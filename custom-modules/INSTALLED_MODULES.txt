@@ -1,8 +1,0 @@
-MMM-CalendarExt3
-MMM-CalendarExt3Agenda
-MMM-CalendarLiveHeader
-MMM-DirectClock
-MMM-ReferenceClock
-MMM-SecondBrain
-MMM-SolarTheme
-MMT-CalmCurrentWeather

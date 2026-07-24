@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "url": "http://127.0.0.1:9091/transmission/rpc",
+  "username": "TRANSMISSION_USER",
+  "password": "TRANSMISSION_PASSWORD_HERE",
+  "recentCompletedMinutes": 60
+}

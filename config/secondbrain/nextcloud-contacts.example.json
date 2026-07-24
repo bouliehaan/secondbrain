@@ -1,0 +1,10 @@
+{
+  "_comment": "Used to turn Google Voice phone numbers into contact names via CardDAV.",
+  "enabled": true,
+  "baseUrl": "https://cloud.example.com",
+  "username": "NEXTCLOUD_USER",
+  "password": "NEXTCLOUD_APP_PASSWORD_HERE",
+  "cardDavUrl": "",
+  "cacheMinutes": 15,
+  "timeoutMs": 15000
+}

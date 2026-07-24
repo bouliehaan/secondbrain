@@ -1,4 +1,0 @@
-$ snap run chromium --version
-
-mkdir: cannot create directory ‘/run/user/0’: Permission denied
-Chromium 150.0.7871.114 snap

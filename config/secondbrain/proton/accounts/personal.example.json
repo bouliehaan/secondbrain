@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "alias": "personal",
+  "displayName": "you@proton.me",
+
+  "_comment": "Host/port are the local Proton Mail Bridge IMAP listener, not Proton's servers.",
+  "host": "127.0.0.1",
+  "port": 1143,
+  "secure": false,
+  "rejectUnauthorized": false,
+  "username": "you@proton.me",
+  "password": "PROTON_BRIDGE_PASSWORD_HERE",
+
+  "mailbox": "All Mail",
+  "maxAgeDays": 14,
+  "maxResults": 8,
+
+  "monitorPackages": true,
+  "packageMaxAgeDays": 7,
+  "packageScanLimit": 250
+}
