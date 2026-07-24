@@ -1,9 +1,0 @@
-{
-  "enabled": true,
-  "baseUrl": "https://cloud.turgonomics.com",
-  "username": "jake",
-  "password": "<REDACTED_SECRET>",
-  "cardDavUrl": "",
-  "cacheMinutes": 15,
-  "timeoutMs": 15000
-}

@@ -1,9 +1,0 @@
-$ timedatectl status
-
-               Local time: Fri 2026-07-17 17:56:13 UTC
-           Universal time: Fri 2026-07-17 17:56:13 UTC
-                 RTC time: Fri 2026-07-17 17:56:13
-                Time zone: Etc/UTC (UTC, +0000)
-System clock synchronized: yes
-              NTP service: active
-          RTC in local TZ: no
