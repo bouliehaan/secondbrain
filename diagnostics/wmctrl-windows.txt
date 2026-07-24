@@ -1,1 +1,0 @@
-0x00a00003  0 2598047 0    0    1920 1080 127.0.0.1.Chromium    server MagicMirror²

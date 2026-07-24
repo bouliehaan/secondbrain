@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Upstream software this dashboard depends on but does not vendor.",
+    "scripts/bootstrap.sh installs these on the mirror.",
+    "Pinned refs keep a rebuild reproducible -- bump them deliberately, not by accident."
+  ],
+
+  "magicmirror": {
+    "version": "2.37.0",
+    "repo": "https://github.com/MagicMirrorOrg/MagicMirror",
+    "installPath": "/opt/MagicMirror"
+  },
+
+  "modules": [
+    {
+      "name": "MMM-CalendarExt3",
+      "version": "2.0.4",
+      "repo": "https://github.com/MMRIZE/MMM-CalendarExt3.git",
+      "ref": "v2.0.4"
+    },
+    {
+      "name": "MMM-CalendarExt3Agenda",
+      "version": "2.0.5",
+      "repo": "https://github.com/MMRIZE/MMM-CalendarExt3Agenda.git",
+      "ref": "v2.0.5"
+    }
+  ],
+
+  "unresolved": [
+    {
+      "name": "MMT-CalmCurrentWeather",
+      "reason": "Referenced by config/config.js as the current-weather themeDir, but no source is present in this repo and no upstream was recorded. It exists only on the mirror at /opt/MagicMirror/modules/. Recover it with scripts/pull-from-pi.sh before rebuilding the mirror from scratch."
+    },
+    {
+      "name": "MMM-DirectClock, MMM-ReferenceClock",
+      "reason": "Listed in the old INSTALLED_MODULES.txt but not referenced by config/config.js. Abandoned clock experiments, superseded by clock/magicmirror-python-clock.py. Not installed by bootstrap."
+    }
+  ]
+}

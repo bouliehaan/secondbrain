@@ -1,1 +1,0 @@
-scrot: Saving to file /tmp/magicmirror-export-20260717-175611/magicmirror-setup-20260717-175611/screenshot/current-display.png failed

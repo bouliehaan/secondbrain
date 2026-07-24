@@ -1,0 +1,30 @@
+[Unit]
+Description=MagicMirror wall dashboard
+Wants=network-online.target
+Wants=<REDACTED_EMAIL>
+Wants=cloudflared.service
+
+After=network-online.target
+After=<REDACTED_EMAIL>
+After=cloudflared.service
+
+[Service]
+Type=simple
+
+User=calendar-display
+Group=calendar-display
+
+WorkingDirectory=/opt/MagicMirror
+
+Environment=HOME=/home/calendar-display
+Environment=PATH=/opt/node-v22.23.1-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
+Environment=TZ=America/Denver
+
+ExecStart=/opt/node-v22.23.1-linux-x64/bin/node --run server
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

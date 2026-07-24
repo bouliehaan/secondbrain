@@ -1,0 +1,26 @@
+{
+  "enabled": true,
+  "alias": "personal",
+  "displayName": "you@gmail.com",
+  "email": "you@gmail.com",
+  "host": "imap.gmail.com",
+  "port": 993,
+  "secure": true,
+  "rejectUnauthorized": true,
+  "username": "you@gmail.com",
+  "password": "GMAIL_APP_PASSWORD_HERE",
+
+  "importantMailbox": "Wall-Display",
+  "maxAgeDays": 14,
+  "maxResults": 8,
+
+  "monitorVoice": true,
+  "voiceMailbox": "INBOX",
+  "voiceMaxAgeMinutes": 240,
+  "voiceMaxResults": 100,
+
+  "monitorPackages": true,
+  "packageMailbox": "All Mail",
+  "packageMaxAgeDays": 7,
+  "packageScanLimit": 250
+}

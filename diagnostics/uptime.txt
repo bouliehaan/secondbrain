@@ -1,3 +1,0 @@
-$ uptime
-
- 17:56:13 up 1 day, 12:24,  3 users,  load average: 0.69, 0.69, 0.74
