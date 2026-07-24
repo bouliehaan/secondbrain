@@ -1,0 +1,1349 @@
+/******************************************************************************
+ * MAGICMIRROR CALENDAR DISPLAY
+ *
+ * Large month calendar on the left.
+ * Clock, weather, forecast and upcoming events on the right.
+ ******************************************************************************/
+
+:root {
+  --dashboard-edge: 12px;
+  --dashboard-gap: 20px;
+  --dashboard-sidebar: 420px;
+  --dashboard-module-gap: 14px;
+
+  --gap-body-top: 0px;
+  --gap-body-right: 0px;
+  --gap-body-bottom: 0px;
+  --gap-body-left: 0px;
+  --gap-modules: 0px;
+}
+
+html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+body {
+  position: fixed !important;
+  inset: 0 !important;
+
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+
+  overflow: hidden !important;
+  background: #000;
+}
+
+/*
+ * The stock calendar remains active as the event provider, but it should not
+ * have any visible output.
+ */
+.calendar-source {
+  display: none !important;
+}
+
+/******************************************************************************
+ * PAGE LAYOUT
+ *
+ * MagicMirror nests top_right inside top_bar. Fixed positioning removes the
+ * sidebar from that nested region geometry and anchors it to the viewport.
+ ******************************************************************************/
+
+.region.bottom.bar {
+  position: fixed !important;
+
+  top: var(--dashboard-edge) !important;
+  right: calc(
+    var(--dashboard-edge) +
+    var(--dashboard-sidebar) +
+    var(--dashboard-gap)
+  ) !important;
+  bottom: var(--dashboard-edge) !important;
+  left: var(--dashboard-edge) !important;
+
+  width: auto !important;
+  height: auto !important;
+
+  text-align: left !important;
+  transform: none !important;
+  overflow: hidden !important;
+
+  z-index: 1;
+}
+
+.region.top.right {
+  position: fixed !important;
+
+  top: var(--dashboard-edge) !important;
+  right: var(--dashboard-edge) !important;
+  bottom: var(--dashboard-edge) !important;
+  left: auto !important;
+
+  width: var(--dashboard-sidebar) !important;
+  height: auto !important;
+
+  text-align: left !important;
+  transform: none !important;
+  overflow: hidden !important;
+
+  z-index: 2;
+}
+
+.region.bottom.bar > .container,
+.region.top.right > .container {
+  box-sizing: border-box;
+
+  width: 100%;
+  height: 100%;
+
+  min-width: 0;
+  min-height: 0;
+}
+
+.region.bottom.bar > .container {
+  display: block !important;
+}
+
+.region.top.right > .container {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+
+  gap: var(--dashboard-module-gap) !important;
+}
+
+.region.top.right .module {
+  box-sizing: border-box;
+
+  width: 100%;
+  min-width: 0;
+
+  margin: 0 !important;
+  text-align: left;
+}
+
+/******************************************************************************
+ * MONTH CALENDAR
+ *
+ * The actual .week nodes divide the available height equally. This works for
+ * four-, five- and six-row months without assigning height to every weekGrid.
+ ******************************************************************************/
+
+.region.bottom.bar .module.MMM-CalendarExt3 {
+  display: flex !important;
+  flex-direction: column !important;
+
+  box-sizing: border-box;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0;
+  min-height: 0;
+
+  margin: 0 !important;
+}
+
+.region.bottom.bar .module.MMM-CalendarExt3 > header {
+  flex: 0 0 auto;
+
+  margin: 0 5px 8px;
+  padding: 0 0 6px;
+
+  border-bottom: 1px solid #555;
+
+  font-size: 28px;
+  line-height: 32px;
+
+  color: #fff;
+  text-align: left;
+  text-transform: none;
+}
+
+.region.bottom.bar .module.MMM-CalendarExt3 > .module-content {
+  flex: 1 1 auto;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+}
+
+.CX3.bodice {
+  display: flex !important;
+  flex-direction: column !important;
+
+  box-sizing: border-box;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+
+  --cellheaderheight: 31px;
+  --cellfooterheight: 0px;
+  --celllinecolor: #3b3b3b;
+  --cellbgcolor: rgba(255, 255, 255, 0.025);
+}
+
+/* Used only when CalendarExt3 customHeader is enabled. */
+.CX3 > .headerTitle {
+  flex: 0 0 auto;
+
+  margin: 0 5px 8px;
+
+  font-size: 28px;
+  line-height: 32px;
+
+  color: #fff;
+  text-align: left;
+}
+
+/*
+ * This selector targets only the Sunday-Saturday header, even though
+ * CalendarExt3 also gives it the weekGrid class.
+ */
+.CX3 > .headerContainer {
+  flex: 0 0 34px !important;
+
+  height: 34px !important;
+  min-height: 34px !important;
+
+  margin: 0 !important;
+  padding: 0 5px !important;
+
+  align-items: center;
+}
+
+.CX3 > .headerContainer .weekday {
+  align-self: center;
+
+  font-size: 17px;
+  line-height: 34px;
+
+  text-align: center;
+  text-transform: uppercase;
+
+  color: #bdbdbd;
+}
+
+/*
+ * These are the real month rows.
+ */
+.CX3 > .week {
+  flex: 1 1 0 !important;
+
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+
+  padding: 0 5px !important;
+  overflow: hidden !important;
+}
+
+.CX3 > .week > .cellContainer {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.CX3 > .week > .cellContainer > .cell {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.CX3 > .week > .eventContainer {
+  top: var(--cellheaderheight) !important;
+  bottom: var(--cellfooterheight) !important;
+
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.CX3 > .week > .eventContainer.weekGridRow {
+  grid-template-rows: repeat(
+    var(--weekeventlines, var(--maxeventlines)),
+    [event-start] minmax(0, 1fr) [event-end]
+  ) !important;
+}
+
+.CX3 .cellBody {
+  height: calc(
+    100% -
+    var(--cellheaderheight) -
+    var(--cellfooterheight)
+  ) !important;
+}
+
+.CX3 .cellHeader {
+  height: var(--cellheaderheight) !important;
+
+  padding: 3px 6px !important;
+  line-height: 24px;
+}
+
+.CX3 .cellFooter {
+  height: var(--cellfooterheight) !important;
+  padding: 0 !important;
+}
+
+.CX3 .event {
+  min-height: 0;
+
+  margin: 1px 2px;
+  padding: 0 3px;
+
+  align-items: center;
+}
+
+.CX3 .event .headline {
+  min-width: 0;
+}
+
+.CX3 .event .headline .title {
+  min-width: 0;
+  font-size: 76%;
+}
+
+.CX3 .event .headline .time,
+.CX3 .event .headline .symbol {
+  flex: 0 0 auto;
+}
+
+.CX3 .today .cellDate {
+  border-radius: 7px;
+  padding: 2px 8px;
+}
+
+/******************************************************************************
+ * RIGHT SIDEBAR
+ ******************************************************************************/
+
+.region.top.right > .container > .module.clock,
+.region.top.right > .container > .module.weather {
+  flex: 0 0 auto;
+}
+
+/******************************************************************************
+ * CLOCK
+ ******************************************************************************/
+
+.region.top.right .clock {
+  text-align: right !important;
+}
+
+.region.top.right .clock .time {
+  font-size: 62px;
+  line-height: 0.95;
+
+  letter-spacing: -2px;
+  color: #fff;
+}
+
+.region.top.right .clock .date {
+  margin-top: 5px;
+
+  font-size: 20px;
+  line-height: 1.15;
+
+  color: #aaa;
+}
+
+/******************************************************************************
+ * WEATHER
+ ******************************************************************************/
+
+.region.top.right .weather {
+  text-align: right !important;
+}
+
+.region.top.right .weather table {
+  width: 100%;
+}
+
+.region.top.right .module.weather > header,
+.region.top.right .module.MMM-CalendarExt3Agenda > header {
+  margin: 0 0 5px;
+  padding-bottom: 4px;
+
+  font-size: 14px;
+  line-height: 18px;
+}
+
+/******************************************************************************
+ * UPCOMING EVENT AGENDA
+ *
+ * The agenda receives every remaining pixel beneath the clock and weather.
+ ******************************************************************************/
+
+.region.top.right .module.MMM-CalendarExt3Agenda,
+.region.top.right .module.side-agenda {
+  display: flex !important;
+  flex: 1 1 0 !important;
+  flex-direction: column !important;
+
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.region.top.right .module.MMM-CalendarExt3Agenda > .module-content,
+.region.top.right .module.side-agenda > .module-content {
+  flex: 1 1 auto !important;
+
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.CX3A.bodice {
+  display: flex !important;
+  flex-direction: column !important;
+
+  box-sizing: border-box;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+
+  gap: 0 !important;
+  overflow: hidden !important;
+
+  font-size: 16px;
+}
+
+/*
+ * The main display already contains a full monthly calendar.
+ */
+.CX3A .miniMonth {
+  display: none !important;
+}
+
+.CX3A .agenda {
+  display: block !important;
+  flex: 1 1 auto !important;
+
+  min-height: 0 !important;
+  max-height: none !important;
+
+  overflow: hidden !important;
+
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+
+.CX3A .agenda .cell {
+  margin: 0 !important;
+  padding: 7px 0 8px !important;
+
+  border-bottom: 1px solid #343434 !important;
+}
+
+.CX3A .cellHeader {
+  margin-bottom: 4px;
+}
+
+.CX3A .cellHeaderMain {
+  gap: 5px;
+
+  font-size: 15px;
+  line-height: 18px;
+}
+
+.CX3A .cellBody {
+  line-height: 1.15;
+}
+
+.CX3A .event {
+  margin: 3px 0;
+}
+
+.CX3A .event .headline {
+  align-items: baseline;
+  gap: 6px;
+
+  min-width: 0;
+}
+
+.CX3A .event .time {
+  flex: 0 0 auto;
+
+  min-width: 64px;
+
+  font-size: 12px;
+  color: #aaa;
+}
+
+.CX3A .event .title {
+  min-width: 0;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  color: #fff;
+}
+
+.CX3A .event .description,
+.CX3A .event .location {
+  display: none !important;
+}
+
+/* BEGIN AUTOMATIC SOLAR THEME */
+
+/******************************************************************************
+ * AUTOMATIC DAY/NIGHT PALETTE
+ *
+ * The existing custom.css remains the dark theme.
+ * MMM-SolarTheme adds html.solar-light during daytime.
+ ******************************************************************************/
+
+html.solar-theme-enabled,
+html.solar-theme-enabled body,
+html.solar-theme-enabled .module,
+html.solar-theme-enabled header,
+html.solar-theme-enabled .CX3,
+html.solar-theme-enabled .CX3 .cell,
+html.solar-theme-enabled .CX3A,
+html.solar-theme-enabled .CX3A .cell {
+  transition:
+    color var(--solar-theme-transition, 1400ms) ease,
+    background-color var(--solar-theme-transition, 1400ms) ease,
+    border-color var(--solar-theme-transition, 1400ms) ease;
+}
+
+html.solar-dark {
+  color-scheme: dark;
+}
+
+html.solar-light {
+  color-scheme: light;
+  background: #f4f3ee !important;
+}
+
+html.solar-light body {
+  background: #f4f3ee !important;
+  color: #34322f !important;
+  text-shadow: none !important;
+}
+
+/******************************************************************************
+ * GENERAL MAGICMIRROR TEXT
+ ******************************************************************************/
+
+html.solar-light .module {
+  color: #4b4842 !important;
+  text-shadow: none !important;
+}
+
+html.solar-light .bright {
+  color: #1f1e1b !important;
+}
+
+html.solar-light .normal {
+  color: #4b4842 !important;
+}
+
+html.solar-light .dimmed {
+  color: #77726a !important;
+}
+
+html.solar-light header,
+html.solar-light .module header {
+  color: #514d47 !important;
+  border-color: #c8c3b9 !important;
+}
+
+/******************************************************************************
+ * CLOCK
+ ******************************************************************************/
+
+html.solar-light .region.top.right .clock .time {
+  color: #191917 !important;
+}
+
+html.solar-light .region.top.right .clock .date {
+  color: #65615a !important;
+}
+
+/******************************************************************************
+ * WEATHER
+ ******************************************************************************/
+
+html.solar-light .region.top.right .weather {
+  color: #35332f !important;
+}
+
+html.solar-light .region.top.right .weather .bright,
+html.solar-light .region.top.right .weather .normal,
+html.solar-light .region.top.right .weather .dimmed,
+html.solar-light .region.top.right .weather .wi,
+html.solar-light .region.top.right .weather .weathericon,
+html.solar-light .region.top.right .weather .temperature,
+html.solar-light .region.top.right .weather .temp,
+html.solar-light .region.top.right .weather .feelslike,
+html.solar-light .region.top.right .weather .wind-speed,
+html.solar-light .region.top.right .weather .wind-direction,
+html.solar-light .region.top.right .weather .sun {
+  color: #35332f !important;
+}
+
+/******************************************************************************
+ * MONTH CALENDAR
+ ******************************************************************************/
+
+html.solar-light .region.bottom.bar
+.module.MMM-CalendarExt3 > header,
+html.solar-light .CX3 > .headerTitle {
+  color: #211f1c !important;
+  border-color: #c9c4ba !important;
+}
+
+html.solar-light .CX3.bodice {
+  --celllinecolor: #cac5bb;
+  --cellbgcolor: rgba(255, 255, 255, 0.28);
+  --defaultcolor: #292722;
+  --defaultColor: #292722;
+
+  color: #292722 !important;
+}
+
+html.solar-light .CX3 > .headerContainer .weekday {
+  color: #68635b !important;
+}
+
+html.solar-light .CX3 .cell {
+  border-color: #cac5bb !important;
+  background-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+html.solar-light .CX3 .cell.thisMonth,
+html.solar-light .CX3 .thisMonth {
+  background-color: rgba(255, 255, 255, 0.68) !important;
+}
+
+html.solar-light .CX3 .cell:not(.thisMonth) {
+  background-color: rgba(40, 38, 34, 0.025) !important;
+  color: #8b867e !important;
+}
+
+html.solar-light .CX3 .cell.today {
+  border-color: #282621 !important;
+}
+
+html.solar-light .CX3 .today .cellDate {
+  background-color: #282621 !important;
+  color: #ffffff !important;
+}
+
+html.solar-light .CX3 .event.singleday,
+html.solar-light .CX3 .event.singleday .title,
+html.solar-light .CX3 .event.singleday .time {
+  color: #292722 !important;
+}
+
+html.solar-light .CX3 .cellHeader .cellWeather,
+html.solar-light .CX3 .cellHeader .cellWeather .maxTemp {
+  color: #302e29 !important;
+}
+
+html.solar-light .CX3 .cellHeader .cellWeather .minTemp {
+  color: #77726a !important;
+}
+
+/******************************************************************************
+ * UPCOMING EVENTS
+ ******************************************************************************/
+
+html.solar-light .CX3A {
+  color: #4c4943 !important;
+
+  --todayColor: #9a6500;
+}
+
+html.solar-light .CX3A .relativeDay {
+  color: #26241f !important;
+}
+
+html.solar-light .CX3A .agenda .cell {
+  border-color: #cbc6bc !important;
+}
+
+html.solar-light
+.CX3A
+.event:not(.fullday):not(.multiday)
+.title {
+  color: #292722 !important;
+}
+
+html.solar-light
+.CX3A
+.event:not(.fullday):not(.multiday)
+.time {
+  color: #6c675f !important;
+}
+
+html.solar-light .CX3A .event .description {
+  color: #666159 !important;
+}
+
+html.solar-light .CX3A .event .location {
+  color: #827c73 !important;
+}
+
+html.solar-light
+.CX3A
+.cellBody
+.fullday
+.event
+.title,
+html.solar-light
+.CX3A
+.cellBody
+.multiday
+.event
+.title,
+html.solar-light
+.CX3A
+.cellBody
+.multiday
+.event
+.time,
+html.solar-light
+.CX3A
+.cellBody
+.multiday
+.event
+.symbol {
+  color: var(--oppositeColor) !important;
+}
+
+/* END AUTOMATIC SOLAR THEME */
+
+/* BEGIN FAMILY CALENDAR REFINEMENT */
+
+/******************************************************************************
+ * CALM FAMILY CALENDAR
+ *
+ * Warm, quiet, easy to scan, and deliberately not office-dashboard styled.
+ ******************************************************************************/
+
+:root,
+html.solar-dark {
+  --family-page: #171613;
+  --family-panel: #211f1b;
+  --family-soft: #292620;
+
+  --family-text: #f3eee5;
+  --family-muted: #b4aa9d;
+  --family-faint: #81786e;
+
+  --family-line: rgba(255, 255, 255, 0.10);
+  --family-line-soft: rgba(255, 255, 255, 0.06);
+
+  --family-accent: #e49a68;
+  --family-today: #3b2b22;
+  --family-weekend: rgba(228, 154, 104, 0.055);
+
+  --family-shadow: rgba(0, 0, 0, 0.24);
+}
+
+html.solar-light {
+  --family-page: #f1ece3;
+  --family-panel: #fffaf2;
+  --family-soft: #f6efe4;
+
+  --family-text: #2b2823;
+  --family-muted: #716a61;
+  --family-faint: #999087;
+
+  --family-line: rgba(70, 57, 43, 0.14);
+  --family-line-soft: rgba(70, 57, 43, 0.08);
+
+  --family-accent: #aa5135;
+  --family-today: #f0d5c1;
+  --family-weekend: rgba(170, 81, 53, 0.045);
+
+  --family-shadow: rgba(72, 54, 35, 0.10);
+}
+
+html,
+body,
+.module,
+.CX3,
+.CX3A {
+  font-family:
+    Ubuntu,
+    "Noto Sans",
+    "Segoe UI",
+    sans-serif !important;
+}
+
+html,
+body,
+html.solar-light,
+html.solar-light body,
+html.solar-dark,
+html.solar-dark body {
+  background: var(--family-page) !important;
+  color: var(--family-text) !important;
+}
+
+/******************************************************************************
+ * SIDEBAR CARDS
+ ******************************************************************************/
+
+.region.top.right > .container {
+  gap: 10px !important;
+}
+
+.region.top.right > .container > .module.clock,
+.region.top.right > .container > .module.MMM-CalendarExt3Agenda,
+.region.top.right > .container > .module.side-agenda {
+  box-sizing: border-box;
+
+  border: 1px solid var(--family-line-soft);
+  border-radius: 18px;
+
+  background: var(--family-panel) !important;
+  box-shadow: 0 6px 18px var(--family-shadow);
+}
+
+/******************************************************************************
+ * CLOCK
+ ******************************************************************************/
+
+.region.top.right > .container > .module.clock {
+  padding: 13px 16px !important;
+}
+
+.region.top.right .clock .time,
+html.solar-light .region.top.right .clock .time {
+  color: var(--family-text) !important;
+
+  font-size: 54px !important;
+  font-weight: 500 !important;
+  line-height: 0.95 !important;
+  letter-spacing: -2px !important;
+}
+
+.region.top.right .clock .date,
+html.solar-light .region.top.right .clock .date {
+  margin-top: 6px !important;
+
+  color: var(--family-muted) !important;
+
+  font-size: 18px !important;
+  font-weight: 500 !important;
+  line-height: 1.15 !important;
+}
+
+/******************************************************************************
+ * WEATHER: TWO MODULES, ONE VISUAL CARD
+ *
+ * Expected module order:
+ *
+ * clock
+ * current weather
+ * forecast weather
+ * agenda
+ *
+ * Current weather becomes the top portion of the card.
+ * The following forecast becomes the bottom portion.
+ ******************************************************************************/
+
+.region.top.right > .container > .module.clock + .module.weather,
+.region.top.right > .container > .module.weather + .module.weather {
+  box-sizing: border-box;
+
+  margin: 0 !important;
+
+  background: var(--family-panel) !important;
+  box-shadow: 0 6px 18px var(--family-shadow);
+}
+
+/*
+ * Current conditions: upper portion.
+ */
+
+.region.top.right > .container > .module.clock + .module.weather {
+  padding: 11px 14px 8px !important;
+
+  border: 1px solid var(--family-line-soft);
+  border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+}
+
+/*
+ * Forecast: lower portion.
+ */
+
+.region.top.right > .container > .module.weather + .module.weather {
+  margin-top: -10px !important;
+  padding: 8px 10px 10px !important;
+
+  border: 1px solid var(--family-line-soft);
+  border-top: 0;
+  border-radius: 0 0 18px 18px;
+}
+
+/*
+ * Retain one location heading.
+ */
+
+.region.top.right
+> .container
+> .module.clock
++ .module.weather
+> header {
+  margin: 0 0 5px !important;
+  padding: 0 0 5px !important;
+
+  border-color: var(--family-line) !important;
+
+  color: var(--family-muted) !important;
+
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em;
+}
+
+/*
+ * The current conditions module already provides the location.
+ */
+
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+> header {
+  display: none !important;
+}
+
+/*
+ * Shared weather colors.
+ */
+
+.region.top.right .weather,
+html.solar-light .region.top.right .weather,
+.region.top.right .weather .bright,
+.region.top.right .weather .normal,
+.region.top.right .weather .dimmed {
+  color: var(--family-text) !important;
+  text-shadow: none !important;
+}
+
+.region.top.right .weather .dimmed {
+  color: var(--family-muted) !important;
+}
+
+.region.top.right .weather .weathericon,
+.region.top.right .weather .wi {
+  color: var(--family-accent) !important;
+}
+
+/*
+ * Compact current conditions without hiding information.
+ */
+
+.region.top.right
+> .container
+> .module.clock
++ .module.weather
+.large {
+  font-size: 44px !important;
+  line-height: 1 !important;
+}
+
+.region.top.right
+> .container
+> .module.clock
++ .module.weather
+.medium {
+  font-size: 15px !important;
+  line-height: 1.2 !important;
+}
+
+.region.top.right
+> .container
+> .module.clock
++ .module.weather
+.small {
+  font-size: 12px !important;
+  line-height: 1.15 !important;
+}
+
+/******************************************************************************
+ * HORIZONTAL FORECAST
+ *
+ * Convert the ordinary vertical table into five equal forecast cards.
+ ******************************************************************************/
+
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+table,
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+tbody {
+  display: block !important;
+
+  width: 100% !important;
+}
+
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+tbody {
+  display: flex !important;
+  align-items: stretch;
+
+  gap: 5px;
+}
+
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+tr {
+  display: flex !important;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+
+  min-width: 0;
+
+  padding: 6px 2px !important;
+
+  border-radius: 11px;
+
+  background: var(--family-soft) !important;
+}
+
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+td {
+  display: block !important;
+
+  width: auto !important;
+  max-width: 100%;
+
+  padding: 1px 0 !important;
+
+  color: var(--family-text) !important;
+
+  font-size: 11px !important;
+  line-height: 1.1 !important;
+  text-align: center !important;
+
+  white-space: nowrap;
+}
+
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+td:first-child {
+  color: var(--family-muted) !important;
+  font-weight: 700;
+}
+
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+.weathericon,
+.region.top.right
+> .container
+> .module.weather
++ .module.weather
+.wi {
+  margin: 5px 0 !important;
+
+  font-size: 19px !important;
+}
+
+/******************************************************************************
+ * MONTH CALENDAR PANEL
+ ******************************************************************************/
+
+.region.bottom.bar .module.MMM-CalendarExt3 {
+  box-sizing: border-box;
+
+  padding: 13px 14px 14px !important;
+
+  border: 1px solid var(--family-line-soft);
+  border-radius: 22px;
+
+  background: var(--family-panel) !important;
+  box-shadow: 0 7px 22px var(--family-shadow);
+}
+
+/******************************************************************************
+ * MONTH TITLE
+ ******************************************************************************/
+
+.region.bottom.bar .module.MMM-CalendarExt3 > header,
+.CX3 > .headerTitle,
+html.solar-light
+.region.bottom.bar
+.module.MMM-CalendarExt3
+> header,
+html.solar-light .CX3 > .headerTitle {
+  margin: 0 5px 9px !important;
+  padding: 1px 2px 8px !important;
+
+  border-color: var(--family-line) !important;
+
+  color: var(--family-text) !important;
+
+  font-size: 29px !important;
+  font-weight: 600 !important;
+  line-height: 32px !important;
+  letter-spacing: -0.5px;
+}
+
+/******************************************************************************
+ * CALENDAR FOUNDATION
+ ******************************************************************************/
+
+.CX3.bodice,
+html.solar-light .CX3.bodice {
+  --celllinecolor: transparent;
+  --cellbgcolor: var(--family-soft);
+
+  --defaultcolor: var(--family-text);
+  --defaultColor: var(--family-text);
+
+  color: var(--family-text) !important;
+}
+
+/******************************************************************************
+ * WEEKDAY LABELS
+ ******************************************************************************/
+
+.CX3 > .headerContainer .weekday,
+html.solar-light .CX3 > .headerContainer .weekday {
+  color: var(--family-muted) !important;
+
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.025em;
+  text-transform: none !important;
+}
+
+/*
+ * A small separation between week rows softens the spreadsheet appearance.
+ */
+
+.CX3 > .week {
+  padding-top: 3px !important;
+}
+
+/******************************************************************************
+ * DAY CELLS
+ ******************************************************************************/
+
+.CX3 .cell,
+html.solar-light .CX3 .cell,
+html.solar-light .CX3 .cell.thisMonth,
+html.solar-light .CX3 .thisMonth {
+  border-color: transparent !important;
+  border-radius: 11px;
+
+  background: var(--family-soft) !important;
+
+  box-shadow:
+    inset 0 0 0 1px var(--family-line-soft);
+}
+
+/*
+ * Weekends are subtly differentiated without becoming another loud color.
+ */
+
+.CX3 .cell.weekend,
+.CX3 .weekend.cell,
+html.solar-light .CX3 .cell.weekend {
+  background: var(--family-weekend) !important;
+}
+
+/*
+ * Dates outside the current month remain visible but recess visually.
+ */
+
+.CX3 .cell:not(.thisMonth),
+html.solar-light .CX3 .cell:not(.thisMonth) {
+  background: transparent !important;
+  color: var(--family-faint) !important;
+}
+
+/*
+ * Today is identified through shape, border and color—not color alone.
+ */
+
+.CX3 .cell.today,
+html.solar-light .CX3 .cell.today {
+  background: var(--family-today) !important;
+
+  box-shadow:
+    inset 0 0 0 2px var(--family-accent),
+    0 3px 10px var(--family-shadow);
+}
+
+.CX3 .cellHeader {
+  padding: 4px 7px 3px !important;
+}
+
+.CX3 .cellDate {
+  color: var(--family-text) !important;
+
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.CX3 .today .cellDate,
+html.solar-light .CX3 .today .cellDate {
+  background: var(--family-accent) !important;
+  color: var(--family-panel) !important;
+
+  font-weight: 800;
+}
+
+/******************************************************************************
+ * CALENDAR EVENTS
+ ******************************************************************************/
+
+.CX3 .event {
+  border-radius: 6px !important;
+
+  box-shadow:
+    0 1px 3px var(--family-shadow);
+}
+
+.CX3 .event .headline .title {
+  font-weight: 600;
+}
+
+/******************************************************************************
+ * UPCOMING EVENTS PANEL
+ ******************************************************************************/
+
+.region.top.right
+> .container
+> .module.MMM-CalendarExt3Agenda,
+.region.top.right
+> .container
+> .module.side-agenda {
+  padding: 11px 11px 7px !important;
+}
+
+.region.top.right
+.module.MMM-CalendarExt3Agenda
+> header,
+.region.top.right
+.module.side-agenda
+> header,
+html.solar-light
+.region.top.right
+.module.MMM-CalendarExt3Agenda
+> header {
+  margin: 0 3px 7px !important;
+  padding: 0 1px 7px !important;
+
+  border-color: var(--family-line) !important;
+
+  color: var(--family-muted) !important;
+
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em;
+}
+
+/******************************************************************************
+ * UPCOMING EVENT DAY GROUPS
+ ******************************************************************************/
+
+.CX3A.bodice,
+html.solar-light .CX3A {
+  color: var(--family-text) !important;
+
+  font-size: 15px !important;
+}
+
+.CX3A .agenda .cell,
+html.solar-light .CX3A .agenda .cell {
+  margin: 0 0 6px !important;
+  padding: 7px 9px 8px !important;
+
+  border: 0 !important;
+  border-radius: 12px;
+
+  background: var(--family-soft) !important;
+
+  box-shadow:
+    inset 0 0 0 1px var(--family-line-soft);
+}
+
+.CX3A .agenda .cell:last-child {
+  margin-bottom: 0 !important;
+}
+
+/******************************************************************************
+ * DAY HEADINGS
+ ******************************************************************************/
+
+.CX3A .relativeDay,
+html.solar-light .CX3A .relativeDay {
+  color: var(--family-accent) !important;
+
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+/******************************************************************************
+ * AGENDA EVENT TEXT
+ ******************************************************************************/
+
+.CX3A .event .time,
+html.solar-light
+.CX3A
+.event:not(.fullday):not(.multiday)
+.time {
+  min-width: 58px !important;
+
+  color: var(--family-muted) !important;
+
+  font-size: 11px !important;
+  font-weight: 600;
+}
+
+.CX3A .event .title,
+html.solar-light
+.CX3A
+.event:not(.fullday):not(.multiday)
+.title {
+  color: var(--family-text) !important;
+
+  font-size: 14px !important;
+  font-weight: 600;
+}
+
+/* END FAMILY CALENDAR REFINEMENT */

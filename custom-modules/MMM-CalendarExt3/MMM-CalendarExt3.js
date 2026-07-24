@@ -1,0 +1,910 @@
+/* global Log, Module, config */
+
+const popoverSupported = Object.prototype.hasOwnProperty.call(HTMLElement.prototype, "popover")
+/*
+Even though `.prototype.hasOwnProperty` is not recommended, it's the only way to check the existence of `popover` feature at this moment.
+console.log(Object.prototype.hasOwnProperty.call(HTMLElement, "popover")) // false
+console.log(Object.hasOwn(HTMLElement, "popover")) // false
+console.log(HTMLElement.prototype.showPopover === 'function') // false
+consoe.log(HTMLElement.prototype.hasOwnProperty("popover")) // true
+*/
+
+if (!popoverSupported) console.info("This browser doesn't support popover yet. Update your system.")
+const animationSupported = (typeof window !== "undefined" && window?.mmVersion) ? +(window.mmVersion.split(".").join("")) >= 2250 : false
+
+Module.register("MMM-CalendarExt3", {
+  requiresVersion: "2.36.0",
+  defaults: {
+    mode: "week", // or 'month', 'day'
+    weekIndex: -1, // Which week from this week starts in a view. Ignored on mode 'month'
+    dayIndex: -1,
+    weeksInView: 3, //  How many weeks will be displayed. Ignored on mode 'month'
+    instanceId: null,
+    firstDayOfWeek: null, // 0: Sunday, 1: Monday
+    minimalDaysOfNewYear: null, // When the first week of new year starts in your country.
+    weekends: [], // or [0, 6]. 0: Sunday, 6: Saturday
+    locale: null, // 'de' or 'en-US' or prefer array like ['en-CA', 'en-US', 'en']
+    cellDateOptions: {
+      month: "short",
+      day: "numeric"
+    },
+    eventTimeOptions: {
+      timeStyle: "short"
+    },
+    headerWeekDayOptions: {
+      weekday: "long"
+    },
+    headerTitleOptions: {
+      month: "long"
+    },
+    calendarSet: [],
+    maxEventLines: 5, // How many events will be shown in a day cell.
+    dynamicWeekHeight: false, // If true, each week row shrinks to the actually used event lines.
+    // It could be possible to use {} like {"4": 6, "5": 5, "6": 4} to set different lines by the number of the week of the month.
+    // Also, it could be possible to use [] like [8, 8, 7, 6, 5] to set different lines by the number of week of the month.
+    fontSize: "18px",
+    eventHeight: "22px",
+    eventFilter: () => { return true },
+    eventSorter: null,
+    eventTransformer: ev => { return ev },
+    refreshInterval: 1000 * 60 * 10, // too frequent refresh. 10 minutes is enough.
+    waitFetch: 1000 * 5,
+    glanceTime: 1000 * 60, // deprecated, use refreshInterval instead.
+    animationSpeed: 2000,
+    useSymbol: true,
+    displayLegend: false,
+    useWeather: true,
+    weatherLocationName: null,
+    // notification: 'CALENDAR_EVENTS', /* reserved */
+    manipulateDateCell: () => { },
+    weatherNotification: "WEATHER_UPDATED",
+    weatherPayload: payload => { return payload },
+    eventNotification: "CALENDAR_EVENTS",
+    eventPayload: payload => { return payload },
+    displayEndTime: false,
+    displayWeatherTemp: false,
+    popoverTemplate: "./popover.html",
+    popoverTimeout: 1000 * 30,
+    popoverPeriodOptions: {
+      dateStyle: "short",
+      timeStyle: "short"
+    },
+    popoverDateOptions: {
+      dateStyle: "full"
+    },
+    showWeekNumber: true,
+    animateIn: "fadeIn",
+    animateOut: "fadeOut",
+    skipPassedEventToday: false,
+    showMore: true,
+    useIconify: true,
+    useMarquee: false,
+
+    skipDuplicated: true,
+    monthIndex: 0,
+    referenceDate: null,
+    showHeader: true,
+    customHeader: false // true or function
+  },
+
+  defaultNotifications: {
+    weatherNotification: "WEATHER_UPDATED",
+    weatherPayload: payload => { return payload },
+    eventNotification: "CALENDAR_EVENTS",
+    eventPayload: payload => { return payload }
+  },
+
+  getStyles() {
+    const css = ["MMM-CalendarExt3.css"]
+    return css
+  },
+
+  socketNotificationReceived(notification, payload) {
+    if (notification !== "CX3_FUNCTIONS_RESTORED") return
+    if (payload.identifier !== this.identifier) return
+
+    const configKeys = ["preProcessor", "eventTransformer", "eventFilter", "eventSorter", "manipulateDateCell", "customHeader"]
+    const notificationKeys = ["eventPayload", "weatherPayload"]
+    const preamble = payload.variablePreamble || ""
+
+    for (const key of [...configKeys, ...notificationKeys]) {
+      if (!payload.functions[key]) continue
+      try {
+        // Create a function factory that first evaluates the variable preamble
+        // (declaring all variables in its scope), then returns the callback function.
+        // The callback function now has access to those variables through closure.
+        const fnFactory = new Function(preamble + "\nreturn " + payload.functions[key])
+        const fn = fnFactory()
+
+        if (typeof fn !== "function") continue
+        if (configKeys.includes(key)) {
+          this.activeConfig[key] = fn
+          this.originalConfig[key] = fn
+        }
+        if (notificationKeys.includes(key)) {
+          this.notifications[key] = fn
+        }
+      } catch (error) {
+        Log.warn(`[CX3] Could not restore config function "${key}":`, error.message)
+      }
+    }
+
+    this._functionsReady()
+
+    // If the module already rendered (e.g. Chrome opened after initial load),
+    // re-render immediately so transforms/filters are applied without waiting
+    // for the next CALENDAR_EVENTS broadcast (which can be many minutes away).
+    if (this._ready) {
+      this.updateDom(this.activeConfig.animationSpeed)
+    }
+  },
+
+  getScripts() {
+    // Load the polyfill for browsers that don't support Intl.Locale.getWeekInfo() (e.g., Firefox)
+    // TODO: Remove this polyfill when Firefox supports getWeekInfo() natively
+    return ["polyfill-getWeekInfo.js"]
+  },
+
+  getMoment(options) {
+    let focusDate = (options.referenceDate) ? new Date(options.referenceDate) : new Date(Date.now())
+    // let focusDate = (this.tempMoment) ? new Date(this.tempMoment.valueOf()) : new Date()
+    switch (options.mode) {
+      case "day":
+        focusDate = new Date(focusDate.getFullYear(), focusDate.getMonth(), focusDate.getDate() + options.dayIndex)
+        break
+      case "month":
+        focusDate = new Date(focusDate.getFullYear(), focusDate.getMonth() + options.monthIndex, 1)
+        break
+      case "week":
+      default:
+        focusDate = new Date(focusDate.getFullYear(), focusDate.getMonth(), focusDate.getDate() + (7 * options.weekIndex))
+    }
+    return focusDate
+  },
+
+  regularizeConfig(options) {
+    const weekInfoFallback = {
+      firstDay: 1,
+      minimalDays: 4,
+      weekend: [0, 6]
+    }
+
+    options.locale = Intl.getCanonicalLocales(options.locale ?? config?.locale ?? config?.language)?.[0] ?? ""
+    const calInfo = new Intl.Locale(options.locale)
+
+    // Use getWeekInfo() - works in all browsers (polyfilled for Firefox)
+    const weekInfo = calInfo.getWeekInfo()
+
+    options.firstDayOfWeek = (options.firstDayOfWeek !== null) ? options.firstDayOfWeek : (weekInfo.firstDay ?? weekInfoFallback.firstDay)
+    options.minimalDaysOfNewYear = (options.minimalDaysOfNewYear !== null) ? options.minimalDaysOfNewYear : (weekInfo.minimalDays ?? weekInfoFallback.minimalDays)
+    options.weekends = ((Array.isArray(options.weekends) && options.weekends?.length) ? options.weekends : (weekInfo.weekend ?? [])).map(d => d % 7)
+
+    options.instanceId = options.instanceId ?? this.identifier
+    this.notifications = {
+      weatherNotification: options.weatherNotification ?? this.defaultNotifications.weatherNotification,
+      weatherPayload: (typeof options.weatherPayload === "function") ? options.weatherPayload : this.defaultNotifications.weatherPayload,
+      eventNotification: options.eventNotification ?? this.defaultNotifications.eventNotification,
+      eventPayload: (typeof options.eventPayload === "function") ? options.eventPayload : this.defaultNotifications.eventPayload
+    }
+
+    options.mode = (["day", "month", "week"].includes(options.mode)) ? options.mode : "week"
+    options.weekIndex = (options.mode === "month") ? 0 : options.weekIndex
+    options.weeksInView = (options.mode === "month") ? 6 : options.weeksInView
+    options.dayIndex = (options.mode === "day") ? options.dayIndex : 0
+    options.dynamicWeekHeight = (options.dynamicWeekHeight === true)
+
+    return options
+  },
+
+  start() {
+    this.activeConfig = this.regularizeConfig({ ...this.config })
+    this.originalConfig = { ...this.activeConfig }
+
+    this.fetchTimer = null
+    this.refreshTimer = null
+    this.forecast = []
+    this.eventPool = new Map()
+    this.popoverTimer = null
+
+    this._ready = false
+    // Safety timeout: if node_helper never responds (e.g. socket issues),
+    // resolve after 5s so the module still renders.
+    const _functionsRestored = new Promise(resolve => {
+      this._functionsReady = resolve
+      setTimeout(resolve, 5000)
+    })
+    this.sendSocketNotification("CX3_REGISTER", { identifier: this.identifier })
+
+    const _moduleLoaded = new Promise((resolve, reject) => {
+      import(`/${this.file("CX3_Shared/CX3_shared.mjs")}`).then(m => {
+        this.library = m
+        if (this.config.useIconify) this.library.prepareIconify()
+        resolve()
+      }).catch(err => {
+        console.error(err)
+        reject(err)
+      })
+    })
+
+    const _domCreated = new Promise(resolve => {
+      this._domReady = resolve
+    })
+
+    Promise.allSettled([_moduleLoaded, _domCreated, _functionsRestored]).then(() => {
+      this._ready = true
+      this.library.prepareMagic()
+      setTimeout(() => {
+        this.updateAnimate()
+      }, this.activeConfig.waitFetch)
+    })
+    if (popoverSupported) {
+      this.preparePopover()
+    }
+  },
+
+  preparePopover() {
+    if (!popoverSupported) return
+    if (document.getElementById("CX3_POPOVER")) return
+
+    fetch(this.file(this.config.popoverTemplate)).then(response => {
+      return response.text()
+    }).then(text => {
+      const template = new DOMParser().parseFromString(text, "text/html").querySelector("#CX3_T_POPOVER").content.querySelector(".popover")
+      const popover = document.importNode(template, true)
+      popover.id = "CX3_POPOVER"
+      document.body.append(popover)
+      popover.ontoggle = ev => {
+        if (this.popoverTimer) {
+          clearTimeout(this.popoverTimer)
+          this.popoverTimer = null
+        }
+        if (ev.newState === "open") {
+          this.popoverTimer = setTimeout(() => {
+            try {
+              popover.hidePopover()
+              popover.querySelector(".container").innerHTML = ""
+            } catch {
+              // do nothing
+            }
+          }, this.activeConfig.popoverTimeout)
+        } else { // closed
+          popover.querySelector(".container").innerHTML = ""
+        }
+      }
+    }).catch(err => {
+      console.error("[CX3]", err)
+    })
+  },
+
+  dayPopover(cDom, events, options) {
+    const popover = document.getElementById("CX3_POPOVER")
+    if (!popover) return
+    const container = popover.querySelector(".container")
+    container.innerHTML = ""
+    const ht = popover.querySelector("template#CX3_T_EVENTLIST").content.cloneNode(true)
+    container.append(document.importNode(ht, true))
+    const header = container.querySelector(".header")
+    header.innerHTML = new Intl.DateTimeFormat(options.locale, { dateStyle: "full" }).formatToParts(new Date(+cDom.dataset.date))
+      .reduce((prev, cur, curIndex) => {
+        const result = `${prev}<span class="eventTimeParts ${cur.type} seq_${curIndex} ${cur.source}">${cur.value}</span>`
+        return result
+      }, "")
+
+    const list = container.querySelector(".list")
+    list.innerHTML = ""
+    const { renderSymbol } = this.library
+    events.forEach(e => {
+      const pOption = (e.fullDayEvent) ? { dateStyle: "short" } : { dateStyle: "short", timeStyle: "short" }
+
+      const item = popover.querySelector("template#CX3_T_EVENTITEM").content.firstElementChild.cloneNode(true)
+      item.style.setProperty("--calendarColor", e.color)
+      item.classList.add("event")
+      const symbol = item.querySelector(".symbol")
+      renderSymbol(symbol, e, config)
+      const time = item.querySelector(".time")
+      time.innerHTML = new Intl.DateTimeFormat(options.locale, pOption).formatRangeToParts(new Date(+e.startDate), new Date(+e.endDate))
+        .reduce((prev, cur, curIndex) => {
+          const result = `${prev}<span class="eventTimeParts ${cur.type} seq_${curIndex} ${cur.source}">${cur.value}</span>`
+          return result
+        }, "")
+      const title = item.querySelector(".title")
+      title.innerHTML = e.title
+      list.append(item)
+    })
+
+    this.activatePopover(popover)
+  },
+
+  eventPopover(eDom, options) {
+    const popover = document.getElementById("CX3_POPOVER")
+    if (!popover) return
+    const container = popover.querySelector(".container")
+    container.innerHTML = ""
+    const ht = popover.querySelector("template#CX3_T_EVENTDETAIL").content.cloneNode(true)
+    container.append(document.importNode(ht, true))
+    const eSymbol = eDom.querySelector(".symbol").cloneNode(true)
+    container.querySelector(".symbol").append(eSymbol)
+    const eTitle = eDom.querySelector(".title").cloneNode(true)
+    container.querySelector(".title").append(eTitle)
+    const header = container.querySelector(".header")
+    header.style.setProperty("--calendarColor", eDom.style.getPropertyValue("--calendarColor"))
+    header.style.setProperty("--oppositeColor", eDom.style.getPropertyValue("--oppositeColor"))
+    header.dataset.isFullday = eDom.dataset.fullDayEvent
+
+    const criteria = container.querySelector(".criteria")
+    criteria.innerHTML = ""
+    const ps = ["location", "description", "calendar"]
+    ps.forEach(c => {
+      if (eDom.dataset[c]) {
+        const ct = popover.querySelector("template#CX3_T_CRITERIA").content.firstElementChild.cloneNode(true)
+        // ct.querySelector('.name').innerHTML = c
+        // ct.querySelector('.name').classList.add(c)
+        ct.classList.add(c)
+        ct.querySelector(".value").innerHTML = eDom.dataset[c]
+        criteria.append(document.importNode(ct, true))
+      }
+    })
+
+    const start = new Date(+(eDom.dataset.startDate))
+    const end = new Date(+(eDom.dataset.endDate))
+    const ct = popover.querySelector("template#CX3_T_CRITERIA").content.firstElementChild.cloneNode(true)
+    criteria.append(document.importNode(ct, true))
+    const n = Array.from(criteria.childNodes).at(-1)
+    n.classList.add("period")
+    const pOption = (eDom.dataset.fullDayEvent === "true") ? { dateStyle: "short" } : { dateStyle: "short", timeStyle: "short" }
+    n.querySelector(".value").innerHTML = new Intl.DateTimeFormat(options.locale, pOption).formatRangeToParts(start, end)
+      .reduce((prev, cur, curIndex) => {
+        const result = `${prev}<span class="eventTimeParts ${cur.type} seq_${curIndex} ${cur.source}">${cur.value}</span>`
+        return result
+      }, "")
+    this.activatePopover(popover)
+  },
+
+  activatePopover(popover) {
+    const opened = document.querySelectorAll("[popover-opened]")
+    for (const o of Array.from(opened)) {
+      o.hidePopover()
+    }
+    popover.showPopover()
+  },
+
+  notificationReceived(notification, payload, sender) {
+    const replyCurrentConfig = ({ callback }) => {
+      if (typeof callback === "function") {
+        callback({ ...this.activeConfig })
+      }
+    }
+
+    if (notification === this.notifications.eventNotification) {
+      const convertedPayload = this.notifications.eventPayload(payload)
+      this.eventPool.set(sender.identifier, structuredClone(convertedPayload))
+    }
+
+    if (notification === "MODULE_DOM_CREATED") {
+      this._domReady()
+      const moduleContainer = document.querySelector(`#${this.identifier} .module-content`)
+      const callback = mutationsList => {
+        for (const mutation of mutationsList) {
+          const content = document.querySelector(`#${this.identifier} .module-content .CX3`)
+          if (mutation.addedNodes.length > 0) this.updated(content, this.activeConfig)
+        }
+      }
+      const MutationObserver = window.MutationObserver || window.WebKitMutationObserver
+      const observer = new MutationObserver(callback)
+      observer.observe(moduleContainer, { childList: true })
+    }
+
+    if (notification === "NEW_PAGE") {
+      // MMM-Pages hides/shows modules via display:none, so offsetWidth/scrollWidth are 0 when hidden.
+      // Re-run updated() after a frame so measurements are correct when the page becomes visible.
+      requestAnimationFrame(() => {
+        const content = document.querySelector(`#${this.identifier} .module-content .CX3`)
+        if (content) this.updated(content, this.activeConfig)
+      })
+    }
+
+    if (notification === this.notifications.weatherNotification) {
+      const convertedPayload = this.notifications.weatherPayload(payload)
+      if (
+        (this.activeConfig.useWeather
+          && ((this.activeConfig.weatherLocationName && convertedPayload.locationName.includes(this.activeConfig.weatherLocationName))
+            || !this.activeConfig.weatherLocationName))
+          && (Array.isArray(convertedPayload?.forecastArray) && convertedPayload?.forecastArray.length)
+      ) {
+        this.forecast = [...convertedPayload.forecastArray].map(o => {
+          const d = new Date(o.date)
+          o.dateId = d.toLocaleDateString("en-CA")
+          return o
+        })
+      } else {
+        if (this.activeConfig.weatherLocationName && !convertedPayload.locationName.includes(this.activeConfig.weatherLocationName)) {
+          Log.warn(`"weatherLocationName: '${this.activeConfig.weatherLocationName}'" doesn't match with location of weather module ('${convertedPayload.locationName}')`)
+        }
+      }
+    }
+
+    if (payload?.instanceId && payload?.instanceId !== this.activeConfig?.instanceId) return
+
+    if (notification === "CX3_GET_CONFIG") {
+      replyCurrentConfig(payload)
+    }
+
+    if (notification === "CX3_SET_CONFIG") {
+      this.activeConfig = this.regularizeConfig({ ...this.activeConfig, ...payload })
+      this.updateAnimate()
+      replyCurrentConfig(payload)
+    }
+
+    if (notification === "CX3_RESET") {
+      this.activeConfig = this.regularizeConfig({ ...this.originalConfig })
+      this.updateAnimate()
+      replyCurrentConfig(payload)
+    }
+  },
+
+  getDom() {
+    let dom = document.createElement("div")
+    dom.innerHTML = ""
+    dom.classList.add("bodice", `CX3_${this.activeConfig.instanceId}`, "CX3")
+    if (this.activeConfig.fontSize) dom.style.setProperty("--fontsize", this.activeConfig.fontSize)
+    if (!this.library?.loaded || !this._ready) {
+      Log.warn("[CX3] Module is not prepared yet, wait a while.")
+      return dom
+    }
+    dom = this.draw(dom, this.activeConfig)
+
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = null
+    }
+    this.refreshTimer = setTimeout(() => {
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = null
+      this.updateAnimate()
+    }, this.activeConfig.refreshInterval)
+    this.sendNotification("CX3_DOM_UPDATED", { instanceId: this.activeConfig.instanceId })
+    return dom
+  },
+
+  updated(dom, options) {
+    if (!dom) return
+    dom.querySelectorAll(".title")?.forEach(e => {
+      const parent = e.closest(".event")
+      const { offsetWidth, scrollWidth } = e
+      if (options.useMarquee && parent?.dataset?.noMarquee !== "true" && offsetWidth < scrollWidth) {
+        const m = document.createElement("span")
+        m.innerHTML = e.innerHTML
+        e.innerHTML = ""
+        e.append(m)
+        e.classList.add("marquee")
+        m.classList.add("marqueeText")
+        const length = m.offsetWidth
+        m.style.setProperty("--marqueeOffset", `${offsetWidth}px`)
+        m.style.setProperty("--marqueeScroll", `${scrollWidth}px`)
+        m.style.setProperty("--marqueeLength", `${length}s`)
+      }
+    })
+  },
+
+  async draw(dom, options) {
+    if (!this.library?.loaded) return dom
+    const {
+      isToday, isPastDay, isFutureDay, isThisMonth, isThisYear, getWeekNo, renderEventAgenda,
+      prepareEvents, getBeginOfWeek, getEndOfWeek, displayLegend, regularizeEvents
+    } = this.library
+
+    const startDayOfWeek = getBeginOfWeek(new Date(Date.now()), options).getDay()
+
+    dom.innerHTML = ""
+    // dom.style.setProperty("--maxeventlines", options.maxEventLines)
+    dom.style.setProperty("--eventheight", options.eventHeight)
+    dom.style.setProperty("--displayEndTime", (options.displayEndTime) ? "inherit" : "none")
+    dom.style.setProperty("--displayWeatherTemp", (options.displayWeatherTemp) ? "inline-block" : "none")
+    dom.dataset.mode = options.mode
+
+    const makeCellDom = d => {
+      const tm = new Date(d.valueOf())
+      const cell = document.createElement("div")
+      cell.classList.add("cell")
+      if (isPastDay(tm)) cell.classList.add("past")
+      if (isToday(tm)) cell.classList.add("today")
+      if (isFutureDay(tm)) cell.classList.add("future")
+      if (isThisMonth(tm)) cell.classList.add("thisMonth")
+      if (isThisYear(tm)) cell.classList.add("thisYear")
+      cell.classList.add(
+        `year_${tm.getFullYear()}`,
+        `month_${tm.getMonth() + 1}`,
+        `date_${tm.getDate()}`,
+        `weekday_${tm.getDay()}`
+      )
+      cell.dataset.date = new Date(tm.getFullYear(), tm.getMonth(), tm.getDate()).valueOf()
+      options.weekends.forEach((w, i) => {
+        if (tm.getDay() === w) cell.classList.add("weekend", `weekend_${i + 1}`)
+      })
+      const h = document.createElement("div")
+      h.classList.add("cellHeader")
+
+      // Show Hide Calendar Week number ("cw##")
+      if (options.showWeekNumber) {
+        const cwDom = document.createElement("div")
+        cwDom.innerHTML = getWeekNo(tm, options)
+        cwDom.classList.add("cw")
+        if (tm.getDay() === startDayOfWeek) {
+          cwDom.classList.add("cwFirst")
+        }
+
+        h.append(cwDom)
+      }
+
+      const forecasted = this.forecast.find(e => {
+        return (tm.toLocaleDateString("en-CA") === e.dateId)
+      })
+
+      if (forecasted && forecasted?.weatherType) {
+        const weatherDom = document.createElement("div")
+        weatherDom.classList.add("cellWeather")
+        const icon = document.createElement("span")
+        icon.classList.add("wi", `wi-${forecasted.weatherType}`)
+        weatherDom.append(icon)
+        const maxTemp = document.createElement("span")
+        maxTemp.classList.add("maxTemp", "temperature")
+        maxTemp.innerHTML = Math.round(forecasted.maxTemperature)
+        weatherDom.append(maxTemp)
+        const minTemp = document.createElement("span")
+        minTemp.classList.add("minTemp", "temperature")
+        minTemp.innerHTML = Math.round(forecasted.minTemperature)
+        weatherDom.append(minTemp)
+        h.append(weatherDom)
+      }
+      const dateDom = document.createElement("div")
+      dateDom.classList.add("cellDate")
+      const dParts = new Intl.DateTimeFormat(options.locale, options.cellDateOptions).formatToParts(tm)
+      const dateHTML = dParts.reduce((prev, cur, curIndex) => {
+        const result = `${prev}<span class="dateParts ${cur.type} seq_${curIndex}">${cur.value}</span>`
+        return result
+      }, "")
+      dateDom.innerHTML = dateHTML
+
+      h.append(dateDom)
+
+      const b = document.createElement("div")
+      b.classList.add("cellBody")
+
+      const f = document.createElement("div")
+      f.classList.add("cellFooter")
+
+      cell.append(h)
+      cell.append(b)
+      cell.append(f)
+      return cell
+    }
+
+    const rangeCalendar = (focusDate, options) => {
+      let boc, eoc
+      switch (options.mode) {
+        case "day":
+          boc = new Date(focusDate.getFullYear(), focusDate.getMonth(), focusDate.getDate())
+          eoc = new Date(boc.valueOf())
+          eoc.setDate(boc.getDate() + 7 * options.weeksInView)
+          eoc.setMilliseconds(-1)
+          break
+        case "month":
+          boc = getBeginOfWeek(new Date(focusDate.getFullYear(), focusDate.getMonth(), 1), options)
+          eoc = getEndOfWeek(new Date(focusDate.getFullYear(), focusDate.getMonth() + 1, 0), options)
+          break
+        case "week":
+        default:
+          boc = getBeginOfWeek(new Date(focusDate.getFullYear(), focusDate.getMonth(), focusDate.getDate()), options)
+          eoc = getEndOfWeek(new Date(boc.getFullYear(), boc.getMonth(), boc.getDate() + (7 * (options.weeksInView - 1))), options)
+          break
+      }
+      return { boc, eoc }
+    }
+
+    const makeDayHeaderDom = (dom, options, range) => {
+      const wm = new Date(range.boc.valueOf())
+      const dayDom = document.createElement("div")
+      dayDom.classList.add("headerContainer", "weekGrid")
+      for (let i = 0; i < 7; i++) {
+        const dm = new Date(wm.getFullYear(), wm.getMonth(), wm.getDate() + i)
+        const day = dm.getDay()
+        const dDom = document.createElement("div")
+        dDom.classList.add("weekday", `weekday_${day}`)
+        options.weekends.forEach((w, idx) => {
+          if (day === w) dDom.classList.add("weekend", `weekend_${idx + 1}`)
+        })
+        const headerText = new Intl.DateTimeFormat(options.locale, options.headerWeekDayOptions).format(dm)
+        dDom.innerHTML = headerText
+        dayDom.append(dDom)
+      }
+
+      dom.append(dayDom)
+    }
+
+    const makeWeekGridDom = (dom, options, events, { boc, eoc }) => {
+      const getMaxEventLines = ({ maxEventLines }, weekCount) => {
+        if (Number.isInteger(+maxEventLines) && Number.isFinite(+maxEventLines)) return +maxEventLines
+        let lines = []
+        if (typeof maxEventLines === "object") {
+          if (!Array.isArray(maxEventLines)) {
+            const maxKeys = Object.keys(maxEventLines)
+              .filter(k => Number.isInteger(+k) && Number.isFinite(+k)).map(k => +k)
+              .reduce((p, v) => { return (p > v ? p : v) }, 0)
+            lines.length = maxKeys + 1
+            const defaultLines = maxEventLines?.[0] ?? maxEventLines?.["0"] ?? this.defaults.maxEventLines
+            lines.fill(defaultLines)
+            for (const [key, value] of Object.entries(maxEventLines)) {
+              if (Number.isInteger(+key) && Number.isFinite(+key) && Number.isInteger(+value) && Number.isFinite(+value)) {
+                lines[+key] = +value
+              }
+            }
+          } else {
+            lines = [...maxEventLines.filter(v => Number.isInteger(+v) && Number.isFinite(+v))]
+          }
+        }
+        return +(lines?.[weekCount] ?? lines?.[0] ?? this.defaults.maxEventLines)
+      }
+
+      // how many weeks between boc(begin of calendar) and eoc(end of calendar)
+      let count = 1
+      const eocWeek = getWeekNo(eoc, options)
+      const w = new Date(boc.valueOf())
+      do {
+        w.setDate(w.getDate() + 7)
+        count++
+      } while (getWeekNo(w, options) !== eocWeek)
+
+      count = (options.mode === "month") ? count : options.weeksInView
+      const maxEventLines = getMaxEventLines(options, count)
+      dom.style.setProperty("--maxeventlines", maxEventLines)
+      dom.dataset.maxEventLines = maxEventLines
+      let wm = new Date(boc.valueOf())
+      do {
+        const wDom = document.createElement("div")
+        wDom.classList.add("week")
+        wDom.dataset.weekNo = getWeekNo(wm, options)
+
+        const ccDom = document.createElement("div")
+        ccDom.classList.add("cellContainer", "weekGrid")
+
+        const ecDom = document.createElement("div")
+        ecDom.classList.add("eventContainer", "weekGrid", "weekGridRow")
+
+        const boundary = []
+
+        for (let i = 0; i < 7; i++) {
+          const cm = new Date(wm.getFullYear(), wm.getMonth(), wm.getDate() + i)
+          ccDom.append(makeCellDom(cm, i))
+          boundary.push(cm.getTime())
+        }
+        const lastDay = new Date(wm.getFullYear(), wm.getMonth(), wm.getDate() + 6, 23, 59, 59, 999)
+        boundary.push(lastDay.getTime())
+
+        const sw = new Date(wm.valueOf())
+        const ew = new Date(sw.getFullYear(), sw.getMonth(), sw.getDate() + 6, 23, 59, 59, 999)
+        const eventsOfWeek = events.filter(ev => {
+          return !(ev.endDate <= sw.getTime() || ev.startDate >= ew.getTime())
+        })
+
+        // Packing algorithm: assign explicit row to each event
+        const assignEventRows = eventList => {
+          // Track which rows are occupied per day (0-6)
+          const rowsPerDay = Array(7).fill(null).map(() => new Set())
+
+          // Calculate start/end column for each event
+          const eventsWithColumns = eventList.map(event => {
+            let startCol = 0
+            if (event.startDate >= boundary.at(0)) {
+              startCol = boundary.findIndex((b, idx, bounds) => {
+                return (event.startDate >= b && event.startDate < bounds[idx + 1])
+              })
+            }
+
+            // Find the last day (0-6) the event is still running
+            const weekDays = boundary.slice(0, 7) // Days 0-6 (7 weekdays), exclude boundary[7] (week end marker)
+            const lastDayIndex = weekDays.findLastIndex(b => event.endDate > b)
+            const endCol = lastDayIndex >= 0 ? lastDayIndex : 6
+
+            const days = []
+            for (let d = startCol; d <= endCol; d++) days.push(d)
+            return { event, startCol, endCol, days, span: endCol - startCol + 1 }
+          })
+
+          // Sort: longer (multi-day) events first, then by start date
+          eventsWithColumns.sort((a, b) => {
+            return b.span - a.span || a.event.startDate - b.event.startDate
+          })
+
+          // Assign rows
+          for (const ev of eventsWithColumns) {
+            let row = 1
+            while (true) {
+              const isFree = ev.days.every(day => !rowsPerDay[day].has(row))
+              if (isFree) break
+              row++
+            }
+            ev.assignedRow = row
+            ev.days.forEach(day => rowsPerDay[day].add(row))
+          }
+
+          return eventsWithColumns
+        }
+
+        // Filter skipped events and assign rows
+        const activeEvents = eventsOfWeek.filter(event => {
+          if (options.skipPassedEventToday) {
+            if (event.today && event.isPassed && !event.isFullday && !event.isMultiday && !event.isCurrent) {
+              event.skip = true
+            }
+          }
+          return !event?.skip
+        })
+
+        const packedEvents = assignEventRows(activeEvents)
+        const usedEventLines = packedEvents.reduce((max, packed) => {
+          return (packed.assignedRow > max) ? packed.assignedRow : max
+        }, 0)
+        const weekEventLines = options.dynamicWeekHeight ? Math.min(maxEventLines, usedEventLines) : maxEventLines
+        wDom.style.setProperty("--weekeventlines", weekEventLines)
+        wDom.dataset.weekEventLines = weekEventLines
+
+        // Track hidden events per day for "+N" display
+        const hiddenPerDay = Array(7).fill(0)
+
+        for (const packed of packedEvents) {
+          const { event, startCol, endCol, assignedRow } = packed
+          const eDom = renderEventAgenda(event, options, focusDate)
+
+          // Set grid position explicitly
+          eDom.style.gridColumnStart = startCol + 1
+          eDom.style.gridColumnEnd = endCol + 2
+          eDom.style.gridRowStart = assignedRow
+
+          if (event.startDate < boundary.at(0)) {
+            eDom.classList.add("continueFromPreviousWeek")
+          }
+          if (event.endDate > boundary.at(-1)) {
+            eDom.classList.add("continueToNextWeek")
+          }
+
+          // Hide events beyond maxEventLines
+          if (assignedRow > maxEventLines) {
+            eDom.style.display = "none"
+            packed.days.forEach(day => hiddenPerDay[day]++)
+          }
+
+          if (event?.noMarquee) {
+            eDom.dataset.noMarquee = true
+          }
+
+          if (popoverSupported) {
+            if (!eDom.id) eDom.id = `${this.identifier}_ev_${eDom.dataset.calendarSeq}_${eDom.dataset.startDate}_${eDom.dataset.endDate}`
+            eDom.dataset.popoverble = true
+            eDom.onclick = () => {
+              this.eventPopover(eDom, options)
+            }
+          }
+
+          ecDom.append(eDom)
+        }
+
+        const dateCells = ccDom.querySelectorAll(".cell")
+        for (let i = 0; i < dateCells.length; i++) {
+          const dateCell = dateCells[i]
+          const dateStart = new Date(+dateCell.dataset.date)
+          const dateEnd = new Date(dateStart.getFullYear(), dateStart.getMonth(), dateStart.getDate(), 23, 59, 59, 999)
+          const thatDayEvents = eventsOfWeek.filter(ev => {
+            return !(ev.endDate <= dateStart.valueOf() || ev.startDate > dateEnd.valueOf())
+          })
+          dateCell.dataset.events = thatDayEvents.length
+          dateCell.dataset.hasEvents = (thatDayEvents.length > 0) ? "true" : "false"
+          if (typeof options.manipulateDateCell === "function") {
+            options.manipulateDateCell(dateCell, thatDayEvents)
+          }
+
+          if (options.showMore) {
+            // showMore reflects only overflowed events hidden by maxEventLines.
+            const hidden = hiddenPerDay[i]
+            if (hidden) {
+              dateCell.classList.add("hasMore")
+              dateCell.style.setProperty("--more", hidden)
+            }
+          }
+
+          if (popoverSupported) {
+            if (!dateCell.id) dateCell.id = `${this.identifier}_dc_${dateCell.dataset.date}`
+            dateCell.dataset.popoverble = true
+            dateCell.onclick = () => {
+              this.dayPopover(dateCell, thatDayEvents, options)
+            }
+          }
+        }
+
+        wDom.append(ccDom)
+        wDom.append(ecDom)
+
+        dom.append(wDom)
+        wm = new Date(wm.getFullYear(), wm.getMonth(), wm.getDate() + 7)
+      } while (wm.valueOf() <= eoc.valueOf())
+    }
+
+    const customHeaderDom = (dom, options, { boc, eoc }) => {
+      const defaultCustomHeader = (options, boc, eoc) => {
+        try {
+          const locale = options.locale
+          const titleOptions = options.headerTitleOptions
+          if (options.mode === "month") {
+            const focusDate = this.getMoment(options)
+            return new Intl.DateTimeFormat(locale, titleOptions)
+              .formatToParts(new Date(focusDate.valueOf()))
+              .reduce((prev, cur, curIndex) => {
+                const result = `${prev}<span class="headerTimeParts ${cur.type} seq_${curIndex} ${cur.source}">${cur.value}</span>`
+                return result
+              }, "")
+          } else {
+            const begin = new Date(boc.valueOf())
+            const end = new Date(eoc.valueOf())
+            return new Intl.DateTimeFormat(locale, titleOptions)
+              .formatRangeToParts(begin, end)
+              .reduce((prev, cur, curIndex) => {
+                const result = `${prev}<span class="headerTimeParts ${cur.type} seq_${curIndex} ${cur.source}">${cur.value}</span>`
+                return result
+              }, "")
+          }
+        } catch (e) {
+          Log.error(e)
+          return ""
+        }
+      }
+      const header = document.createElement("h1")
+      header.classList.add("headerTitle")
+      header.innerHTML = (typeof options.customHeader === "function") ? options.customHeader(options, boc, eoc) : defaultCustomHeader(options, boc, eoc)
+      dom.prepend(header)
+    }
+
+    const focusDate = this.getMoment(options)
+    const { boc, eoc } = rangeCalendar(focusDate, options)
+    dom.dataset.beginOfCalendar = boc.valueOf()
+    dom.dataset.endOfCalendar = eoc.valueOf()
+    const targetEvents = prepareEvents({
+      targetEvents: regularizeEvents({
+        eventPool: this.eventPool,
+        config: options
+      }),
+      config: options,
+      range: [boc, eoc]
+    })
+    if (options.showHeader) makeDayHeaderDom(dom, options, { boc, eoc })
+    makeWeekGridDom(dom, options, targetEvents, { boc, eoc })
+    if (options.displayLegend) displayLegend(dom, targetEvents, options)
+    if (options.customHeader) customHeaderDom(dom, options, { boc, eoc })
+    return dom
+  },
+
+  getHeader() {
+    if (this.data.header && this.data.header.trim() !== "") return this.data.header
+    if (!this.activeConfig.customHeader && this.activeConfig.mode === "month") {
+      const focusDate = this.getMoment(this.activeConfig)
+      const locale = this.activeConfig.locale
+      const titleOptions = this.activeConfig.headerTitleOptions
+      return new Intl.DateTimeFormat(locale, titleOptions).format(new Date(focusDate.valueOf()))
+    }
+    return this.data.header
+  },
+
+  updateAnimate() {
+    this.updateDom(
+      (!animationSupported)
+        ? this.config.animationSpeed
+        : {
+          options: {
+            speed: this.config.animationSpeed,
+            animate: {
+              in: this.config.animateIn,
+              out: this.config.animateOut
+            }
+          }
+        }
+    )
+  }
+})

@@ -1,0 +1,15 @@
+$ chronyc tracking
+
+Reference ID    : 84A36002 (time-b-b.nist.gov)
+Stratum         : 2
+Ref time (UTC)  : Fri Jul 17 17:52:59 2026
+System time     : 0.001183845 seconds slow of NTP time
+Last offset     : -0.000565725 seconds
+RMS offset      : 0.000629288 seconds
+Frequency       : 11.145 ppm slow
+Residual freq   : -0.011 ppm
+Skew            : 0.144 ppm
+Root delay      : 0.286441863 seconds
+Root dispersion : 0.001596560 seconds
+Update interval : 1034.4 seconds
+Leap status     : Normal

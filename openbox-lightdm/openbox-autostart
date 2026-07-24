@@ -1,0 +1,22 @@
+# Wait briefly for the NVIDIA output to appear, then enable it.
+for i in $(seq 1 15); do
+    xrandr --output HDMI-1-0 \
+        --mode 1920x1080 \
+        --rate 60 \
+        --primary &&
+        break
+
+    sleep 1
+done
+
+xset s off
+xset -dpms
+xset s noblank
+
+picom -b &
+unclutter -idle 0.5 -root &
+/usr/local/bin/calendar-kiosk &
+
+# BEGIN MAGICMIRROR PYTHON CLOCK
+/usr/local/bin/magicmirror-python-clock.py &
+# END MAGICMIRROR PYTHON CLOCK

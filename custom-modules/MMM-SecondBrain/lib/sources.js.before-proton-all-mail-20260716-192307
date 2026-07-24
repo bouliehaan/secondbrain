@@ -1,0 +1,665 @@
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const { simpleParser } = require("mailparser");
+const { ImapFlow } = require("imapflow");
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function writeJsonAtomic(filePath, value) {
+  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+    mode: 0o600
+  });
+  fs.renameSync(temporary, filePath);
+  fs.chmodSync(filePath, 0o600);
+}
+
+function listJsonFiles(directory) {
+  if (!fs.existsSync(directory)) {
+    return [];
+  }
+
+  return fs.readdirSync(directory)
+    .filter((name) => name.endsWith(".json"))
+    .sort()
+    .map((name) => path.join(directory, name));
+}
+
+function cleanText(value, maxLength = 180) {
+  const cleaned = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim();
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function displaySender(raw) {
+  const value = cleanText(raw, 100);
+  const withoutAddress = value.replace(/\s*<[^>]+>\s*$/, "").replace(/^"|"$/g, "");
+  return withoutAddress || value || "Unknown sender";
+}
+
+function ageText(timestamp, now = Date.now()) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return "";
+  }
+
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+
+  if (seconds < 60) {
+    return "now";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+function headerValue(headers, name) {
+  const target = String(name).toLowerCase();
+  const found = (headers || []).find(
+    (header) => String(header.name || "").toLowerCase() === target
+  );
+  return found?.value || "";
+}
+
+function voiceClassification(from, subject) {
+  const combined = `${from} ${subject}`.toLowerCase();
+  const looksLikeVoice =
+    combined.includes("<REDACTED_EMAIL>") ||
+    combined.includes("google voice");
+
+  if (!looksLikeVoice) {
+    return null;
+  }
+
+  if (combined.includes("missed call")) {
+    return "Missed call";
+  }
+
+  if (combined.includes("voicemail")) {
+    return "Voicemail";
+  }
+
+  if (
+    combined.includes("text message") ||
+    combined.includes("new message") ||
+    combined.includes("sms")
+  ) {
+    return "Voice message";
+  }
+
+  return "Google Voice";
+}
+
+function envelopeIdentity(addresses) {
+  const first = Array.isArray(addresses) ? addresses[0] : null;
+  if (!first) {
+    return {
+      address: "",
+      display: "Unknown sender"
+    };
+  }
+
+  return {
+    address: first.address || "",
+    display: first.name || first.address || "Unknown sender"
+  };
+}
+
+function resolveMailbox(mailboxes, requested, specialUse = null) {
+  const name = String(requested || "").trim();
+
+  if (specialUse) {
+    const special = mailboxes.find(
+      (mailbox) => String(mailbox.specialUse || "").toLowerCase() === specialUse.toLowerCase()
+    );
+    if (special) {
+      return special.path;
+    }
+  }
+
+  const exact = mailboxes.find((mailbox) => mailbox.path === name);
+  if (exact) {
+    return exact.path;
+  }
+
+  const lowered = name.toLowerCase();
+  const insensitive = mailboxes.find(
+    (mailbox) => String(mailbox.path || "").toLowerCase() === lowered
+  );
+
+  return insensitive?.path || null;
+}
+
+async function parsedPreview(source, maxLength = 180) {
+  if (!source) {
+    return "";
+  }
+
+  try {
+    const parsed = await simpleParser(source, {
+      skipHtmlToText: false,
+      skipTextToHtml: true,
+      skipImageLinks: true
+    });
+
+    return cleanText(parsed.text || "", maxLength);
+  } catch {
+    return "";
+  }
+}
+
+async function fetchUnreadMailbox(client, mailbox, since, maxResults) {
+  let lock;
+
+  try {
+    lock = await client.getMailboxLock(mailbox, { readOnly: true });
+    const uids = await client.search({ seen: false, since }, { uid: true });
+    const selected = uids
+      .sort((a, b) => b - a)
+      .slice(0, Math.max(1, Number(maxResults || 8)));
+
+    if (selected.length === 0) {
+      return [];
+    }
+
+    return await client.fetchAll(
+      selected,
+      {
+        envelope: true,
+        internalDate: true,
+        source: true
+      },
+      { uid: true }
+    );
+  } finally {
+    if (lock) {
+      lock.release();
+    }
+  }
+}
+
+async function pollGmail(configDir, log = console) {
+  const accountsDir = path.join(configDir, "gmail", "accounts");
+  const results = [];
+
+  for (const accountPath of listJsonFiles(accountsDir)) {
+    let client;
+
+    try {
+      const account = readJson(accountPath);
+      if (account.enabled === false || !account.password) {
+        continue;
+      }
+
+      const accountName = account.displayName || account.email || account.alias || "Gmail";
+      const alias = account.alias || account.email || "account";
+
+      client = new ImapFlow({
+        host: account.host || "imap.gmail.com",
+        port: Number(account.port || 993),
+        secure: account.secure !== false,
+        auth: {
+          user: account.username || account.email,
+          pass: account.password
+        },
+        tls: {
+          rejectUnauthorized: account.rejectUnauthorized !== false
+        },
+        logger: false
+      });
+
+      await client.connect();
+      const mailboxes = await client.list();
+
+      const importantMailbox = resolveMailbox(
+        mailboxes,
+        account.importantMailbox || "Wall-Display"
+      );
+
+      if (!importantMailbox) {
+        throw new Error(
+          `Gmail label/mailbox '${account.importantMailbox || "Wall-Display"}' was not found. ` +
+          "Create that label in Gmail or rerun 'sudo secondbrain gmail ALIAS' with its exact IMAP name."
+        );
+      }
+
+      const importantSince = new Date(
+        Date.now() - Number(account.maxAgeDays || 14) * 86400000
+      );
+
+      const importantMessages = await fetchUnreadMailbox(
+        client,
+        importantMailbox,
+        importantSince,
+        Number(account.maxResults || 8)
+      );
+
+      for (const message of importantMessages) {
+        const sender = envelopeIdentity(message.envelope?.from);
+        const subject = message.envelope?.subject || "No subject";
+        const timestamp = new Date(
+          message.internalDate || message.envelope?.date || Date.now()
+        ).getTime();
+        const voiceLabel = voiceClassification(sender.address, subject);
+        const preview = await parsedPreview(message.source, 180);
+        const messageKey = message.envelope?.messageId || `${importantMailbox}:${message.uid}`;
+
+        results.push({
+          id: `gmail:${alias}:${messageKey}`,
+          kind: voiceLabel ? "voice" : "email",
+          label: voiceLabel || `Email · ${accountName}`,
+          title: voiceLabel
+            ? cleanText(subject, 110)
+            : `${cleanText(sender.display, 70)} — ${cleanText(subject, 100)}`,
+          detail: preview,
+          timestamp,
+          priority: voiceLabel ? 100 : 75,
+          source: accountName
+        });
+      }
+
+      if (account.monitorVoice !== false) {
+        const voiceMailbox = resolveMailbox(
+          mailboxes,
+          account.voiceMailbox || "INBOX",
+          "\\Inbox"
+        );
+
+        if (!voiceMailbox) {
+          throw new Error("Gmail INBOX could not be found for Google Voice monitoring.");
+        }
+
+        const voiceMaxAgeMinutes = Math.max(
+          5,
+          Number(account.voiceMaxAgeMinutes || 60)
+        );
+        const voiceSince = new Date(Date.now() - voiceMaxAgeMinutes * 60000);
+        const voiceMessages = await fetchUnreadMailbox(
+          client,
+          voiceMailbox,
+          voiceSince,
+          Number(account.voiceMaxResults || 20)
+        );
+
+        for (const message of voiceMessages) {
+          const sender = envelopeIdentity(message.envelope?.from);
+          const subject = message.envelope?.subject || "Google Voice";
+          const voiceLabel = voiceClassification(sender.address, subject);
+
+          if (!voiceLabel) {
+            continue;
+          }
+
+          const timestamp = new Date(
+            message.internalDate || message.envelope?.date || Date.now()
+          ).getTime();
+
+          if (Date.now() - timestamp > voiceMaxAgeMinutes * 60000) {
+            continue;
+          }
+
+          const preview = await parsedPreview(message.source, 180);
+          const messageKey = message.envelope?.messageId || `${voiceMailbox}:${message.uid}`;
+
+          results.push({
+            id: `gmail:${alias}:${messageKey}`,
+            kind: "voice",
+            label: voiceLabel,
+            title: cleanText(subject, 110),
+            detail: preview,
+            timestamp,
+            priority: 100,
+            source: accountName
+          });
+        }
+      }
+    } catch (error) {
+      log.error(`[MMM-SecondBrain] Gmail IMAP account ${path.basename(accountPath)} failed: ${error.message}`);
+    } finally {
+      if (client) {
+        try {
+          await client.logout();
+        } catch {
+          // The server may already have closed the connection.
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+function envelopeAddress(addresses) {
+  const first = Array.isArray(addresses) ? addresses[0] : null;
+  if (!first) {
+    return "Unknown sender";
+  }
+
+  return first.name || first.address || "Unknown sender";
+}
+
+async function pollProton(configDir, log = console) {
+  const accountsDir = path.join(configDir, "proton", "accounts");
+  const results = [];
+
+  for (const accountPath of listJsonFiles(accountsDir)) {
+    let client;
+    let lock;
+
+    try {
+      const account = readJson(accountPath);
+      if (account.enabled === false) {
+        continue;
+      }
+
+      client = new ImapFlow({
+        host: account.host || "127.0.0.1",
+        port: Number(account.port || 1143),
+        secure: Boolean(account.secure),
+        auth: {
+          user: account.username,
+          pass: account.password
+        },
+        tls: {
+          rejectUnauthorized: account.rejectUnauthorized === true
+        },
+        logger: false
+      });
+
+      await client.connect();
+      const mailbox = account.mailbox || "Labels/Wall Display";
+      lock = await client.getMailboxLock(mailbox);
+
+      const since = new Date(Date.now() - Number(account.maxAgeDays || 14) * 86400000);
+      const uids = await client.search({ seen: false, since }, { uid: true });
+      const selected = uids.sort((a, b) => b - a).slice(0, Number(account.maxResults || 8));
+
+      if (selected.length > 0) {
+        const messages = await client.fetchAll(
+          selected,
+          { envelope: true, internalDate: true },
+          { uid: true }
+        );
+
+        const accountName = account.displayName || account.alias || "Proton Mail";
+
+        for (const message of messages) {
+          const sender = envelopeAddress(message.envelope?.from);
+          const subject = message.envelope?.subject || "No subject";
+          const timestamp = new Date(
+            message.internalDate || message.envelope?.date || Date.now()
+          ).getTime();
+
+          results.push({
+            id: `proton:${account.alias || "account"}:${message.uid}`,
+            kind: "email",
+            label: `Proton · ${accountName}`,
+            title: `${cleanText(sender, 70)} — ${cleanText(subject, 105)}`,
+            detail: "Unread in your Wall Display mailbox",
+            timestamp,
+            priority: 78,
+            source: accountName
+          });
+        }
+      }
+    } catch (error) {
+      log.error(`[MMM-SecondBrain] Proton account ${path.basename(accountPath)} failed: ${error.message}`);
+    } finally {
+      if (lock) {
+        lock.release();
+      }
+      if (client) {
+        try {
+          await client.logout();
+        } catch {
+          // Bridge may already have closed the connection.
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+async function transmissionRpc(config, payload) {
+  const headers = {
+    "Content-Type": "application/json"
+  };
+
+  if (config.username) {
+    headers.Authorization = `Basic ${Buffer.from(`${config.username}:${config.password || ""}`).toString("base64")}`;
+  }
+
+  let response = await fetch(config.url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(8000)
+  });
+
+  if (response.status === 409) {
+    const sessionId = response.headers.get("x-transmission-session-id");
+    if (!sessionId) {
+      throw new Error("Transmission requested a session ID but did not return one");
+    }
+
+    headers["X-Transmission-Session-Id"] = sessionId;
+    response = await fetch(config.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000)
+    });
+  }
+
+  if (!response.ok) {
+    throw new Error(`Transmission RPC returned HTTP ${response.status}`);
+  }
+
+  const result = await response.json();
+  if (result.result && result.result !== "success") {
+    throw new Error(`Transmission RPC error: ${result.result}`);
+  }
+
+  return result.arguments || result.params || {};
+}
+
+function formatBytesPerSecond(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) {
+    return `${bytes} B/s`;
+  }
+  if (bytes < 1024 ** 2) {
+    return `${(bytes / 1024).toFixed(1)} KB/s`;
+  }
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB/s`;
+}
+
+function formatEta(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0 || value >= 31536000) {
+    return "ETA unknown";
+  }
+
+  if (value < 60) {
+    return "under 1 min";
+  }
+
+  const minutes = Math.round(value / 60);
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  return remaining ? `${hours}h ${remaining}m` : `${hours}h`;
+}
+
+async function pollTransmission(configDir, log = console) {
+  const configPath = path.join(configDir, "transmission.json");
+  if (!fs.existsSync(configPath)) {
+    return [];
+  }
+
+  const config = readJson(configPath);
+  if (config.enabled === false) {
+    return [];
+  }
+
+  try {
+    const response = await transmissionRpc(
+      {
+        url: config.url || "http://127.0.0.1:9091/transmission/rpc",
+        username: config.username || "",
+        password: "<REDACTED_SECRET>" || ""
+      },
+      {
+        method: "torrent-get",
+        arguments: {
+          fields: [
+            "id",
+            "name",
+            "status",
+            "percentDone",
+            "rateDownload",
+            "eta",
+            "error",
+            "errorString",
+            "doneDate",
+            "isFinished"
+          ]
+        }
+      }
+    );
+
+    const now = Date.now();
+    const completedWindow = Number(config.recentCompletedMinutes || 45) * 60000;
+    const results = [];
+
+    for (const torrent of response.torrents || []) {
+      const progress = Math.round(Number(torrent.percentDone || 0) * 100);
+      const hasError = Number(torrent.error || 0) !== 0;
+      const downloading = [3, 4].includes(Number(torrent.status)) && progress < 100;
+      const doneTimestamp = Number(torrent.doneDate || 0) * 1000;
+      const recentlyCompleted =
+        progress >= 100 &&
+        doneTimestamp > 0 &&
+        now - doneTimestamp <= completedWindow;
+
+      if (hasError) {
+        results.push({
+          id: `transmission:error:${torrent.id}`,
+          kind: "warning",
+          label: "Transmission error",
+          title: cleanText(torrent.name, 120),
+          detail: cleanText(torrent.errorString || "Download error", 170),
+          timestamp: now,
+          priority: 90
+        });
+        continue;
+      }
+
+      if (downloading) {
+        results.push({
+          id: `transmission:active:${torrent.id}`,
+          kind: "download",
+          label: "Downloading",
+          title: cleanText(torrent.name, 120),
+          detail: `${progress}% · ${formatBytesPerSecond(torrent.rateDownload)} · ${formatEta(torrent.eta)}`,
+          timestamp: now,
+          priority: 45,
+          progress
+        });
+        continue;
+      }
+
+      if (recentlyCompleted) {
+        results.push({
+          id: `transmission:done:${torrent.id}`,
+          kind: "download",
+          label: "Download finished",
+          title: cleanText(torrent.name, 120),
+          detail: "Ready",
+          timestamp: doneTimestamp,
+          priority: 35,
+          progress: 100
+        });
+      }
+    }
+
+    return results;
+  } catch (error) {
+    log.error(`[MMM-SecondBrain] Transmission failed: ${error.message}`);
+    return [];
+  }
+}
+
+function deduplicate(items) {
+  const map = new Map();
+  for (const item of items) {
+    const existing = map.get(item.id);
+    if (!existing || Number(item.priority || 0) > Number(existing.priority || 0)) {
+      map.set(item.id, item);
+    }
+  }
+  return Array.from(map.values());
+}
+
+async function pollAll(configDir, options = {}, log = console) {
+  const settled = await Promise.allSettled([
+    pollGmail(configDir, log),
+    pollProton(configDir, log),
+    pollTransmission(configDir, log)
+  ]);
+
+  const items = [];
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      items.push(...result.value);
+    } else {
+      log.error(`[MMM-SecondBrain] Source poll failed: ${result.reason?.message || result.reason}`);
+    }
+  }
+
+  const now = Date.now();
+  return deduplicate(items)
+    .sort((a, b) => {
+      const priorityDifference = Number(b.priority || 0) - Number(a.priority || 0);
+      if (priorityDifference !== 0) {
+        return priorityDifference;
+      }
+      return Number(b.timestamp || 0) - Number(a.timestamp || 0);
+    })
+    .slice(0, Number(options.maxItems || 4))
+    .map((item) => ({
+      ...item,
+      age: ageText(Number(item.timestamp || 0), now)
+    }));
+}
+
+module.exports = {
+  pollAll,
+  pollGmail,
+  pollProton,
+  pollTransmission
+};

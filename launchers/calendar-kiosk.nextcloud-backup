@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+export TZ=America/Denver
+
+URL="https://cloud.turgonomics.com/apps/calendar"
+
+while true; do
+    rm -f "$HOME"/snap/chromium/common/calendar-kiosk/Singleton*
+
+    # Restart hourly so newly refreshed subscription data appears.
+    timeout --signal=TERM --kill-after=15s 1h \
+        /snap/bin/chromium \
+        --user-data-dir="$HOME/snap/chromium/common/calendar-kiosk" \
+        --kiosk \
+        --app="$URL" \
+        --no-first-run \
+        --no-default-browser-check \
+        --noerrdialogs \
+        --disable-session-crashed-bubble \
+        --disable-features=Translate,TranslateUI \
+        --disable-pinch \
+        --overscroll-history-navigation=0 \
+        --password-store=basic
+
+    sleep 3
+done

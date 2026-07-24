@@ -1,0 +1,414 @@
+/******************************************************************************
+ * SECOND BRAIN CONTAINER
+ *
+ * This outer shell has no visible background. Each child section is its own
+ * independent bubble and disappears when its source category is empty.
+ ******************************************************************************/
+
+.secondbrain-shell {
+  display: flex;
+  flex-direction: column;
+
+  box-sizing: border-box;
+
+  width: 100%;
+  max-height: 248px;
+
+  gap: 9px;
+
+  overflow: hidden;
+}
+
+.secondbrain-empty {
+  display: none !important;
+}
+
+/******************************************************************************
+ * INDIVIDUAL BUBBLES
+ ******************************************************************************/
+
+.secondbrain-section {
+  box-sizing: border-box;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  padding: 9px;
+
+  overflow: hidden;
+
+  border:
+    1px solid
+    var(
+      --calm-line-soft,
+      rgba(255, 255, 255, 0.08)
+    );
+
+  border-radius: 16px;
+
+  background:
+    var(
+      --calm-panel,
+      #202425
+    ) !important;
+
+  box-shadow:
+    0 5px 16px
+    var(
+      --calm-shadow,
+      rgba(0, 0, 0, 0.22)
+    );
+
+  color:
+    var(
+      --calm-text,
+      #f0f1ed
+    ) !important;
+}
+
+/*
+ * Notifications receive most of the available area.
+ */
+
+.secondbrain-section-notifications {
+  flex: 0 1 auto;
+  max-height: 154px;
+}
+
+/*
+ * Downloads remain intentionally compact so they cannot displace the agenda.
+ */
+
+.secondbrain-section-downloads {
+  flex: 0 0 auto;
+  max-height: 85px;
+}
+
+.secondbrain-section-packages {
+  flex: 0 0 auto;
+  max-height: none;
+}
+
+/******************************************************************************
+ * HEADINGS
+ ******************************************************************************/
+
+.secondbrain-heading {
+  margin: 0 2px 6px;
+  padding: 0 1px 6px;
+
+  border-bottom:
+    1px solid
+    var(
+      --calm-line,
+      rgba(255, 255, 255, 0.11)
+    );
+
+  color:
+    var(
+      --calm-muted,
+      #aab1af
+    ) !important;
+
+  font-size: 11px !important;
+  font-weight: 700;
+  line-height: 1.15;
+
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/******************************************************************************
+ * ITEM LISTS
+ ******************************************************************************/
+
+.secondbrain-list {
+  display: flex;
+  flex-direction: column;
+
+  gap: 5px;
+
+  min-height: 0;
+
+  overflow: hidden;
+}
+
+/******************************************************************************
+ * INDIVIDUAL ITEMS
+ ******************************************************************************/
+
+.secondbrain-card {
+  position: relative;
+
+  box-sizing: border-box;
+
+  min-width: 0;
+
+  padding: 7px 8px 7px 10px;
+
+  overflow: hidden;
+
+  border:
+    1px solid
+    var(
+      --calm-line-soft,
+      rgba(255, 255, 255, 0.07)
+    );
+
+  border-radius: 10px;
+
+  background:
+    var(
+      --calm-surface,
+      #272c2d
+    ) !important;
+
+  box-shadow:
+    inset 3px 0 0
+    var(
+      --secondbrain-accent,
+      var(
+        --calm-accent,
+        #8ba9a2
+      )
+    );
+
+  color:
+    var(
+      --calm-text,
+      #f0f1ed
+    ) !important;
+}
+
+.secondbrain-voice {
+  --secondbrain-accent:
+    var(
+      --calm-accent-strong,
+      #a4c0ba
+    );
+}
+
+.secondbrain-email {
+  --secondbrain-accent:
+    var(
+      --calm-accent,
+      #8ba9a2
+    );
+}
+
+.secondbrain-download {
+  --secondbrain-accent: #7f9b86;
+}
+
+.secondbrain-warning {
+  --secondbrain-accent: #ba8662;
+}
+
+.secondbrain-package {
+  --secondbrain-accent: #c0a47b;
+}
+
+.secondbrain-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+
+  gap: 8px;
+
+  min-width: 0;
+}
+
+.secondbrain-label,
+.secondbrain-age {
+  color:
+    var(
+      --calm-muted,
+      #aab1af
+    ) !important;
+
+  font-size: 9px !important;
+  font-weight: 700;
+  line-height: 1.15;
+
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.secondbrain-age {
+  flex: 0 0 auto;
+
+  color:
+    var(
+      --calm-faint,
+      #78807e
+    ) !important;
+
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.secondbrain-title {
+  margin-top: 2px;
+
+  overflow: hidden;
+
+  color:
+    var(
+      --calm-text,
+      #f0f1ed
+    ) !important;
+
+  font-size: 13px !important;
+  font-weight: 650;
+  line-height: 1.18;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.secondbrain-detail {
+  display: -webkit-box;
+
+  margin-top: 2px;
+
+  overflow: hidden;
+
+  color:
+    var(
+      --calm-muted,
+      #aab1af
+    ) !important;
+
+  font-size: 10px !important;
+  line-height: 1.22;
+
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/*
+ * Download information remains one line tall.
+ */
+
+.secondbrain-section-downloads
+.secondbrain-detail {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  -webkit-line-clamp: 1;
+}
+
+/******************************************************************************
+ * DOWNLOAD PROGRESS
+ ******************************************************************************/
+
+.secondbrain-progress {
+  height: 3px;
+
+  margin-top: 6px;
+
+  overflow: hidden;
+
+  border-radius: 999px;
+
+  background:
+    var(
+      --calm-line,
+      rgba(255, 255, 255, 0.11)
+    );
+}
+
+.secondbrain-progress-bar {
+  height: 100%;
+
+  border-radius: inherit;
+
+  background:
+    var(
+      --secondbrain-accent,
+      var(
+        --calm-accent,
+        #8ba9a2
+      )
+    );
+}
+
+/******************************************************************************
+ * MAGICMIRROR REGION CONSTRAINTS
+ ******************************************************************************/
+
+.region.top.right
+.module.MMM-SecondBrain {
+  flex: 0 0 auto !important;
+
+  width: 100% !important;
+  max-height: 248px !important;
+  min-width: 0 !important;
+
+  margin: 0 !important;
+
+  overflow: hidden !important;
+}
+
+/******************************************************************************
+ * LIGHT MODE
+ ******************************************************************************/
+
+html.solar-light
+.secondbrain-section {
+  background:
+    var(
+      --calm-panel,
+      #f7f7f3
+    ) !important;
+
+  color:
+    var(
+      --calm-text,
+      #222728
+    ) !important;
+}
+
+html.solar-light
+.secondbrain-card {
+  background:
+    var(
+      --calm-surface,
+      #eeefea
+    ) !important;
+
+  color:
+    var(
+      --calm-text,
+      #222728
+    ) !important;
+}
+
+/* BEGIN THREE-ITEM SECOND BRAIN HEIGHT FIX */
+
+/* Remove every fixed-height clip that can cut off the third notification. */
+.region.top.right .module.MMM-SecondBrain,
+.region.top.right .module.MMM-SecondBrain > .module-content,
+.region.top.right .module.MMM-SecondBrain .secondbrain-shell,
+.region.top.right .module.MMM-SecondBrain .secondbrain-list,
+.region.top.right .module.MMM-SecondBrain [class*="secondbrain-section"] {
+  box-sizing: border-box !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.region.top.right .module.MMM-SecondBrain .secondbrain-card {
+  flex: 0 0 auto !important;
+  max-height: none !important;
+}
+
+.region.top.right .module.MMM-SecondBrain .secondbrain-section-notifications,
+.region.top.right .module.MMM-SecondBrain .secondbrain-section-downloads,
+.region.top.right .module.MMM-SecondBrain .secondbrain-section-packages {
+  padding-bottom: 8px !important;
+}
+
+/* END THREE-ITEM SECOND BRAIN HEIGHT FIX */

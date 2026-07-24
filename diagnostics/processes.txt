@@ -1,0 +1,368 @@
+$ ps -eo pid,ppid,user,lstart,stat,comm,args --sort=lstart
+
+    PID    PPID USER                      STARTED STAT COMMAND         COMMAND
+      1       0 root     Thu Jul 16 05:31:22 2026 Ss   systemd         /sbin/init
+      2       0 root     Thu Jul 16 05:31:22 2026 S    kthreadd        [kthreadd]
+      3       2 root     Thu Jul 16 05:31:22 2026 S    pool_workqueue_ [pool_workqueue_release]
+      4       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-rcu_g [kworker/R-rcu_g]
+      5       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-rcu_p [kworker/R-rcu_p]
+      6       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-slub_ [kworker/R-slub_]
+      7       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-netns [kworker/R-netns]
+      9       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/0:0H-ev [kworker/0:0H-events_highpri]
+     12       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-mm_pe [kworker/R-mm_pe]
+     13       2 root     Thu Jul 16 05:31:22 2026 I    rcu_tasks_kthre [rcu_tasks_kthread]
+     14       2 root     Thu Jul 16 05:31:22 2026 I    rcu_tasks_rude_ [rcu_tasks_rude_kthread]
+     15       2 root     Thu Jul 16 05:31:22 2026 I    rcu_tasks_trace [rcu_tasks_trace_kthread]
+     16       2 root     Thu Jul 16 05:31:22 2026 S    ksoftirqd/0     [ksoftirqd/0]
+     17       2 root     Thu Jul 16 05:31:22 2026 I    rcu_preempt     [rcu_preempt]
+     18       2 root     Thu Jul 16 05:31:22 2026 S    migration/0     [migration/0]
+     19       2 root     Thu Jul 16 05:31:22 2026 S    idle_inject/0   [idle_inject/0]
+     20       2 root     Thu Jul 16 05:31:22 2026 S    cpuhp/0         [cpuhp/0]
+     21       2 root     Thu Jul 16 05:31:22 2026 S    cpuhp/1         [cpuhp/1]
+     22       2 root     Thu Jul 16 05:31:22 2026 S    idle_inject/1   [idle_inject/1]
+     23       2 root     Thu Jul 16 05:31:22 2026 S    migration/1     [migration/1]
+     24       2 root     Thu Jul 16 05:31:22 2026 S    ksoftirqd/1     [ksoftirqd/1]
+     26       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/1:0H-ev [kworker/1:0H-events_highpri]
+     27       2 root     Thu Jul 16 05:31:22 2026 S    cpuhp/2         [cpuhp/2]
+     28       2 root     Thu Jul 16 05:31:22 2026 S    idle_inject/2   [idle_inject/2]
+     29       2 root     Thu Jul 16 05:31:22 2026 S    migration/2     [migration/2]
+     30       2 root     Thu Jul 16 05:31:22 2026 S    ksoftirqd/2     [ksoftirqd/2]
+     32       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/2:0H-ev [kworker/2:0H-events_highpri]
+     33       2 root     Thu Jul 16 05:31:22 2026 S    cpuhp/3         [cpuhp/3]
+     34       2 root     Thu Jul 16 05:31:22 2026 S    idle_inject/3   [idle_inject/3]
+     35       2 root     Thu Jul 16 05:31:22 2026 S    migration/3     [migration/3]
+     36       2 root     Thu Jul 16 05:31:22 2026 S    ksoftirqd/3     [ksoftirqd/3]
+     38       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/3:0H-ev [kworker/3:0H-events_highpri]
+     39       2 root     Thu Jul 16 05:31:22 2026 S    kdevtmpfs       [kdevtmpfs]
+     40       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-inet_ [kworker/R-inet_]
+     41       2 root     Thu Jul 16 05:31:22 2026 S    kauditd         [kauditd]
+     42       2 root     Thu Jul 16 05:31:22 2026 S    khungtaskd      [khungtaskd]
+     44       2 root     Thu Jul 16 05:31:22 2026 S    oom_reaper      [oom_reaper]
+     45       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-write [kworker/R-write]
+     46       2 root     Thu Jul 16 05:31:22 2026 S    kcompactd0      [kcompactd0]
+     47       2 root     Thu Jul 16 05:31:22 2026 SN   ksmd            [ksmd]
+     49       2 root     Thu Jul 16 05:31:22 2026 SN   khugepaged      [khugepaged]
+     50       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-kinte [kworker/R-kinte]
+     51       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-kbloc [kworker/R-kbloc]
+     52       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-blkcg [kworker/R-blkcg]
+     53       2 root     Thu Jul 16 05:31:22 2026 S    irq/9-acpi      [irq/9-acpi]
+     55       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-tpm_d [kworker/R-tpm_d]
+     56       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-ata_s [kworker/R-ata_s]
+     57       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-md    [kworker/R-md]
+     58       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-md_bi [kworker/R-md_bi]
+     59       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-edac- [kworker/R-edac-]
+     60       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-devfr [kworker/R-devfr]
+     61       2 root     Thu Jul 16 05:31:22 2026 S    watchdogd       [watchdogd]
+     62       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-quota [kworker/R-quota]
+     64       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/1:1H-kb [kworker/1:1H-kblockd]
+     65       2 root     Thu Jul 16 05:31:22 2026 S    kswapd0         [kswapd0]
+     66       2 root     Thu Jul 16 05:31:22 2026 S    ecryptfs-kthrea [ecryptfs-kthread]
+     67       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-kthro [kworker/R-kthro]
+     68       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-acpi_ [kworker/R-acpi_]
+     71       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-mld   [kworker/R-mld]
+     73       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/0:1H-kb [kworker/0:1H-kblockd]
+     74       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-ipv6_ [kworker/R-ipv6_]
+     82       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-kstrp [kworker/R-kstrp]
+     84       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/u9:0    [kworker/u9:0]
+     89       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-crypt [kworker/R-crypt]
+     99       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-charg [kworker/R-charg]
+    126       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/3:1H-kb [kworker/3:1H-kblockd]
+    130       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/2:1H-kb [kworker/2:1H-kblockd]
+    177       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_0       [scsi_eh_0]
+    178       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    179       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_1       [scsi_eh_1]
+    180       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    181       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_2       [scsi_eh_2]
+    182       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    183       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_3       [scsi_eh_3]
+    184       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    185       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_4       [scsi_eh_4]
+    186       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    187       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_5       [scsi_eh_5]
+    188       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    189       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_6       [scsi_eh_6]
+    190       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    191       2 root     Thu Jul 16 05:31:22 2026 S    scsi_eh_7       [scsi_eh_7]
+    192       2 root     Thu Jul 16 05:31:22 2026 I<   kworker/R-scsi_ [kworker/R-scsi_]
+    244       2 root     Thu Jul 16 05:31:23 2026 I<   kworker/R-kdmfl [kworker/R-kdmfl]
+    270       2 root     Thu Jul 16 05:31:24 2026 I<   kworker/R-raid5 [kworker/R-raid5]
+    311       2 root     Thu Jul 16 05:31:24 2026 S    jbd2/dm-0-8     [jbd2/dm-0-8]
+    312       2 root     Thu Jul 16 05:31:24 2026 I<   kworker/R-ext4- [kworker/R-ext4-]
+    381       1 root     Thu Jul 16 05:31:27 2026 S<s  systemd-journal /usr/lib/systemd/systemd-journald
+    430       2 root     Thu Jul 16 05:31:28 2026 I<   kworker/R-kmpat [kworker/R-kmpat]
+    431       2 root     Thu Jul 16 05:31:28 2026 I<   kworker/R-kmpat [kworker/R-kmpat]
+    432       1 root     Thu Jul 16 05:31:28 2026 SLsl multipathd      /sbin/multipathd -d -s
+    443       1 root     Thu Jul 16 05:31:29 2026 Ss   systemd-udevd   /usr/lib/systemd/systemd-udevd
+    469       2 root     Thu Jul 16 05:31:31 2026 S    psimon          [psimon]
+    528       2 root     Thu Jul 16 05:31:33 2026 S    irq/43-mei_me   [irq/43-mei_me]
+    609       2 root     Thu Jul 16 05:31:34 2026 I<   kworker/R-led_w [kworker/R-led_w]
+    707       2 root     Thu Jul 16 05:31:35 2026 I<   kworker/R-ttm   [kworker/R-ttm]
+    708       2 root     Thu Jul 16 05:31:35 2026 S    card1-crtc0     [card1-crtc0]
+    709       2 root     Thu Jul 16 05:31:35 2026 S    card1-crtc1     [card1-crtc1]
+    710       2 root     Thu Jul 16 05:31:35 2026 S    card1-crtc2     [card1-crtc2]
+    757       1 root     Thu Jul 16 05:31:35 2026 Ss   mount.ntfs      /sbin/mount.ntfs /dev/sdb1 /mnt/data2tb -o rw,uid=1000,gid=1002,umask=0002
+    758       2 root     Thu Jul 16 05:31:35 2026 S    nv_queue        [nv_queue]
+    759       2 root     Thu Jul 16 05:31:35 2026 S    nv_queue        [nv_queue]
+    760       1 root     Thu Jul 16 05:31:36 2026 Ss   mount.ntfs      /sbin/mount.ntfs /dev/sda1 /mnt/data4tb -o rw,uid=1000,gid=1002,umask=0002
+    788       2 root     Thu Jul 16 05:31:38 2026 S    nvidia-modeset/ [nvidia-modeset/kthread_q]
+    789       2 root     Thu Jul 16 05:31:38 2026 S    nvidia-modeset/ [nvidia-modeset/deferred_close_kthread_q]
+    810       2 root     Thu Jul 16 05:31:38 2026 S    UVM global queu [UVM global queue]
+    811       2 root     Thu Jul 16 05:31:38 2026 S    UVM deferred re [UVM deferred release queue]
+    812       2 root     Thu Jul 16 05:31:38 2026 S    UVM Tools Event [UVM Tools Event Queue]
+    824       2 root     Thu Jul 16 05:31:39 2026 S    jbd2/sdc2-8     [jbd2/sdc2-8]
+    825       2 root     Thu Jul 16 05:31:39 2026 I<   kworker/R-ext4- [kworker/R-ext4-]
+   1017       1 systemd+ Thu Jul 16 05:31:40 2026 Ss   systemd-network /usr/lib/systemd/systemd-networkd
+   1020       2 root     Thu Jul 16 05:31:41 2026 I<   kworker/R-cfg80 [kworker/R-cfg80]
+   1115       1 systemd+ Thu Jul 16 05:31:51 2026 Ss   systemd-resolve /usr/lib/systemd/systemd-resolved
+   1126       1 root     Thu Jul 16 05:31:51 2026 Ssl  accounts-daemon /usr/libexec/accounts-daemon
+   1128       1 root     Thu Jul 16 05:31:51 2026 Ss   cron            /usr/sbin/cron -f -P
+   1129       1 message+ Thu Jul 16 05:31:51 2026 Ss   dbus-daemon     @dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+   1148       1 jellyfin Thu Jul 16 05:31:51 2026 Ssl  jellyfin        /usr/bin/jellyfin --webdir=/usr/share/jellyfin/web --ffmpeg=/usr/lib/jellyfin-ffmpeg/ffmpeg
+   1154       1 polkitd  Thu Jul 16 05:31:51 2026 Ssl  polkitd         /usr/lib/polkit-1/polkitd --no-debug
+   1162       1 nvidia-+ Thu Jul 16 05:31:51 2026 Ss   nvidia-persiste /usr/bin/nvidia-persistenced --user nvidia-persistenced --no-persistence-mode --verbose
+   1164       1 root     Thu Jul 16 05:31:51 2026 Ss   smartd          /usr/sbin/smartd -n
+   1165       1 root     Thu Jul 16 05:31:51 2026 Ss   run-cups-browse /bin/sh /snap/cups/1225/scripts/run-cups-browsed
+   1166       1 root     Thu Jul 16 05:31:51 2026 Ss   run-cupsd       /bin/sh /snap/cups/1225/scripts/run-cupsd
+   1168       1 root     Thu Jul 16 05:31:51 2026 Ssl  snapd           /snap/snapd/current/usr/lib/snapd/snapd
+   1169       1 sonarr   Thu Jul 16 05:31:51 2026 Ssl  mono            /usr/bin/mono --debug /usr/lib/sonarr/bin/Sonarr.exe -nobrowser -data=/var/lib/sonarr
+   1171       1 root     Thu Jul 16 05:31:51 2026 Ss   systemd-logind  /usr/lib/systemd/systemd-logind
+   1173       1 root     Thu Jul 16 05:31:51 2026 Ssl  thermald        /usr/sbin/thermald --systemd --dbus-enable --adaptive
+   1174       1 jake     Thu Jul 16 05:31:51 2026 Ssl  tunarr-v1.2.7-l /opt/tunarr/tunarr-v1.2.7-linux-x64
+   1175       1 root     Thu Jul 16 05:31:51 2026 Ssl  udisksd         /usr/libexec/udisks2/udisksd
+   1191       1 root     Thu Jul 16 05:31:52 2026 Ss+  agetty          /sbin/agetty -o -p -- \u --noclear - linux
+   1194       1 syslog   Thu Jul 16 05:31:52 2026 Ssl  rsyslogd        /usr/sbin/rsyslogd -n -iNONE
+   1225       1 root     Thu Jul 16 05:31:52 2026 Ssl  unattended-upgr /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal
+   1338       1 root     Thu Jul 16 05:31:58 2026 Ssl  containerd      /usr/bin/containerd
+   1340       2 root     Thu Jul 16 05:31:58 2026 I<   kworker/R-wg-cr [kworker/R-wg-cr]
+   1360       1 root     Thu Jul 16 05:31:59 2026 Ssl  ModemManager    /usr/sbin/ModemManager
+   1400       1 root     Thu Jul 16 05:32:00 2026 Ss   nginx           nginx: master process /usr/sbin/nginx -g daemon on; master_process on;
+   1401    1400 www-data Thu Jul 16 05:32:00 2026 S    nginx           nginx: worker process
+   1402    1400 www-data Thu Jul 16 05:32:00 2026 S    nginx           nginx: worker process
+   1403    1400 www-data Thu Jul 16 05:32:00 2026 S    nginx           nginx: worker process
+   1404    1400 www-data Thu Jul 16 05:32:00 2026 S    nginx           nginx: worker process
+   1406       1 icecast2 Thu Jul 16 05:32:00 2026 Sl   icecast2        /usr/bin/icecast2 -b -c /etc/icecast2/icecast.xml
+   1408       1 jake     Thu Jul 16 05:32:00 2026 Ssl  cloudflared     /usr/local/bin/cloudflared --config /home/jake/.cloudflared/config.yml tunnel run
+   1410       1 debian-+ Thu Jul 16 05:32:00 2026 Ssl  transmission-da /usr/bin/transmission-daemon -f --log-level=error
+   1451       1 root     Thu Jul 16 05:32:06 2026 Ss   nmbd            /usr/sbin/nmbd --foreground --no-process-group
+   1465       1 root     Thu Jul 16 05:32:08 2026 Ss   smbd            /usr/sbin/smbd --foreground --no-process-group
+   1499    1465 root     Thu Jul 16 05:32:11 2026 S    smbd-notifyd    smbd: notifyd .
+   1500    1465 root     Thu Jul 16 05:32:11 2026 S    smbd-cleanupd   smbd: cleanupd 
+   1785       1 root     Thu Jul 16 05:32:49 2026 Ssl  dockerd         /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+   1972    1166 root     Thu Jul 16 05:33:11 2026 Sl   cupsd           cupsd -f -s /var/snap/cups/common/etc/cups/cups-files.conf -c /var/snap/cups/common/etc/cups/cupsd.conf
+   1989    1165 root     Thu Jul 16 05:33:11 2026 Sl   cups-browsed    cups-browsed -c /var/snap/cups/common/etc/cups/cups-browsed.conf
+   2127    1174 jake     Thu Jul 16 05:33:21 2026 Sl   meilisearch     /opt/tunarr/meilisearch --http-addr localhost:37291 --db-path /home/jake/.local/share/tunarr/data.ms --no-analytics --experimental-dumpless-upgrade --schedule-snapshot 14400 --snapshot-dir /home/jake/.local/share/tunarr/ms-snapshots
+   2642       1 root     Thu Jul 16 05:33:37 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 3209e28e6975239fe34cee8a1158e6f5b3528a917cd845507674ff7a5487779a -address /run/containerd/containerd.sock
+   2643       1 root     Thu Jul 16 05:33:37 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id d1a69371c5b36db2a3f9c3a5c678161d256e9ae3b6999a30f92a8d032ef28ce2 -address /run/containerd/containerd.sock
+   2645       1 root     Thu Jul 16 05:33:37 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 23d8624cd31446344aa24739f0342959b9f94f013ae710aa377a62f2c5acdf5f -address /run/containerd/containerd.sock
+   2647       1 root     Thu Jul 16 05:33:37 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 1fd819582d53d929e2aec4e5a99f5c83651c45b1b08cc975e773a355fcf23daf -address /run/containerd/containerd.sock
+   2648       1 root     Thu Jul 16 05:33:37 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id c11648a677e790873930a7edd4ab306750f534f88cda460b3afb2c9ec4dc1dea -address /run/containerd/containerd.sock
+   2655       1 root     Thu Jul 16 05:33:37 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id aa8dca84afb1dc08028f059d20abdd721d96b7c7a349cea5ba216dba5fd62dc8 -address /run/containerd/containerd.sock
+   2690       1 root     Thu Jul 16 05:33:37 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id a3e4821d29ac92b86fae1facd8c497f9984e11c211a707d7526dfab82a659ae0 -address /run/containerd/containerd.sock
+   2837    2645 www-data Thu Jul 16 05:33:38 2026 Ss   docker-init     /sbin/docker-init -- /start.sh
+   2838    2647 calenda+ Thu Jul 16 05:33:38 2026 Ss   docker-init     /sbin/docker-init -- /start.sh
+   2845    2642 samo     Thu Jul 16 05:33:38 2026 Ss   docker-init     /sbin/docker-init -- /start.sh
+   2857    2655 nobody   Thu Jul 16 05:33:38 2026 Ss   docker-init     /sbin/docker-init -- /start.sh
+   2861    2690 nobody   Thu Jul 16 05:33:38 2026 Ss   docker-init     /sbin/docker-init -- /start.sh
+   2877    2643 samo     Thu Jul 16 05:33:38 2026 Ss   docker-init     /sbin/docker-init -- /start.sh
+   2883    2648 jake     Thu Jul 16 05:33:38 2026 Ss   docker-init     /sbin/docker-init -- /start.sh supervisord -c /supervisord.conf
+   2899       1 root     Thu Jul 16 05:33:38 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 48581297bf3f25034cd0fc516115f31469d017ad5b224cf62739fadd927664fb -address /run/containerd/containerd.sock
+   2923    2899 root     Thu Jul 16 05:33:38 2026 Ss   s6-svscan       /package/admin/s6/command/s6-svscan -d4 -- /run/service
+   2983       1 root     Thu Jul 16 05:33:38 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 0f979baf7031762fcb94fff87ed213a1eb949565359d49b8b7403f172347f116 -address /run/containerd/containerd.sock
+   3009    2983 calenda+ Thu Jul 16 05:33:38 2026 Ss   tini            tini -- yarn start-prod
+   3026       1 root     Thu Jul 16 05:33:39 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 01412bc441fa3505e44809bca2e83581d980a41dd2bef31153faf8d2939d442b -address /run/containerd/containerd.sock
+   3050    3026 samo     Thu Jul 16 05:33:39 2026 Ssl  valkey-server   valkey-server *:6379
+   3071       1 root     Thu Jul 16 05:33:39 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id a513404fdbd56b98a2d17d4af24a277cab4f880ebb3582495d8ca6635d43f804 -address /run/containerd/containerd.sock
+   3101    3071 root     Thu Jul 16 05:33:39 2026 Ss   tini            tini -- python -m immich_ml
+   3167    1785 root     Thu Jul 16 05:33:39 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 9696 -container-ip 172.18.0.2 -container-port 9696 -use-listen-fd
+   3176       1 root     Thu Jul 16 05:33:40 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id c723feebf3c3670ba15f27e75a3de89099d4ce07bd26095f0c692058cca17c78 -address /run/containerd/containerd.sock
+   3199    3176 root     Thu Jul 16 05:33:40 2026 Ss   docker-init     /sbin/docker-init -- /start.sh /usr/bin/supervisord -c /supervisord.conf
+   3222       1 root     Thu Jul 16 05:33:40 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id ae8ca88fc7e733ced0210a5421cc2ae84defbd59a34fc0163923245410c9b3f9 -address /run/containerd/containerd.sock
+   3246    3222 www-data Thu Jul 16 05:33:40 2026 Ss   docker-init     /sbin/docker-init -- /start.sh /usr/bin/supervisord -c /supervisord.conf
+   3262       1 root     Thu Jul 16 05:33:40 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 1462d4da46715e06fafa051bee00814081afb95493ab57dfbfc606b046e4c1ad -address /run/containerd/containerd.sock
+   3286    3262 root     Thu Jul 16 05:33:40 2026 Ss   supervisord     /usr/bin/python3 /usr/bin/supervisord -c /supervisord.conf
+   3301       1 root     Thu Jul 16 05:33:40 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 9c740f368278ca02fa755d08200355c1b919a906d53e8ed30e4c92d024190f8f -address /run/containerd/containerd.sock
+   3324    3301 samo     Thu Jul 16 05:33:40 2026 Ss   postgres        postgres -c config_file=/etc/postgresql/postgresql.conf
+   3340       1 root     Thu Jul 16 05:33:40 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 12bcacd5d6f4ece3c92d91358bc859196a8c4bb08be3e31a8d5d9d6d4e77bf7b -address /run/containerd/containerd.sock
+   3364    3340 root     Thu Jul 16 05:33:40 2026 Ss   tini            tini -- /bin/bash -c start.sh
+   3441    1785 root     Thu Jul 16 05:33:43 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 22300 -container-ip 172.17.0.2 -container-port 22300 -use-listen-fd
+   3535    2837 www-data Thu Jul 16 05:33:45 2026 Sl   notify_push     /var/www/html/custom_apps/notify_push/bin/x86_64/notify_push --port 7867 /var/www/html/config/config.php
+   3588    2845 samo     Thu Jul 16 05:33:45 2026 Sl   redis-server    redis-server *:6379
+   3619    2838 calenda+ Thu Jul 16 05:33:45 2026 Sl   coolwsd         /usr/bin/coolwsd --version --use-env-vars --o:sys_template_path=/opt/cool/systemplate --o:child_root_path=/opt/cool/child-roots --o:file_server_root_path=/usr/share/coolwsd --o:cache_files.path=/opt/cool/cache --o:logging.color=false --o:stop_on_config_change=true --o:ssl.enable=false --o:ssl.termination=true --o:logging.disable_server_audit=true --o:welcome.enable=false --o:fetch_update_check=0 --o:allow_update_popup=false --o:security.seccomp=true --o:remote_font_config.url=https://cloud.turgonomics.com/apps/richdocuments/settings/fonts.json --o:net.post_allow.host[0]=.+ --o:logging.level=warning --o:logging.level_startup=warning
+   3620    2861 nobody   Thu Jul 16 05:33:45 2026 Sl   imaginary       imaginary -return-size -max-allowed-resolution 222.2 -key cdc0cd465d0dbc567206531a241d90ae0b1ff861ab7546b6
+   3631    1785 root     Thu Jul 16 05:33:46 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 3478 -container-ip 172.20.0.7 -container-port 3478 -use-listen-fd
+   3644    1785 root     Thu Jul 16 05:33:46 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto udp -host-ip 0.0.0.0 -host-port 3478 -container-ip 172.20.0.7 -container-port 3478 -use-listen-fd
+   3680    1785 root     Thu Jul 16 05:33:47 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 2283 -container-ip 172.21.0.4 -container-port 2283 -use-listen-fd
+   3693    3009 calenda+ Thu Jul 16 05:33:48 2026 Sl   MainThread      node /opt/yarn-v1.22.22/bin/yarn.js start-prod
+   3694    3101 root     Thu Jul 16 05:33:48 2026 Sl   python          python -m immich_ml
+   3713    2857 nobody   Thu Jul 16 05:33:49 2026 Sl   npm run server: npm run server:start
+   3728    2877 samo     Thu Jul 16 05:33:49 2026 S    start.sh        /bin/bash /start.sh
+   3754    2883 jake     Thu Jul 16 05:33:50 2026 S    supervisord     /usr/bin/python3 /usr/bin/supervisord -c /supervisord.conf
+   3784    1785 root     Thu Jul 16 05:33:51 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 8080 -container-ip 172.20.0.10 -container-port 8080 -use-listen-fd
+   3812    3199 root     Thu Jul 16 05:33:52 2026 S    supervisord     /usr/bin/python3 /usr/bin/supervisord -c /supervisord.conf
+   3813    3364 root     Thu Jul 16 05:33:53 2026 Sl   immich          immich
+   3820    1785 root     Thu Jul 16 05:33:53 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11000 -container-ip 172.20.0.11 -container-port 11000 -use-listen-fd
+   3853    3246 www-data Thu Jul 16 05:33:54 2026 S    supervisord     /usr/bin/python3 /usr/bin/supervisord -c /supervisord.conf
+   3919    3728 samo     Thu Jul 16 05:33:56 2026 S    postgres        postgres
+   3939    2923 root     Thu Jul 16 05:33:58 2026 S    s6-supervise    s6-supervise s6-linux-init-shutdownd
+   3949    3939 root     Thu Jul 16 05:33:58 2026 Ss   s6-linux-init-s /package/admin/s6-linux-init/command/s6-linux-init-shutdownd -d3 -c /run/s6/basedir -g 3000 -C -B
+   4034    3919 samo     Thu Jul 16 05:34:04 2026 Ss   postgres        postgres: io worker 0
+   4035    3919 samo     Thu Jul 16 05:34:04 2026 Ss   postgres        postgres: io worker 1
+   4036    3919 samo     Thu Jul 16 05:34:04 2026 Ss   postgres        postgres: io worker 2
+   4037    3919 samo     Thu Jul 16 05:34:04 2026 Ss   postgres        postgres: checkpointer 
+   4038    3919 samo     Thu Jul 16 05:34:04 2026 Ss   postgres        postgres: background writer 
+   4074    2923 root     Thu Jul 16 05:34:06 2026 S    s6-supervise    s6-supervise s6rc-oneshot-runner
+   4075    2923 root     Thu Jul 16 05:34:06 2026 S    s6-supervise    s6-supervise svc-prowlarr
+   4076    2923 root     Thu Jul 16 05:34:06 2026 S    s6-supervise    s6-supervise svc-cron
+   4077    2923 root     Thu Jul 16 05:34:06 2026 S    s6-supervise    s6-supervise s6rc-fdholder
+   4113    4074 root     Thu Jul 16 05:34:07 2026 Ss   s6-ipcserverd   /package/admin/s6/command/s6-ipcserverd -1 -- /package/admin/s6/command/s6-ipcserver-access -v0 -E -l0 -i data/rules -- /package/admin/s6/command/s6-sudod -t 30000 -- /package/admin/s6-rc/command/s6-rc-oneshot-run -l ../.. --
+   4159    3919 samo     Thu Jul 16 05:34:08 2026 Ss   postgres        postgres: walwriter 
+   4160    3919 samo     Thu Jul 16 05:34:08 2026 Ss   postgres        postgres: autovacuum launcher 
+   4161    3919 samo     Thu Jul 16 05:34:08 2026 Ss   postgres        postgres: logical replication launcher 
+   4316    4075 jake     Thu Jul 16 05:34:15 2026 Ssl  Prowlarr        /app/prowlarr/bin/Prowlarr -nobrowser -data=/config
+   4317    4076 root     Thu Jul 16 05:34:15 2026 Ss   busybox         busybox crond -f -S -l 5
+   4964    3693 calenda+ Thu Jul 16 05:34:38 2026 S    sh              /bin/sh -c pm2 kill && pm2 start --no-daemon --exp-backoff-restart-delay=1000 dist/app.js
+   5047    3754 jake     Thu Jul 16 05:34:41 2026 Sl   nats-server     nats-server -c /etc/nats.conf
+   5048    3754 jake     Thu Jul 16 05:34:41 2026 Sl   beam.smp        /opt/eturnal/bin/eturnal -Bd -- -root /opt/eturnal -bindir /opt/eturnal/erts-15.2.6/bin -progname opt/eturnal/bin/eturnal -- -home /home/eturnal -- -noshell -noinput -boot /opt/eturnal/releases/1.12.2/start -mode embedded -boot_var SYSTEM_LIB_DIR /opt/eturnal/lib -config /opt/eturnal/releases/1.12.2/sys.config -name eturnal@127.0.0.1 -kernel inet_dist_use_interface {127,0,0,1} -setcookie eturnal -- -erl_epmd_port 3470 -start_epmd false -- foreground --
+   5049    3754 jake     Thu Jul 16 05:34:41 2026 Sl   janus           janus --config=/conf/janus.jcfg --disable-colors --log-stdout --full-trickle --debug-level 3
+   5050    3754 jake     Thu Jul 16 05:34:41 2026 Sl   nextcloud-spree nextcloud-spreed-signaling -config /conf/signaling.conf
+   5125    3324 samo     Thu Jul 16 05:34:43 2026 Ssl  postgres        postgres: vectors 
+   5221    5048 jake     Thu Jul 16 05:34:46 2026 Ss   erl_child_setup erl_child_setup 200000
+   5634    5221 jake     Thu Jul 16 05:34:58 2026 Ss   inet_gethost    /opt/eturnal/erts-15.2.6/bin/inet_gethost 4
+   5635    5634 jake     Thu Jul 16 05:34:58 2026 S    inet_gethost    /opt/eturnal/erts-15.2.6/bin/inet_gethost 4
+   5970    4964 calenda+ Thu Jul 16 05:35:14 2026 Sl   MainThread      /usr/local/bin/node /usr/local/bin/pm2 start --no-daemon --exp-backoff-restart-delay=1000 dist/app.js
+   5983    5970 calenda+ Thu Jul 16 05:35:14 2026 Ssl  node /opt/pm2/m node /opt/pm2/modules/pm2-logrotate/node_modules/pm2-logrotate/app.js
+   5994    5970 calenda+ Thu Jul 16 05:35:14 2026 Ssl  node /home/jopl node /home/joplin/packages/server/dist/app.js
+   6021    3694 root     Thu Jul 16 05:35:15 2026 S    python          python -m gunicorn immich_ml.main:app -k immich_ml.config.CustomUvicornWorker -c /usr/src/immich_ml/gunicorn_conf.py -b [::]:3003 -w 1 -t 300 --log-config-json /usr/src/immich_ml/log_conf.json --keep-alive 2 --graceful-timeout 10 --no-control-socket
+   6048    3713 nobody   Thu Jul 16 05:35:15 2026 Sl   node-MainThread node websocket_server/main.js
+   6261    3286 root     Thu Jul 16 05:35:22 2026 S    backup-time-fil /bin/bash /backup-time-file-watcher.sh
+   6262    3286 www-data Thu Jul 16 05:35:22 2026 Sl   caddy           /usr/bin/caddy run --config /acme.Caddyfile
+   6263    3286 www-data Thu Jul 16 05:35:22 2026 Sl   caddy           /usr/bin/caddy run --config /internal.Caddyfile
+   6264    3286 root     Thu Jul 16 05:35:22 2026 S    cron.sh         /bin/bash /cron.sh
+   6265    3286 www-data Thu Jul 16 05:35:22 2026 S    php             php -S 127.0.0.1:9876 /var/www/docker-aio/php/domain-validator.php
+   6270    3286 root     Thu Jul 16 05:35:22 2026 S    php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+   6274    3286 www-data Thu Jul 16 05:35:22 2026 S    session-dedupli /bin/bash /session-deduplicator.sh
+   6838       1 root     Thu Jul 16 05:35:42 2026 Ssl  upowerd         /usr/libexec/upowerd
+   7466    3324 samo     Thu Jul 16 05:36:07 2026 Ss   postgres        postgres: checkpointer 
+   7467    3324 samo     Thu Jul 16 05:36:07 2026 Ss   postgres        postgres: background writer 
+   7468    3324 samo     Thu Jul 16 05:36:07 2026 Ss   postgres        postgres: walwriter 
+   7469    3324 samo     Thu Jul 16 05:36:07 2026 Ss   postgres        postgres: autovacuum launcher 
+   7470    3324 samo     Thu Jul 16 05:36:07 2026 Ss   postgres        postgres: stats collector 
+   7471    3324 samo     Thu Jul 16 05:36:07 2026 Ss   postgres        postgres: logical replication launcher 
+   7962    3619 calenda+ Thu Jul 16 05:36:23 2026 S    forkit          /usr/bin/coolforkit-caps --systemplate=/opt/cool/systemplate --lotemplate=/opt/collaboraoffice --childroot=/opt/cool/child-roots/7-4BE05BE0/ --clientport=9980 --masterport=coolwsd-fdObI67D --rlimits=limit_virt_mem_mb:0;limit_stack_mem_kb:8000;limit_file_size_mb:0;limit_num_open_files:0 --version --ui=default
+   8798       2 root     Thu Jul 16 05:36:55 2026 I<   kworker/R-tls-s [kworker/R-tls-s]
+   9004    3812 www-data Thu Jul 16 05:37:11 2026 S    cron.sh         /bin/bash /cron.sh
+   9006    3812 root     Thu Jul 16 05:37:11 2026 S    php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+   9007    3812 www-data Thu Jul 16 05:37:11 2026 S    run-exec-comman /bin/bash /run-exec-commands.sh
+   9044    9006 www-data Thu Jul 16 05:37:13 2026 S    php-fpm         php-fpm: pool www
+   9479    3813 root     Thu Jul 16 05:37:27 2026 Sl   immich-api      immich-api
+   9499    3853 www-data Thu Jul 16 05:37:29 2026 S    httpd           httpd -DFOREGROUND
+   9500    3853 www-data Thu Jul 16 05:37:29 2026 Sl   caddy           /usr/bin/caddy run --config /tmp/Caddyfile
+   9533    9499 www-data Thu Jul 16 05:37:30 2026 Sl   httpd           httpd -DFOREGROUND
+   9534    9499 www-data Thu Jul 16 05:37:30 2026 Sl   httpd           httpd -DFOREGROUND
+   9539    9499 www-data Thu Jul 16 05:37:30 2026 Sl   httpd           httpd -DFOREGROUND
+   9859    9007 www-data Thu Jul 16 05:37:47 2026 S    sleep           sleep inf
+  10188    9006 www-data Thu Jul 16 05:37:59 2026 S    php-fpm         php-fpm: pool www
+  10211    9499 www-data Thu Jul 16 05:38:00 2026 Sl   httpd           httpd -DFOREGROUND
+  10442       1 root     Thu Jul 16 05:38:15 2026 Ss   sshd            sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+  12375    7962 calenda+ Thu Jul 16 05:39:40 2026 S    kit_spare_022   /usr/bin/coolforkit-caps --systemplate=/opt/cool/systemplate --lotemplate=/opt/collaboraoffice --childroot=/opt/cool/child-roots/7-4BE05BE0/ --clientport=9980 --masterport=coolwsd-fdObI67D --rlimits=limit_virt_mem_mb:0;limit_stack_mem_kb:8000;limit_file_size_mb:0;limit_num_open_files:0 --version --ui=default
+  15891    7962 calenda+ Thu Jul 16 05:42:14 2026 S    kit_spare_023   /usr/bin/coolforkit-caps --systemplate=/opt/cool/systemplate --lotemplate=/opt/collaboraoffice --childroot=/opt/cool/child-roots/7-4BE05BE0/ --clientport=9980 --masterport=coolwsd-fdObI67D --rlimits=limit_virt_mem_mb:0;limit_stack_mem_kb:8000;limit_file_size_mb:0;limit_num_open_files:0 --version --ui=default
+  15892    7962 calenda+ Thu Jul 16 05:42:14 2026 S    kit_spare_024   /usr/bin/coolforkit-caps --systemplate=/opt/cool/systemplate --lotemplate=/opt/collaboraoffice --childroot=/opt/cool/child-roots/7-4BE05BE0/ --clientport=9980 --masterport=coolwsd-fdObI67D --rlimits=limit_virt_mem_mb:0;limit_stack_mem_kb:8000;limit_file_size_mb:0;limit_num_open_files:0 --version --ui=default
+  15893    7962 calenda+ Thu Jul 16 05:42:14 2026 S    kit_spare_025   /usr/bin/coolforkit-caps --systemplate=/opt/cool/systemplate --lotemplate=/opt/collaboraoffice --childroot=/opt/cool/child-roots/7-4BE05BE0/ --clientport=9980 --masterport=coolwsd-fdObI67D --rlimits=limit_virt_mem_mb:0;limit_stack_mem_kb:8000;limit_file_size_mb:0;limit_num_open_files:0 --version --ui=default
+  17530       1 root     Thu Jul 16 05:43:30 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 43f5203d326537ea3eaa98392b247e8b9af6a68a9cf7001268fb59fdb371e5cd -address /run/containerd/containerd.sock
+  17554   17530 samo     Thu Jul 16 05:43:30 2026 Ss   postgres        postgres
+  17609   17554 samo     Thu Jul 16 05:43:31 2026 Ss   postgres        postgres: checkpointer 
+  17610   17554 samo     Thu Jul 16 05:43:31 2026 Ss   postgres        postgres: background writer 
+  17612   17554 samo     Thu Jul 16 05:43:31 2026 Ss   postgres        postgres: walwriter 
+  17613   17554 samo     Thu Jul 16 05:43:31 2026 Ss   postgres        postgres: autovacuum launcher 
+  17614   17554 samo     Thu Jul 16 05:43:31 2026 Ss   postgres        postgres: logical replication launcher 
+  24452    9006 www-data Thu Jul 16 05:49:03 2026 S    php-fpm         php-fpm: pool www
+  24453    9006 www-data Thu Jul 16 05:49:03 2026 S    php-fpm         php-fpm: pool www
+  24454    9006 www-data Thu Jul 16 05:49:03 2026 S    php-fpm         php-fpm: pool www
+  24455    9006 www-data Thu Jul 16 05:49:03 2026 S    php-fpm         php-fpm: pool www
+  26771       1 root     Thu Jul 16 05:51:19 2026 Ssl  fwupd           /usr/libexec/fwupd/fwupd
+  36035    9006 www-data Thu Jul 16 05:59:40 2026 S    php-fpm         php-fpm: pool www
+  49295    1465 jake     Thu Jul 16 06:12:08 2026 S    smbd[192.168.1. smbd: client [192.168.1.159]
+  52622       1 jake     Thu Jul 16 06:14:49 2026 SLsl liquidsoap      /usr/bin/liquidsoap /home/jake/radio/diamond-city-radio.liq
+  52625       1 jake     Thu Jul 16 06:14:49 2026 SLsl liquidsoap      /usr/bin/liquidsoap /home/jake/radio/artbell.liq
+  52626       1 jake     Thu Jul 16 06:14:49 2026 SLsl liquidsoap      /usr/bin/liquidsoap /home/jake/radio/stations/radio-classics.liq
+  52628       1 jake     Thu Jul 16 06:14:49 2026 SLsl liquidsoap      /usr/bin/liquidsoap /home/jake/radio/radio-new-vegas.liq
+ 231288    9006 www-data Thu Jul 16 09:04:58 2026 S    php-fpm         php-fpm: pool www
+ 860639       1 jake     Thu Jul 16 18:58:04 2026 Ss   systemd         /usr/lib/systemd/systemd --user
+ 860640  860639 jake     Thu Jul 16 18:58:04 2026 S    (sd-pam)        (sd-pam)
+ 889702  860639 jake     Thu Jul 16 19:24:21 2026 Ss   dbus-daemon     /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+ 893692       1 calenda+ Thu Jul 16 19:28:07 2026 Ss   dbus-daemon     /usr/bin/dbus-daemon --syslog --fork --print-pid 4 --print-address 6 --session
+ 995555       1 calenda+ Thu Jul 16 21:05:41 2026 Ssl  protonmail-brid /usr/bin/protonmail-bridge --noninteractive --log-level info
+ 995563  995555 calenda+ Thu Jul 16 21:05:41 2026 Sl   bridge          /usr/lib/protonmail/bridge/bridge --noninteractive --log-level info --session-id 20260716_210541808 --launcher /usr/lib/protonmail/bridge/proton-bridge
+ 995581       1 calenda+ Thu Jul 16 21:05:42 2026 Ss   dbus-daemon     /usr/bin/dbus-daemon --syslog --fork --print-pid 4 --print-address 6 --session
+1129850       1 _chrony  Thu Jul 16 23:08:13 2026 S    chronyd         /usr/sbin/chronyd -F 1
+1129851 1129850 _chrony  Thu Jul 16 23:08:13 2026 S    chronyd         /usr/sbin/chronyd -F 1
+1232893       1 calenda+ Fri Jul 17 00:33:31 2026 Ss   systemd         /usr/lib/systemd/systemd --user
+1232896 1232893 calenda+ Fri Jul 17 00:33:31 2026 S    (sd-pam)        (sd-pam)
+1233126 1232893 calenda+ Fri Jul 17 00:33:37 2026 Ss   dbus-daemon     /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+1393118    6021 root     Fri Jul 17 01:41:22 2026 Sl   python          python -m gunicorn immich_ml.main:app -k immich_ml.config.CustomUvicornWorker -c /usr/src/immich_ml/gunicorn_conf.py -b [::]:3003 -w 1 -t 300 --log-config-json /usr/src/immich_ml/log_conf.json --keep-alive 2 --graceful-timeout 10 --no-control-socket
+1487184 1232893 calenda+ Fri Jul 17 03:05:34 2026 Ssl  at-spi-bus-laun /usr/libexec/at-spi-bus-launcher
+1487191 1487184 calenda+ Fri Jul 17 03:05:34 2026 S    dbus-daemon     /usr/bin/dbus-daemon --config-file=/usr/share/defaults/at-spi2/accessibility.conf --nofork --print-address 11 --address=unix:path=/run/user/1001/at-spi/bus_0
+1681211    3812 www-data Fri Jul 17 05:37:12 2026 S    timeout         timeout 86400 nc -lk 9001
+1681212 1681211 www-data Fri Jul 17 05:37:12 2026 S    nc              nc -lk 9001
+1781721       2 root     Fri Jul 17 06:55:43 2026 S    psimon          [psimon]
+2358310   10442 root     Fri Jul 17 14:36:41 2026 Ss   sshd            sshd: jake [priv]
+2358422 2358310 jake     Fri Jul 17 14:36:43 2026 S    sshd            sshd: jake@pts/0
+2358423 2358422 jake     Fri Jul 17 14:36:43 2026 Ss   bash            -bash
+2503003       2 root     Fri Jul 17 16:34:48 2026 I    kworker/u8:0-ev [kworker/u8:0-events_power_efficient]
+2543256       2 root     Fri Jul 17 17:07:22 2026 I    kworker/u8:7-ev [kworker/u8:7-events_unbound]
+2544465       1 root     Fri Jul 17 17:08:07 2026 Sl   containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 8440d941c78d469287388d9941d935ec5cc6b118fca078801c438c5b19ab4ab2 -address /run/containerd/containerd.sock
+2544489 2544465 samo     Fri Jul 17 17:08:07 2026 Ssl  samo-server     /usr/local/bin/samo-server
+2544521    1785 root     Fri Jul 17 17:08:08 2026 Sl   docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 6969 -container-ip 172.22.0.3 -container-port 6969 -use-listen-fd
+2544576   17554 samo     Fri Jul 17 17:08:10 2026 Ss   postgres        postgres: samo samo 172.22.0.3(49246) idle
+2555598    3324 samo     Fri Jul 17 17:16:59 2026 Ss   postgres        postgres: postgres immich 172.21.0.4(49240) idle
+2573929   17554 samo     Fri Jul 17 17:32:04 2026 Ss   postgres        postgres: samo samo 172.22.0.3(37962) idle
+2577579       2 root     Fri Jul 17 17:35:01 2026 I    kworker/u8:1-ev [kworker/u8:1-events_power_efficient]
+2578024       2 root     Fri Jul 17 17:35:21 2026 I    kworker/0:1-wg- [kworker/0:1-wg-crypt-proton]
+2578143       2 root     Fri Jul 17 17:35:28 2026 I    kworker/3:1-wg- [kworker/3:1-wg-crypt-proton]
+2578517       2 root     Fri Jul 17 17:35:48 2026 I    kworker/2:2-eve [kworker/2:2-events]
+2581364       2 root     Fri Jul 17 17:38:07 2026 I    kworker/1:4-wg- [kworker/1:4-wg-crypt-proton]
+2581530   17554 samo     Fri Jul 17 17:38:13 2026 Ss   postgres        postgres: samo samo 172.22.0.3(43350) idle
+2581560       2 root     Fri Jul 17 17:38:15 2026 I    kworker/3:2-eve [kworker/3:2-events]
+2588077       2 root     Fri Jul 17 17:43:41 2026 I    kworker/1:0-eve [kworker/1:0-events]
+2595254       2 root     Fri Jul 17 17:49:31 2026 I    kworker/u8:4-fl [kworker/u8:4-flush-252:0]
+2595259       2 root     Fri Jul 17 17:49:31 2026 I    kworker/2:3-wg- [kworker/2:3-wg-crypt-proton]
+2596212       2 root     Fri Jul 17 17:49:50 2026 I    kworker/1:2-wg- [kworker/1:2-wg-crypt-proton]
+2596787       2 root     Fri Jul 17 17:50:13 2026 I    kworker/0:3-wg- [kworker/0:3-wg-crypt-proton]
+2597705       1 calenda+ Fri Jul 17 17:50:48 2026 Ss   node            /opt/node-v22.23.1-linux-x64/bin/node --run server
+2597708 2597705 calenda+ Fri Jul 17 17:50:48 2026 S    sh              /bin/sh -c node ./serveronly
+2597709 2597708 calenda+ Fri Jul 17 17:50:48 2026 Sl   node            node ./serveronly
+2597846       1 root     Fri Jul 17 17:50:49 2026 Ssl  lightdm         /usr/sbin/lightdm
+2597856 2597846 root     Fri Jul 17 17:50:49 2026 Ssl+ Xorg            /usr/lib/xorg/Xorg -core :0 -seat seat0 -auth /var/run/lightdm/root/:0 -nolisten tcp vt7 -novtswitch
+2597944       2 root     Fri Jul 17 17:50:50 2026 S    irq/47-nvidia   [irq/47-nvidia]
+2597945       2 root     Fri Jul 17 17:50:50 2026 S    nvidia          [nvidia]
+2597946       2 root     Fri Jul 17 17:50:50 2026 S    nv_queue        [nv_queue]
+2597953 2597846 root     Fri Jul 17 17:50:51 2026 Sl   lightdm         lightdm --session-child 13 16
+2597960 2597953 calenda+ Fri Jul 17 17:50:51 2026 Ssl  openbox         /usr/bin/openbox --startup /usr/lib/x86_64-linux-gnu/openbox-autostart OPENBOX
+2597998 2597960 calenda+ Fri Jul 17 17:50:52 2026 S    unclutter       /usr/bin/unclutter -idle 1 -root
+2598019       1 calenda+ Fri Jul 17 17:50:52 2026 S    bash            bash /usr/local/bin/calendar-kiosk
+2598020       1 calenda+ Fri Jul 17 17:50:52 2026 S    bash            bash /usr/local/bin/magicmirror-native-clock-launcher
+2598047 2598019 calenda+ Fri Jul 17 17:50:52 2026 Sl   chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --password-store=basic --gtk-version=3 --disable-features=TFLiteLanguageDetectionEnabled --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --kiosk --app=http://127.0.0.1:43761/?kiosk_session=1784310652616947992 --no-first-run --no-default-browser-check --noerrdialogs --disable-session-crashed-bubble --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-application-cache --disk-cache-size=1 --media-cache-size=1 --disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion --disable-pinch --overscroll-history-navigation=0 --password-store=basic
+2598132       1 calenda+ Fri Jul 17 17:50:52 2026 Sl   chrome_crashpad /snap/chromium/3491/usr/lib/chromium-browser/chrome_crashpad_handler --monitor-self --monitor-self-annotation=ptype=crashpad-handler --database=/home/calendar-display/snap/chromium/common/chromium/Crash Reports --annotation=channel=snap --annotation=lsb-release=Ubuntu Core 24 --annotation=plat=Linux --annotation=prod=Chrome_Linux --annotation=ver=150.0.7871.114 --initial-client-fd=5 --shared-client-connection
+2598134       1 calenda+ Fri Jul 17 17:50:52 2026 S    chrome_crashpad /snap/chromium/3491/usr/lib/chromium-browser/chrome_crashpad_handler --no-periodic-tasks --monitor-self-annotation=ptype=crashpad-handler --database=/home/calendar-display/snap/chromium/common/chromium/Crash Reports --annotation=channel=snap --annotation=lsb-release=Ubuntu Core 24 --annotation=plat=Linux --annotation=prod=Chrome_Linux --annotation=ver=150.0.7871.114 --initial-client-fd=4 --shared-client-connection
+2598138 2598047 calenda+ Fri Jul 17 17:50:52 2026 S    chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=zygote --no-zygote-sandbox --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable
+2598139 2598047 calenda+ Fri Jul 17 17:50:52 2026 S    chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=zygote --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable
+2598141 2598139 calenda+ Fri Jul 17 17:50:52 2026 S    chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=zygote --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable
+2598179 2598138 calenda+ Fri Jul 17 17:50:52 2026 Sl   chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=gpu-process --ozone-platform=x11 --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --metrics-shmem-handle=4,i,16402469244909207670,1884604941002060051,262144 --field-trial-handle=3,i,13622157427417869370,6970220051879215397,262144 --disable-features=CalculateNativeWinOcclusion,Translate,TranslateUI --variations-seed-version --pseudonymization-salt-handle=7,i,7108568684336847392,4149314732141747164,4 --trace-process-track-uuid=3190708988185955192
+2598181 2598047 calenda+ Fri Jul 17 17:50:52 2026 Sl   chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,16266093795356746308,18091370223488388806,524288 --field-trial-handle=3,i,13622157427417869370,6970220051879215397,262144 --disable-features=CalculateNativeWinOcclusion,Translate,TranslateUI --variations-seed-version --pseudonymization-salt-handle=7,i,7108568684336847392,4149314732141747164,4 --trace-process-track-uuid=3190708989122997041
+2598192 2598141 calenda+ Fri Jul 17 17:50:52 2026 Sl   chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=utility --utility-sub-type=storage.mojom.StorageService --lang=en-US --service-sandbox-type=utility --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,7361466529771697779,16168965427041151042,524288 --field-trial-handle=3,i,13622157427417869370,6970220051879215397,262144 --disable-features=CalculateNativeWinOcclusion,Translate,TranslateUI --variations-seed-version --pseudonymization-salt-handle=7,i,7108568684336847392,4149314732141747164,4 --trace-process-track-uuid=3190708990060038890
+2598207 2598141 calenda+ Fri Jul 17 17:50:52 2026 Sl   chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=renderer --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable --disable-background-timer-throttling --ozone-platform=x11 --lang=en-US --num-raster-threads=2 --enable-main-frame-before-activation --renderer-client-id=6 --time-ticks-at-unix-epoch=-1784179882154535 --launch-time-ticks=130770958196 --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,18052483694196053076,14231282255571702486,2097152 --field-trial-handle=3,i,13622157427417869370,6970220051879215397,262144 --disable-features=CalculateNativeWinOcclusion,Translate,TranslateUI --variations-seed-version --pseudonymization-salt-handle=7,i,7108568684336847392,4149314732141747164,4 --trace-process-track-uuid=3190708991934122588
+2598208 2598141 calenda+ Fri Jul 17 17:50:52 2026 Sl   chrome          /snap/chromium/3491/usr/lib/chromium-browser/chrome --type=renderer --crashpad-handler-pid=2598132 --enable-crash-reporter=,snap --noerrdialogs --user-data-dir=/home/calendar-display/snap/chromium/common/magicmirror-kiosk-chrony --change-stack-guard-on-fork=enable --disable-background-timer-throttling --ozone-platform=x11 --lang=en-US --num-raster-threads=2 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1784179882154535 --launch-time-ticks=130770959789 --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,2559101710202528450,10783301141226995973,2097152 --field-trial-handle=3,i,13622157427417869370,6970220051879215397,262144 --disable-features=CalculateNativeWinOcclusion,Translate,TranslateUI --variations-seed-version --pseudonymization-salt-handle=7,i,7108568684336847392,4149314732141747164,4 --trace-process-track-uuid=3190708990997080739
+2598291 2598020 calenda+ Fri Jul 17 17:50:54 2026 Sl   magicmirror-nat /usr/local/bin/magicmirror-native-clock
+2599807    9004 www-data Fri Jul 17 17:52:12 2026 S    sleep           sleep 5m
+2603785       2 root     Fri Jul 17 17:55:21 2026 I    kworker/2:0-eve [kworker/2:0-events]
+2603875   17554 samo     Fri Jul 17 17:55:27 2026 Ss   postgres        postgres: samo samo 172.22.0.3(36410) idle
+2604399       2 root     Fri Jul 17 17:55:53 2026 I    kworker/0:0-eve [kworker/0:0-events]
+2604501    6264 root     Fri Jul 17 17:56:02 2026 S    sleep           sleep 30
+2604551       2 root     Fri Jul 17 17:56:03 2026 I    kworker/3:0-wg- [kworker/3:0-wg-crypt-proton]
+2604665 2358423 root     Fri Jul 17 17:56:10 2026 S+   sudo            sudo bash
+2604666 2604665 root     Fri Jul 17 17:56:10 2026 Ss+  sudo            sudo bash
+2604667 2604666 root     Fri Jul 17 17:56:10 2026 S    bash            bash
+2604688    6261 root     Fri Jul 17 17:56:11 2026 S    sleep           sleep 2
+2604771    6274 www-data Fri Jul 17 17:56:12 2026 S    sleep           sleep 2
+2604836 2598020 calenda+ Fri Jul 17 17:56:12 2026 S    sleep           sleep 1
+2604876 2604667 root     Fri Jul 17 17:56:12 2026 R    ps              ps -eo pid,ppid,user,lstart,stat,comm,args --sort=lstart

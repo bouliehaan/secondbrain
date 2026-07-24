@@ -1,0 +1,15 @@
+$ dpkg-query -W conky conky-all picom libxosd2 xosd-bin chromium-browser python3-gi gir1.2-gtk-3.0 libcairo2 libpango-1.0-0 openbox lightdm chrony
+
+dpkg-query: no packages found matching xosd-bin
+dpkg-query: no packages found matching chromium-browser
+chrony	4.5-1ubuntu4.2
+conky	
+conky-all	1.19.6-1build3
+gir1.2-gtk-3.0:amd64	3.24.41-4ubuntu1.3
+libcairo2:amd64	1.18.0-3build1
+libpango-1.0-0:amd64	1.52.1+ds-1build1
+libxosd2	2.2.14-2.1build1
+lightdm	1.30.0-0ubuntu14
+openbox	3.6.1-12build5
+picom	10.2-3build2
+python3-gi	3.48.2-1
