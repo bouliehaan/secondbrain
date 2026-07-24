@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "baseUrl": "https://cloud.example.com",
+  "username": "jake",
+  "password": "<REDACTED_SECRET>",
+  "cardDavUrl": "",
+  "cacheMinutes": 15,
+  "timeoutMs": 15000
+}

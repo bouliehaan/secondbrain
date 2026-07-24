@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "alias": "personal",
+  "displayName": "<REDACTED_EMAIL>",
+  "host": "127.0.0.1",
+  "port": 1143,
+  "secure": false,
+  "rejectUnauthorized": false,
+  "username": "<REDACTED_EMAIL>",
+  "password": "<REDACTED_SECRET>",
+  "mailbox": "All Mail",
+  "maxAgeDays": 14,
+  "maxResults": 8
+}

@@ -1,0 +1,499 @@
+/******************************************************************************
+ * MAGICMIRROR CALENDAR DISPLAY
+ *
+ * Large month calendar on the left.
+ * Clock, weather, forecast and upcoming events on the right.
+ ******************************************************************************/
+
+:root {
+  --dashboard-edge: 12px;
+  --dashboard-gap: 20px;
+  --dashboard-sidebar: 420px;
+  --dashboard-module-gap: 14px;
+
+  --gap-body-top: 0px;
+  --gap-body-right: 0px;
+  --gap-body-bottom: 0px;
+  --gap-body-left: 0px;
+  --gap-modules: 0px;
+}
+
+html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+body {
+  position: fixed !important;
+  inset: 0 !important;
+
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+
+  overflow: hidden !important;
+  background: #000;
+}
+
+/*
+ * The stock calendar remains active as the event provider, but it should not
+ * have any visible output.
+ */
+.calendar-source {
+  display: none !important;
+}
+
+/******************************************************************************
+ * PAGE LAYOUT
+ *
+ * MagicMirror nests top_right inside top_bar. Fixed positioning removes the
+ * sidebar from that nested region geometry and anchors it to the viewport.
+ ******************************************************************************/
+
+.region.bottom.bar {
+  position: fixed !important;
+
+  top: var(--dashboard-edge) !important;
+  right: calc(
+    var(--dashboard-edge) +
+    var(--dashboard-sidebar) +
+    var(--dashboard-gap)
+  ) !important;
+  bottom: var(--dashboard-edge) !important;
+  left: var(--dashboard-edge) !important;
+
+  width: auto !important;
+  height: auto !important;
+
+  text-align: left !important;
+  transform: none !important;
+  overflow: hidden !important;
+
+  z-index: 1;
+}
+
+.region.top.right {
+  position: fixed !important;
+
+  top: var(--dashboard-edge) !important;
+  right: var(--dashboard-edge) !important;
+  bottom: var(--dashboard-edge) !important;
+  left: auto !important;
+
+  width: var(--dashboard-sidebar) !important;
+  height: auto !important;
+
+  text-align: left !important;
+  transform: none !important;
+  overflow: hidden !important;
+
+  z-index: 2;
+}
+
+.region.bottom.bar > .container,
+.region.top.right > .container {
+  box-sizing: border-box;
+
+  width: 100%;
+  height: 100%;
+
+  min-width: 0;
+  min-height: 0;
+}
+
+.region.bottom.bar > .container {
+  display: block !important;
+}
+
+.region.top.right > .container {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+
+  gap: var(--dashboard-module-gap) !important;
+}
+
+.region.top.right .module {
+  box-sizing: border-box;
+
+  width: 100%;
+  min-width: 0;
+
+  margin: 0 !important;
+  text-align: left;
+}
+
+/******************************************************************************
+ * MONTH CALENDAR
+ *
+ * The actual .week nodes divide the available height equally. This works for
+ * four-, five- and six-row months without assigning height to every weekGrid.
+ ******************************************************************************/
+
+.region.bottom.bar .module.MMM-CalendarExt3 {
+  display: flex !important;
+  flex-direction: column !important;
+
+  box-sizing: border-box;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0;
+  min-height: 0;
+
+  margin: 0 !important;
+}
+
+.region.bottom.bar .module.MMM-CalendarExt3 > header {
+  flex: 0 0 auto;
+
+  margin: 0 5px 8px;
+  padding: 0 0 6px;
+
+  border-bottom: 1px solid #555;
+
+  font-size: 28px;
+  line-height: 32px;
+
+  color: #fff;
+  text-align: left;
+  text-transform: none;
+}
+
+.region.bottom.bar .module.MMM-CalendarExt3 > .module-content {
+  flex: 1 1 auto;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+}
+
+.CX3.bodice {
+  display: flex !important;
+  flex-direction: column !important;
+
+  box-sizing: border-box;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+
+  --cellheaderheight: 31px;
+  --cellfooterheight: 0px;
+  --celllinecolor: #3b3b3b;
+  --cellbgcolor: rgba(255, 255, 255, 0.025);
+}
+
+/* Used only when CalendarExt3 customHeader is enabled. */
+.CX3 > .headerTitle {
+  flex: 0 0 auto;
+
+  margin: 0 5px 8px;
+
+  font-size: 28px;
+  line-height: 32px;
+
+  color: #fff;
+  text-align: left;
+}
+
+/*
+ * This selector targets only the Sunday-Saturday header, even though
+ * CalendarExt3 also gives it the weekGrid class.
+ */
+.CX3 > .headerContainer {
+  flex: 0 0 34px !important;
+
+  height: 34px !important;
+  min-height: 34px !important;
+
+  margin: 0 !important;
+  padding: 0 5px !important;
+
+  align-items: center;
+}
+
+.CX3 > .headerContainer .weekday {
+  align-self: center;
+
+  font-size: 17px;
+  line-height: 34px;
+
+  text-align: center;
+  text-transform: uppercase;
+
+  color: #bdbdbd;
+}
+
+/*
+ * These are the real month rows.
+ */
+.CX3 > .week {
+  flex: 1 1 0 !important;
+
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+
+  padding: 0 5px !important;
+  overflow: hidden !important;
+}
+
+.CX3 > .week > .cellContainer {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.CX3 > .week > .cellContainer > .cell {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.CX3 > .week > .eventContainer {
+  top: var(--cellheaderheight) !important;
+  bottom: var(--cellfooterheight) !important;
+
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.CX3 > .week > .eventContainer.weekGridRow {
+  grid-template-rows: repeat(
+    var(--weekeventlines, var(--maxeventlines)),
+    [event-start] minmax(0, 1fr) [event-end]
+  ) !important;
+}
+
+.CX3 .cellBody {
+  height: calc(
+    100% -
+    var(--cellheaderheight) -
+    var(--cellfooterheight)
+  ) !important;
+}
+
+.CX3 .cellHeader {
+  height: var(--cellheaderheight) !important;
+
+  padding: 3px 6px !important;
+  line-height: 24px;
+}
+
+.CX3 .cellFooter {
+  height: var(--cellfooterheight) !important;
+  padding: 0 !important;
+}
+
+.CX3 .event {
+  min-height: 0;
+
+  margin: 1px 2px;
+  padding: 0 3px;
+
+  align-items: center;
+}
+
+.CX3 .event .headline {
+  min-width: 0;
+}
+
+.CX3 .event .headline .title {
+  min-width: 0;
+  font-size: 76%;
+}
+
+.CX3 .event .headline .time,
+.CX3 .event .headline .symbol {
+  flex: 0 0 auto;
+}
+
+.CX3 .today .cellDate {
+  border-radius: 7px;
+  padding: 2px 8px;
+}
+
+/******************************************************************************
+ * RIGHT SIDEBAR
+ ******************************************************************************/
+
+.region.top.right > .container > .module.clock,
+.region.top.right > .container > .module.weather {
+  flex: 0 0 auto;
+}
+
+/******************************************************************************
+ * CLOCK
+ ******************************************************************************/
+
+.region.top.right .clock {
+  text-align: right !important;
+}
+
+.region.top.right .clock .time {
+  font-size: 62px;
+  line-height: 0.95;
+
+  letter-spacing: -2px;
+  color: #fff;
+}
+
+.region.top.right .clock .date {
+  margin-top: 5px;
+
+  font-size: 20px;
+  line-height: 1.15;
+
+  color: #aaa;
+}
+
+/******************************************************************************
+ * WEATHER
+ ******************************************************************************/
+
+.region.top.right .weather {
+  text-align: right !important;
+}
+
+.region.top.right .weather table {
+  width: 100%;
+}
+
+.region.top.right .module.weather > header,
+.region.top.right .module.MMM-CalendarExt3Agenda > header {
+  margin: 0 0 5px;
+  padding-bottom: 4px;
+
+  font-size: 14px;
+  line-height: 18px;
+}
+
+/******************************************************************************
+ * UPCOMING EVENT AGENDA
+ *
+ * The agenda receives every remaining pixel beneath the clock and weather.
+ ******************************************************************************/
+
+.region.top.right .module.MMM-CalendarExt3Agenda,
+.region.top.right .module.side-agenda {
+  display: flex !important;
+  flex: 1 1 0 !important;
+  flex-direction: column !important;
+
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.region.top.right .module.MMM-CalendarExt3Agenda > .module-content,
+.region.top.right .module.side-agenda > .module-content {
+  flex: 1 1 auto !important;
+
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.CX3A.bodice {
+  display: flex !important;
+  flex-direction: column !important;
+
+  box-sizing: border-box;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+
+  gap: 0 !important;
+  overflow: hidden !important;
+
+  font-size: 16px;
+}
+
+/*
+ * The main display already contains a full monthly calendar.
+ */
+.CX3A .miniMonth {
+  display: none !important;
+}
+
+.CX3A .agenda {
+  display: block !important;
+  flex: 1 1 auto !important;
+
+  min-height: 0 !important;
+  max-height: none !important;
+
+  overflow: hidden !important;
+
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+
+.CX3A .agenda .cell {
+  margin: 0 !important;
+  padding: 7px 0 8px !important;
+
+  border-bottom: 1px solid #343434 !important;
+}
+
+.CX3A .cellHeader {
+  margin-bottom: 4px;
+}
+
+.CX3A .cellHeaderMain {
+  gap: 5px;
+
+  font-size: 15px;
+  line-height: 18px;
+}
+
+.CX3A .cellBody {
+  line-height: 1.15;
+}
+
+.CX3A .event {
+  margin: 3px 0;
+}
+
+.CX3A .event .headline {
+  align-items: baseline;
+  gap: 6px;
+
+  min-width: 0;
+}
+
+.CX3A .event .time {
+  flex: 0 0 auto;
+
+  min-width: 64px;
+
+  font-size: 12px;
+  color: #aaa;
+}
+
+.CX3A .event .title {
+  min-width: 0;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  color: #fff;
+}
+
+.CX3A .event .description,
+.CX3A .event .location {
+  display: none !important;
+}

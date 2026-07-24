@@ -1,0 +1,35 @@
+PATH: /usr/local/bin/magicmirror-native-clock-launcher
+
+  File: /usr/local/bin/magicmirror-native-clock-launcher
+  Size: 1239      	Blocks: 8          IO Block: 4096   regular file
+Device: 252,0	Inode: 819796      Links: 1
+Access: (0755/-rwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-07-17 03:48:44.407918585 +0000
+Modify: 2026-07-17 02:55:40.075314775 +0000
+Change: 2026-07-17 03:48:41.225881792 +0000
+ Birth: 2026-07-17 03:33:02.697305893 +0000
+
+/usr/local/bin/magicmirror-native-clock-launcher: Bourne-Again shell script, ASCII text executable
+
+4a953387e1288c4874b087d95c36ca49793e25e9c6b210d5ad94cd4a71dc40d6  /usr/local/bin/magicmirror-native-clock-launcher
+
+	not a dynamic executable
+
+SELECTED STRINGS
+----------------
+LOG="$CACHE_DIR/magicmirror-native-clock.log"
+LOCK="$CACHE_DIR/magicmirror-native-clock.lock"
+if [[ -r /etc/default/magicmirror-native-clock ]]; then
+    source /etc/default/magicmirror-native-clock
+export TZ="${MM_CLOCK_TZ:-America/Denver}"
+        sleep 0.25
+[[:space:]]*# is created, placing the native clock over the kiosk.
+    sleep 2
+    /usr/local/bin/magicmirror-native-clock \
+    CLOCK_PID=$!
+    while kill -0 "$CLOCK_PID" 2>/dev/null; do
+            kill "$CLOCK_PID" 2>/dev/null || true
+            wait "$CLOCK_PID" 2>/dev/null || true
+        sleep 1
+    wait "$CLOCK_PID" 2>/dev/null || true
+    sleep 1

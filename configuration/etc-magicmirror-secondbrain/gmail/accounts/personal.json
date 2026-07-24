@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "alias": "personal",
+  "displayName": "<REDACTED_EMAIL>",
+  "email": "<REDACTED_EMAIL>",
+  "host": "imap.gmail.com",
+  "port": 993,
+  "secure": true,
+  "rejectUnauthorized": true,
+  "username": "<REDACTED_EMAIL>",
+  "password": "<REDACTED_SECRET>",
+  "importantMailbox": "Wall-Display",
+  "maxAgeDays": 14,
+  "maxResults": 8,
+  "monitorVoice": true,
+  "voiceMailbox": "INBOX",
+  "voiceMaxAgeMinutes": 240,
+  "voiceMaxResults": 100
+}

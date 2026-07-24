@@ -1,0 +1,158 @@
+$ lsmod
+
+Module                  Size  Used by
+cpuid                  12288  0
+tcp_diag               12288  0
+inet_diag              28672  1 tcp_diag
+hid_logitech_hidpp     65536  0
+joydev                 32768  0
+input_leds             12288  0
+hid_logitech_dj        36864  0
+hid_generic            12288  0
+usbhid                 77824  2 hid_logitech_dj,hid_logitech_hidpp
+hid                   180224  4 usbhid,hid_generic,hid_logitech_dj,hid_logitech_hidpp
+tls                   155648  1
+nf_conntrack_netlink    57344  0
+xt_nat                 12288  76
+veth                   45056  0
+xt_MASQUERADE          16384  6
+bridge                425984  0
+stp                    12288  1 bridge
+llc                    16384  2 bridge,stp
+xfrm_user              61440  1
+xfrm_algo              16384  1 xfrm_user
+xt_set                 20480  0
+ip_set                 61440  1 xt_set
+nft_chain_nat          12288  39
+nf_nat                 61440  3 xt_nat,nft_chain_nat,xt_MASQUERADE
+qrtr                   53248  2
+nft_fib_ipv4           12288  1
+nft_ct                 24576  4
+nft_fib_ipv6           12288  1
+nft_fib                12288  2 nft_fib_ipv6,nft_fib_ipv4
+wireguard             114688  0
+overlay               212992  18
+curve25519_x86_64      36864  1 wireguard
+libchacha20poly1305    16384  1 wireguard
+chacha_x86_64          32768  1 libchacha20poly1305
+poly1305_x86_64        28672  1 libchacha20poly1305
+libcurve25519_generic    49152  2 curve25519_x86_64,wireguard
+libchacha              12288  1 chacha_x86_64
+ip6_udp_tunnel         16384  1 wireguard
+udp_tunnel             32768  1 wireguard
+cfg80211             1368064  0
+ip6t_REJECT            12288  1
+nf_reject_ipv6         24576  1 ip6t_REJECT
+xt_hl                  12288  22
+ip6t_rt                16384  3
+ipt_REJECT             12288  1
+nf_reject_ipv4         12288  1 ipt_REJECT
+xt_LOG                 16384  12
+nf_log_syslog          20480  12
+nft_limit              16384  15
+xt_limit               12288  0
+xt_addrtype            12288  8
+xt_tcpudp              16384  60
+xt_conntrack           12288  18
+nf_conntrack          196608  6 xt_conntrack,nf_nat,nft_ct,xt_nat,nf_conntrack_netlink,xt_MASQUERADE
+nf_defrag_ipv6         24576  1 nf_conntrack
+nf_defrag_ipv4         12288  1 nf_conntrack
+nft_compat             20480  207
+nf_tables             380928  1739 nft_ct,nft_compat,nft_fib_ipv6,nft_fib_ipv4,nft_chain_nat,nft_limit,nft_fib
+binfmt_misc            24576  1
+nls_iso8859_1          12288  1
+nvidia_uvm           1421312  0
+nvidia_drm             77824  2
+nvidia_modeset       1212416  3 nvidia_drm
+nvidia              35643392  102 nvidia_uvm,nvidia_modeset
+i915                 4288512  12
+drm_buddy              20480  1 i915
+ttm                   110592  1 i915
+drm_display_helper    237568  1 i915
+intel_rapl_msr         20480  0
+intel_rapl_common      40960  1 intel_rapl_msr
+at24                   28672  0
+x86_pkg_temp_thermal    20480  0
+cec                    94208  2 drm_display_helper,i915
+intel_powerclamp       24576  0
+eeepc_wmi              12288  0
+rc_core                73728  1 cec
+mfd_aaeon              12288  0
+coretemp               24576  0
+mei_pxp                16384  0
+mei_hdcp               28672  0
+snd_soc_rt5640        155648  0
+snd_hda_codec_realtek   208896  1
+snd_soc_rl6231         16384  1 snd_soc_rt5640
+snd_hda_codec_hdmi     94208  2
+snd_hda_codec_generic   122880  1 snd_hda_codec_realtek
+asus_wmi               86016  2 eeepc_wmi,mfd_aaeon
+rapl                   20480  0
+snd_hda_intel          61440  0
+snd_intel_dspcfg       36864  1 snd_hda_intel
+snd_intel_sdw_acpi     16384  1 snd_intel_dspcfg
+i2c_algo_bit           16384  1 i915
+snd_hda_codec         204800  4 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec_realtek
+snd_soc_core          442368  1 snd_soc_rt5640
+intel_cstate           24576  0
+snd_compress           28672  1 snd_soc_core
+ac97_bus               12288  1 snd_soc_core
+snd_hda_core          139264  5 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_hda_codec_realtek
+i2c_i801               36864  0
+ledtrig_audio          12288  1 asus_wmi
+wmi_bmof               12288  0
+sparse_keymap          12288  1 asus_wmi
+i2c_smbus              16384  1 i2c_i801
+platform_profile       12288  1 asus_wmi
+snd_pcm_dmaengine      16384  1 snd_soc_core
+snd_hwdep              20480  1 snd_hda_codec
+snd_pcm               192512  8 snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_soc_rt5640,snd_compress,snd_soc_core,snd_hda_core,snd_pcm_dmaengine
+mxm_wmi                12288  0
+mei_me                 53248  2
+snd_timer              49152  1 snd_pcm
+lpc_ich                32768  0
+snd                   143360  10 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hwdep,snd_hda_intel,snd_hda_codec,snd_hda_codec_realtek,snd_timer,snd_compress,snd_soc_core,snd_pcm
+soundcore              16384  1 snd
+mei                   172032  5 mei_hdcp,mei_pxp,mei_me
+mac_hid                12288  0
+acpi_pad              184320  0
+sch_fq_codel           24576  2
+msr                    12288  0
+dm_multipath           45056  0
+efi_pstore             12288  0
+nfnetlink              20480  7 nft_compat,nf_conntrack_netlink,nf_tables,ip_set
+dmi_sysfs              24576  0
+ip_tables              32768  0
+x_tables               65536  14 xt_conntrack,nft_compat,xt_LOG,xt_tcpudp,xt_addrtype,xt_nat,ip6t_rt,xt_set,ipt_REJECT,ip_tables,xt_limit,xt_hl,xt_MASQUERADE,ip6t_REJECT
+autofs4                57344  2
+btrfs                2056192  0
+blake2b_generic        24576  0
+raid10                 77824  0
+raid456               196608  0
+async_raid6_recov      20480  1 raid456
+async_memcpy           16384  2 raid456,async_raid6_recov
+async_pq               20480  2 raid456,async_raid6_recov
+async_xor              16384  3 async_pq,raid456,async_raid6_recov
+async_tx               16384  5 async_pq,async_memcpy,async_xor,raid456,async_raid6_recov
+xor                    20480  2 async_xor,btrfs
+raid6_pq              126976  4 async_pq,btrfs,raid456,async_raid6_recov
+libcrc32c              12288  5 nf_conntrack,nf_nat,btrfs,nf_tables,raid456
+raid1                  61440  0
+raid0                  24576  0
+crct10dif_pclmul       12288  1
+crc32_pclmul           12288  0
+polyval_clmulni        12288  0
+polyval_generic        12288  1 polyval_clmulni
+ghash_clmulni_intel    16384  0
+ahci                   49152  7
+sha256_ssse3           32768  0
+sha1_ssse3             32768  0
+libahci                53248  1 ahci
+e1000e                356352  0
+xhci_pci               24576  0
+xhci_pci_renesas       20480  1 xhci_pci
+video                  77824  3 asus_wmi,i915,nvidia_modeset
+wmi                    28672  5 video,asus_wmi,wmi_bmof,mfd_aaeon,mxm_wmi
+aesni_intel           356352  0
+crypto_simd            16384  1 aesni_intel
+cryptd                 24576  2 crypto_simd,ghash_clmulni_intel

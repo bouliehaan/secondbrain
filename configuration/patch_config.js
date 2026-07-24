@@ -1,0 +1,18 @@
+const fs = require('fs');
+const path = "test_config.js";
+let content = fs.readFileSync(path, 'utf8');
+
+if (!content.includes('eventFilter:')) {
+  content = content.replace(
+    'instanceId: "upcomingAgenda",',
+    'instanceId: "upcomingAgenda",\n        eventFilter: (ev) => { return ev.endDate > Date.now(); },'
+  );
+  fs.writeFileSync(path, content, 'utf8');
+} else {
+  // If we already inserted a broken one, replace it
+  content = content.replace(
+    /eventFilter:\s*\(ev\)\s*=>\s*\{.*?\},/s,
+    'eventFilter: (ev) => { return ev.endDate > Date.now(); },'
+  );
+  fs.writeFileSync(path, content, 'utf8');
+}

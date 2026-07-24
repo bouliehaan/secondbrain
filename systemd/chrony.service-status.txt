@@ -1,0 +1,24 @@
+● chrony.service - chrony, an NTP client/server
+     Loaded: loaded (/usr/lib/systemd/system/chrony.service; enabled; preset: enabled)
+     Active: active (running) since Thu 2026-07-16 23:08:13 UTC; 18h ago
+       Docs: man:chronyd(8)
+             man:chronyc(1)
+             man:chrony.conf(5)
+   Main PID: 1129850 (chronyd)
+      Tasks: 2 (limit: 18943)
+     Memory: 960.0K (peak: 2.4M swap: 712.0K swap peak: 748.0K)
+        CPU: 189ms
+     CGroup: /system.slice/chrony.service
+             ├─1129850 /usr/sbin/chronyd -F 1
+             └─1129851 /usr/sbin/chronyd -F 1
+
+Jul 16 23:08:13 server chronyd[1129850]: chronyd version 4.5 starting (+CMDMON +NTP +REFCLOCK +RTC +PRIVDROP +SCFILTER +SIGND +ASYNCDNS +NTS +SECHASH +IPV6 -DEBUG)
+Jul 16 23:08:13 server chronyd[1129850]: Loaded 0 symmetric keys
+Jul 16 23:08:13 server chronyd[1129850]: Frequency -12.639 +/- 1000000.000 ppm read from /var/lib/chrony/chrony.drift
+Jul 16 23:08:13 server chronyd[1129850]: Using right/UTC timezone to obtain leap second data
+Jul 16 23:08:13 server chronyd[1129850]: Loaded seccomp filter (level 1)
+Jul 16 23:08:13 server systemd[1]: Started chrony.service - chrony, an NTP client/server.
+Jul 16 23:10:24 server chronyd[1129850]: Selected source 132.163.97.1 (time-a-wwv.nist.gov)
+Jul 16 23:10:24 server chronyd[1129850]: System clock TAI offset set to 37 seconds
+Jul 17 00:05:13 server chronyd[1129850]: Selected source 132.163.96.2 (time-b-b.nist.gov)
+Jul 17 12:08:51 server chronyd[1129850]: Selected source 132.163.96.2 (time-b-b.nist.gov)

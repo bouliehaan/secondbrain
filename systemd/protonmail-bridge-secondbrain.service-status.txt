@@ -1,0 +1,15 @@
+● protonmail-bridge-secondbrain.service - Proton Mail Bridge for MagicMirror Second Brain
+     Loaded: loaded (/etc/systemd/system/protonmail-bridge-secondbrain.service; enabled; preset: enabled)
+     Active: active (running) since Thu 2026-07-16 21:05:41 UTC; 20h ago
+   Main PID: 995555 (protonmail-brid)
+      Tasks: 18 (limit: 18943)
+     Memory: 24.0M (peak: 26.2M swap: 3.7M swap peak: 3.8M)
+        CPU: 1min 4.196s
+     CGroup: /system.slice/protonmail-bridge-secondbrain.service
+             ├─995555 /usr/bin/protonmail-bridge --noninteractive --log-level info
+             ├─995563 /usr/lib/protonmail/bridge/bridge --noninteractive --log-level info --session-id 20260716_210541808 --launcher /usr/lib/protonmail/bridge/proton-bridge
+             └─995581 /usr/bin/dbus-daemon --syslog --fork --print-pid 4 --print-address 6 --session
+
+Jul 16 21:05:41 server systemd[1]: Started protonmail-bridge-secondbrain.service - Proton Mail Bridge for MagicMirror Second Brain.
+Jul 16 21:05:42 server dbus-daemon[995581]: [session uid=1001 pid=995579] AppArmor D-Bus mediation is enabled
+Jul 16 21:05:43 server protonmail-bridge[995563]: WARN[Jul 16 21:05:43.920] Failed to add test credentials to keychain    error="failed to open secretservice session: The name org.freedesktop.secrets was not provided by any .service files" helper="*keychain.SecretServiceDBusHelper"

@@ -1,0 +1,16 @@
+● lightdm.service - Light Display Manager
+     Loaded: loaded (/usr/lib/systemd/system/lightdm.service; indirect; preset: enabled)
+     Active: active (running) since Fri 2026-07-17 17:50:49 UTC; 5min ago
+       Docs: man:lightdm(1)
+    Process: 2597843 ExecStartPre=/bin/sh -c [ "$(basename $(cat /etc/X11/default-display-manager 2>/dev/null))" = "lightdm" ] (code=exited, status=0/SUCCESS)
+   Main PID: 2597846 (lightdm)
+      Tasks: 8 (limit: 18943)
+     Memory: 99.0M (peak: 115.2M)
+        CPU: 46.771s
+     CGroup: /system.slice/lightdm.service
+             ├─2597846 /usr/sbin/lightdm
+             └─2597856 /usr/lib/xorg/Xorg -core :0 -seat seat0 -auth /var/run/lightdm/root/:0 -nolisten tcp vt7 -novtswitch
+
+Jul 17 17:50:49 server systemd[1]: Starting lightdm.service - Light Display Manager...
+Jul 17 17:50:49 server systemd[1]: Started lightdm.service - Light Display Manager.
+Jul 17 17:50:51 server lightdm[2597953]: pam_unix(lightdm-autologin:session): session opened for user calendar-display(uid=1001) by (uid=0)
