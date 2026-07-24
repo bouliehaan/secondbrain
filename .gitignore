@@ -1,30 +1,34 @@
-# Ignore EVERYTHING by default to prevent accidental leaks
-*
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-error.log*
 
-# Allow directories to be searched
-!*/
+# Real credentials. Only *.example.json templates belong in the repo.
+# Live secrets live on the mirror at /etc/magicmirror-secondbrain/
+config/secondbrain/**/*.json
+!config/secondbrain/**/*.example.json
 
-# Explicitly allow ONLY these specific files:
-!.gitignore
-!commit.sh
+# Runtime state written by the module on the mirror
+package_state.json
 
-# Re-ignore OS and temp files
+# Logs and captures
+*.log
+logs/
+screenshot/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editor / OS
 .DS_Store
-.DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
-ehthumbs.db
 Thumbs.db
-node_modules/
-npm-debug.log
-yarn-error.log
-package-lock.json
-yarn.lock
-*.log
-*.png
-*.jpg
-*.jpeg
-*.gif
-.env
-.env.*
+*.swp
+
+# Ad-hoc rescue copies. Git history is the version control now.
+*.before-*
+*.bak
+*.orig

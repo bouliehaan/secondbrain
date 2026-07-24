@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -u
+
+CACHE_DIR="$HOME/.cache"
+LOG="$CACHE_DIR/magicmirror-native-clock.log"
+LOCK="$CACHE_DIR/magicmirror-native-clock.lock"
+CHROME_PATTERN='--app=http://127\.0\.0\.1:43761'
+
+mkdir -p "$CACHE_DIR"
+
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+
+: > "$LOG"
+
+if [[ -r /etc/default/magicmirror-native-clock ]]; then
+    set -a
+    source /etc/default/magicmirror-native-clock
+    set +a
+fi
+
+export TZ="${MM_CLOCK_TZ:-America/Denver}"
+
+while true; do
+    until pgrep \
+        -u "$(id -u)" \
+        -f -- "$CHROME_PATTERN" \
+        >/dev/null
+    do
+        sleep 0.25
+    done
+
+[[:space:]]*#
+[[:space:]]*# Chromium is already mapped before the unmanaged OSD
+[[:space:]]*# is created, placing the native clock over the kiosk.
+[[:space:]]*#/
+    sleep 2
+
+    /usr/local/bin/magicmirror-native-clock \
+        >>"$LOG" 2>&1 &
+
+    CLOCK_PID=$!
+
+    while kill -0 "$CLOCK_PID" 2>/dev/null; do
+        if ! pgrep \
+            -u "$(id -u)" \
+            -f -- "$CHROME_PATTERN" \
+            >/dev/null
+        then
+            kill "$CLOCK_PID" 2>/dev/null || true
+            wait "$CLOCK_PID" 2>/dev/null || true
+            break
+        fi
+
+        sleep 1
+    done
+
+    wait "$CLOCK_PID" 2>/dev/null || true
+    sleep 1
+done

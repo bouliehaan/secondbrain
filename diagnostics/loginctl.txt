@@ -1,0 +1,8 @@
+$ loginctl list-sessions
+
+SESSION  UID USER             SEAT  TTY  STATE   IDLE SINCE
+    124 1000 jake             -     -    closing no   -
+    280 1000 jake             -     -    active  no   -
+    c51 1001 calendar-display seat0 tty7 active  no   -
+
+3 sessions listed.

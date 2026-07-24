@@ -1,0 +1,604 @@
+/* stylelint-disable
+value-no-vendor-prefix, property-no-vendor-prefix, custom-property-pattern,
+selector-class-pattern, selector-id-pattern, no-descending-specificity,
+selector-pseudo-class-no-unknown, keyframes-name-pattern,
+*/
+
+.CX3 {
+  /* you CAN modify these values; but SHOULD NOT to remove */
+  --celllinecolor: #333;
+  --cellbgcolor: rgb(0 0 0 / 20%);
+  --cellheaderheight: 25px;
+  --cellfooterheight: 2px;
+  --defaultcolor: #fff;
+  --eventheight: calc(var(--fontsize) + 4px);
+  --displayEndTime: none;
+  --displayWeatherTemp: none;
+
+  font-size: var(--fontsize);
+  color: var(--defaultcolor);
+  line-height: calc(var(--eventheight));
+}
+
+.CX3 * {
+  box-sizing: border-box;
+}
+
+.CX3_MAGIC {
+  display: none;
+}
+
+.CX3.bodice {
+  width: 100%;
+}
+
+.CX3 .week {
+  width: 100%;
+  padding: 0 5px;
+  height: calc(
+    var(--cellheaderheight) + var(--cellfooterheight) +
+      calc(var(--eventheight) * var(--weekeventlines, var(--maxeventlines)))
+  );
+  position: relative;
+}
+
+.CX3 .weekGrid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(7, [cell-start] 1fr [cell-end]);
+  grid-auto-columns: 0fr;
+}
+
+.CX3 .weekGridRow {
+  grid-template-rows: repeat(
+    var(--weekeventlines, var(--maxeventlines)),
+    [event-start] minmax(0, 1fr) [event-end]
+  );
+  grid-auto-rows: 0;
+  overflow-y: hidden;
+}
+
+.CX3 .cellContainer {
+  width: 100%;
+  height: calc(
+    var(--cellheaderheight) + var(--cellfooterheight) +
+      calc(var(--eventheight) * var(--weekeventlines, var(--maxeventlines)))
+  );
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.CX3 .eventContainer {
+  z-index: 20;
+  position: absolute;
+  bottom: var(--cellfooterheight);
+  left: 0;
+  width: 100%;
+  height: calc(var(--eventheight) * var(--weekeventlines, var(--maxeventlines)));
+}
+
+.CX3 .cell {
+  border: 1px solid var(--celllinecolor);
+  background-color: var(--cellbgcolor);
+  height: calc(
+    var(--cellheaderheight) + var(--cellfooterheight) +
+      calc(var(--eventheight) * var(--weekeventlines, var(--maxeventlines)))
+  );
+  position: relative;
+}
+
+.CX3 .cell.hasMore::after {
+  counter-reset: more var(--more);
+  content: counter(more);
+  display: block;
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  color: black;
+  font-weight: bold;
+  font-size: 14px;
+  border-radius: 9px;
+  background-color: white;
+  z-index: 30;
+  text-align: center;
+  line-height: 18px;
+}
+
+.CX3 .cellHeader {
+  text-align: right;
+  height: var(--cellheaderheight);
+  padding: 2px;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  font-size: 90%;
+}
+
+.CX3 .cellFooter {
+  text-align: left;
+  height: var(--cellfooterheight);
+  padding: 2px;
+}
+
+.CX3 .cellBody {
+  height: calc(var(--eventheight) * var(--weekeventlines, var(--maxeventlines)));
+}
+
+.CX3 .cw {
+  font-size: 80%;
+  color: goldenrod;
+  margin-right: 5px;
+}
+
+.CX3 .cw:not(.cwFirst) {
+  display: none;
+}
+
+.CX3 .cw::before {
+  content: "CW";
+  margin-right: 5px;
+}
+
+.CX3 .cellContainer .cell:nth-child(1) .cw {
+  display: inherit;
+}
+
+.CX3 .cell.today {
+  border: 1px solid #fff;
+}
+
+.CX3 .today .cellDate {
+  font-weight: bold;
+  background-color: white;
+  color: black;
+  border-radius: 8px;
+  padding: 1px 8px;
+  margin: 1px;
+  line-height: 100%;
+}
+
+.CX3 .thisMonth {
+  background-color: rgb(255 255 255 / 10%);
+}
+
+.CX3 .cellDate .literal {
+  margin-right: 3px;
+}
+
+.CX3 .cellDate :not(.day) {
+  display: none;
+}
+
+.CX3 .today .cellDate :not(.day) {
+  display: inline-block;
+}
+
+.CX3 .date_1 .cellDate :not(.day) {
+  display: inline-block;
+}
+
+.CX3 .week:nth-child(2) .cell:first-child .cellDate * {
+  display: inline-block;
+}
+
+.CX3 .event {
+  margin: 1px 2px;
+  padding: 0 2px;
+  text-align: left;
+  grid-row: span 1;
+  color: var(--defaultcolor);
+  display: flex;
+  justify-content: flex-start;
+  gap: 2px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+  position: relative;
+}
+
+.CX3 .event .headline {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.CX3 .event .headline .title.marquee {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: unset;
+  position: relative;
+  contain: layout style;
+}
+
+.CX3 .event .headline .title.marquee .marqueeText {
+  display: inline-block;
+  white-space: nowrap;
+  overflow: unset;
+  animation: marquee calc(var(--marqueeLength) / 10) linear 2s infinite;
+  min-width: 0;
+}
+
+/* Pause marquee animation when hidden */
+.CX3.hidden .event .headline .title.marquee .marqueeText,
+.CX3[style*="display: none"] .event .headline .title.marquee .marqueeText,
+.CX3[style*="visibility: hidden"] .event .headline .title.marquee .marqueeText {
+  animation-play-state: paused;
+}
+
+@keyframes marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  49.999% {
+    transform: translate3d(calc(var(--marqueeScroll) * -1), 0, 0);
+  }
+
+  50% {
+    transform: translate3d(var(--marqueeOffset), 0, 0);
+  }
+
+  60% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  100% {
+    /* waiting */
+  }
+}
+
+.CX3 .event .time {
+  font-size: 75%;
+  width: fit-content;
+}
+
+.CX3 .event .headline .title {
+  font-size: 75%;
+  font-weight: bold;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  padding-left: 2px;
+  order: 3;
+}
+
+.CX3 .event .headline .symbol {
+  order: 1;
+}
+
+.CX3 .event .headline .time {
+  order: 2;
+  display: inline-block;
+}
+
+.CX3 .event.fullday,
+.CX3 .event.multiday {
+  background-color: var(--calendarColor);
+  mix-blend-mode: difference;
+  border-radius: 4px;
+  color: var(--oppositeColor);
+}
+
+.CX3 .event.singleday .headline:not(.useSymbol)::before,
+.CX3 .event.singleday .headline.useSymbol .symbol.noSymbol::before {
+  content: "⬤";
+  color: var(--calendarColor);
+  display: inline-block;
+  padding-right: 2px;
+  font-size: 75%;
+}
+
+.CX3 .event .headline:not(.useSymbol) .symbol {
+  display: none;
+}
+
+.CX3 .event .headline.useSymbol .symbol {
+  display: inline-block;
+  padding-right: 2px;
+  font-size: 75%;
+  align-self: center;
+}
+
+.CX3 .event.singleday .headline.useSymbol .symbol {
+  color: var(--calendarColor);
+}
+
+.CX3 .event.singleday .headline .time {
+  display: inline-block;
+  padding-right: 2px;
+  font-size: 75%;
+  color: var(--defaultColor);
+}
+
+.CX3 .event.multiday .headline .startTime {
+  display: inline-block;
+  padding-right: 2px;
+  font-size: 75%;
+  color: var(--oppositeColor);
+}
+
+.CX3 .event .time.notInDay {
+  display: none;
+}
+
+.CX3 .event .time.endTime {
+  display: var(--displayEndTime);
+}
+
+.CX3 .event:not(.fullday) .headline .time.endTime {
+  display: var(--displayEndTime);
+}
+
+.CX3 .event .startTime::after {
+  display: var(--displayEndTime);
+  content: " -";
+}
+
+.CX3 .event .startTime.notInDay + .endTime.inDay::before {
+  display: var(--displayEndTime);
+  content: "- ";
+}
+
+.CX3 .event.continueFromPreviousWeek .headline .time {
+  display: none;
+}
+
+.CX3 .event.multiday:not(.continueToNextWeek) .headline .endTime {
+  display: inherit;
+  order: 4;
+  margin-left: auto;
+}
+
+.CX3 .event.multiday.fullday .headline .time {
+  display: none;
+}
+
+.CX3 .event.fullday .headline .time {
+  display: none;
+}
+
+.CX3 .event .description,
+.CX3 .event .location {
+  display: none;
+}
+
+.CX3 .event.passed {
+  filter: brightness(0.8) grayscale(0.5);
+}
+
+.CX3 .event.current {
+  filter: saturate(2);
+}
+
+.CX3 .weekend {
+  color: crimson;
+  font-weight: bold;
+}
+
+.CX3 .weekend_2 {
+  color: crimson;
+}
+
+.CX3 .weekend_1 {
+  color: dodgerblue;
+}
+
+.CX3 .cellHeader .cellDate {
+  flex-grow: 3;
+}
+
+.CX3 .cellHeader .cellWeather {
+  color: white;
+  margin: 2px;
+  font-size: 100%;
+  align-self: center;
+}
+
+.CX3 .cellHeader .cellWeather .icon {
+  font-size: 100%;
+  font-weight: bold;
+}
+
+.CX3 .cellHeader .cellWeather .maxTemp {
+  color: white;
+  font-weight: bold;
+  font-size: 90%;
+}
+
+.CX3 .cellHeader .cellWeather .minTemp {
+  color: darkgray;
+  font-weight: normal;
+}
+
+.CX3 .cellHeader .cellWeather .temperature {
+  display: var(--displayWeatherTemp);
+  padding-left: 5px;
+  font-size: 90%;
+}
+
+.CX3 .cellHeader .cellWeather .maxTemp::before {
+  content: " \25b2";
+}
+
+.CX3 .cellHeader .cellWeather .minTemp::before {
+  content: " \25bc";
+}
+
+.CX3 .cellHeader .cellWeather .temperature::after {
+  content: "° ";
+}
+
+.CX3 .legends {
+  display: flex;
+  flex-direction: row;
+  gap: 5px;
+  justify-content: center;
+  padding: 10px;
+}
+
+.CX3 .legends .legend {
+  font-size: 75%;
+  background-color: var(--calendarColor);
+  color: var(--oppositeColor);
+  padding: 2px 5px;
+  border-radius: 5px;
+  display: block;
+}
+
+.CX3 .legend.useSymbol .symbol {
+  display: inline-block;
+  padding-right: 2px;
+  font-size: 90%;
+  align-self: center;
+}
+
+/* popover */
+
+#CX3_POPOVER {
+  max-width: 50%;
+  min-width: 25%;
+  height: fit-content;
+  max-height: calc(max(fit-content, 80%) - 20px);
+  background-color: white;
+  border-radius: 10px;
+  position: absolute;
+  box-shadow: 5px 5px 20px 0 #000;
+  font-size: 90%;
+}
+
+#CX3_POPOVER[popover] {
+  padding: 0;
+}
+
+#CX3_POPOVER:popover-open {
+  animation: slideIn 0.5s ease-in-out;
+}
+
+#CX3_POPOVER::backdrop {
+  background-color: rgb(127 127 127 / 25%);
+  backdrop-filter: blur(5px);
+}
+
+@keyframes slideIn {
+  0% {
+    opacity: 0;
+    transform: translateY(200px);
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+#CX3_POPOVER .header {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 5px;
+  font-size: 150%;
+  font-weight: bold;
+  padding-left: 5px;
+  padding-right: 5px;
+  color: white;
+  background-color: black;
+}
+
+#CX3_POPOVER .header[data-is-fullday="true"] {
+  background-color: var(--calendarColor);
+  color: var(--oppositeColor);
+}
+
+#CX3_POPOVER .header[data-is-fullday="false"] {
+  background-color: var(--oppositeColor);
+  color: var(--calendarColor);
+}
+
+#CX3_POPOVER .content {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 20px;
+  background-color: white;
+  overflow-y: auto;
+}
+
+#CX3_POPOVER .content .name {
+  font-weight: bold;
+  text-transform: uppercase;
+  font-size: 75%;
+  color: darkmagenta;
+}
+
+#CX3_POPOVER .content .value {
+  margin-left: 10px;
+  margin-bottom: 10px;
+  font-size: 90%;
+  color: black;
+  white-space: unset;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  text-wrap: balance;
+  overflow-y: hidden;
+
+  /* text-wrap: balance; */
+
+  /* Expreimental for CSS Text Module Level 4 */
+}
+
+#CX3_POPOVER .content .list {
+  margin: 0;
+  padding: 0;
+}
+
+#CX3_POPOVER .content .eventItem {
+  margin-bottom: 5px;
+}
+
+#CX3_POPOVER .eventItem {
+  display: flex;
+  flex-flow: row wrap;
+  list-style: none;
+}
+
+#CX3_POPOVER .eventItem .symbol {
+  color: var(--calendarColor);
+  font-weight: bold;
+}
+
+#CX3_POPOVER .eventItem .title {
+  margin-left: 10px;
+  font-weight: bold;
+}
+
+#CX3_POPOVER .eventItem .time {
+  flex-basis: 100%;
+}
+
+#CX3_POPOVER .eventItem .full {
+  margin-left: 30px;
+}
+
+#CX3_POPOVER .criteriaItem.period .name::before {
+  content: "PERIOD";
+}
+
+#CX3_POPOVER .criteriaItem.location .name::before {
+  content: "LOCATION";
+}
+
+#CX3_POPOVER .criteriaItem.description .name::before {
+  content: "DESCRIPTION";
+}
+
+#CX3_POPOVER .criteriaItem.calendar .name::before {
+  content: "CALENDAR";
+}

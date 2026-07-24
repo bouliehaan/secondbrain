@@ -1,0 +1,145 @@
+PATH: /usr/local/bin/magicmirror-native-clock
+
+  File: /usr/local/bin/magicmirror-native-clock
+  Size: 31096     	Blocks: 64         IO Block: 4096   regular file
+Device: 252,0	Inode: 819581      Links: 1
+Access: (0755/-rwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-07-17 03:07:40.309303184 +0000
+Modify: 2026-07-17 02:55:40.069314709 +0000
+Change: 2026-07-17 03:07:34.462238253 +0000
+ Birth: 2026-07-17 03:07:34.462238253 +0000
+
+/usr/local/bin/magicmirror-native-clock: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=bee0f2a693a8ef75e033cd0c7949040f3def19ef, for GNU/Linux 3.2.0, with debug_info, not stripped
+
+0880dd2512510fdb1bef5814a769180fac47173b9bf3587dbc008d6d19ab36c9  /usr/local/bin/magicmirror-native-clock
+
+	linux-vdso.so.1 (0x00007ffe2b995000)
+	libxosd.so.2 => /lib/libxosd.so.2 (0x0000744992400000)
+	libX11.so.6 => /lib/x86_64-linux-gnu/libX11.so.6 (0x000074499262e000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000744992000000)
+	libXinerama.so.1 => /lib/x86_64-linux-gnu/libXinerama.so.1 (0x0000744992629000)
+	libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x0000744992624000)
+	libXext.so.6 => /lib/x86_64-linux-gnu/libXext.so.6 (0x000074499260e000)
+	libxcb.so.1 => /lib/x86_64-linux-gnu/libxcb.so.1 (0x00007449923d7000)
+	/lib64/ld-linux-x86-64.so.2 (0x000074499277f000)
+	libXau.so.6 => /lib/x86_64-linux-gnu/libXau.so.6 (0x0000744992608000)
+	libXdmcp.so.6 => /lib/x86_64-linux-gnu/libXdmcp.so.6 (0x00007449923cf000)
+	libbsd.so.0 => /lib/x86_64-linux-gnu/libbsd.so.0 (0x00007449923b9000)
+	libmd.so.0 => /lib/x86_64-linux-gnu/libmd.so.0 (0x00007449923a8000)
+
+SELECTED STRINGS
+----------------
+xosd_set_horizontal_offset
+xosd_set_vertical_offset
+xosd_set_timeout
+xosd_set_pos
+xosd_display
+xosd_show
+xosd_set_align
+xosd_set_colour
+xosd_set_shadow_offset
+xosd_set_outline_colour
+xosd_set_font
+xosd_destroy
+xosd_create
+xosd_set_outline_offset
+nanosleep
+clock_gettime
+localtime_r
+strftime
+libxosd.so.2
+MM_CLOCK_TZ
+MM_CLOCK_COLOUR
+MM_CLOCK_OUTLINE_COLOUR
+MM_CLOCK_DATE_FONT
+MM_CLOCK_TIME_FONT
+MM_CLOCK_X
+MM_CLOCK_DATE_Y
+MM_CLOCK_TIME_Y
+MM_CLOCK_DATE_OUTLINE
+MM_CLOCK_TIME_OUTLINE
+clock_gettime
+localtime_r failed.
+strftime failed.
+XOSD display update failed.
+No usable X11 font was found.
+Unable to configure an XOSD display.
+Unable to create XOSD windows. Check DISPLAY and XAUTHORITY.
+pause_time
+choose_font
+time_fallbacks
+fallback_fonts
+xosd_create
+nanosleep
+xosd_set_pos
+local_time
+clock_gettime
+xosd_pos
+XOSD_bottom
+realtime
+XOSD_middle
+XOSD_printf
+xosd_set_align
+XOSD_left
+XOSD_top
+XOSD_string
+xosd_display
+time_font
+timezone
+xosd_command
+xosd_set_shadow_offset
+xosd_set_vertical_offset
+xosd_set_horizontal_offset
+xosd_show
+xosd_set_outline_offset
+xosd_set_colour
+preferred_font
+date_display
+time_y
+localtime_r
+xosd_set_timeout
+XOSD_right
+__clockid_t
+xosd_set_outline_colour
+XOSD_center
+date_font
+timespec
+strftime
+xosd_align
+time_outline
+xosd_destroy
+xosd_set_font
+__time_t
+XOSD_percentage
+XOSD_slider
+xosd
+time_display
+time_text
+configure_display
+/usr/local/src/magicmirror-native-clock.c
+clockid_t.h
+time_t.h
+struct_timespec.h
+xosd.h
+time.h
+magicmirror-native-clock.c
+configure_display
+time_fallbacks.0
+xosd_set_pos
+localtime_r@GLIBC_2.2.5
+clock_gettime@GLIBC_2.17
+xosd_show
+xosd_create
+xosd_set_horizontal_offset
+xosd_set_font
+nanosleep@GLIBC_2.2.5
+xosd_set_vertical_offset
+xosd_set_outline_colour
+xosd_set_timeout
+xosd_display
+strftime@GLIBC_2.2.5
+xosd_set_colour
+xosd_set_align
+xosd_destroy
+xosd_set_outline_offset
+xosd_set_shadow_offset

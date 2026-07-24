@@ -1,0 +1,173 @@
+"use strict";
+
+const NodeHelper = require("node_helper");
+const { pollAll } = require("./lib/sources");
+
+// MAGICMIRROR-GV-SANITIZER-V1
+const GOOGLE_VOICE_GAP =
+  String.raw`(?:\s|&nbsp;|&#160;|<[^>]*>)*`;
+
+const GOOGLE_VOICE_BOILERPLATE = new RegExp(
+  `${GOOGLE_VOICE_GAP}` +
+  `to${GOOGLE_VOICE_GAP}` +
+  `respond${GOOGLE_VOICE_GAP}` +
+  `to${GOOGLE_VOICE_GAP}` +
+  `this${GOOGLE_VOICE_GAP}` +
+  `(?:text${GOOGLE_VOICE_GAP})?` +
+  `message\\b[\\s\\S]*$`,
+  "i"
+);
+
+function stripGoogleVoiceBoilerplate (value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  return value
+    .replace(GOOGLE_VOICE_BOILERPLATE, "")
+    .replace(
+      /(?:\s|&nbsp;|&#160;|<br\s*\/?\s*>|<\/?p\b[^>]*>)+$/gi,
+      ""
+    )
+    .trim();
+}
+
+function sanitizeSecondBrainPayload (value) {
+  if (typeof value === "string") {
+    return stripGoogleVoiceBoilerplate(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(sanitizeSecondBrainPayload);
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+
+  if (
+    prototype !== Object.prototype &&
+    prototype !== null
+  ) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(
+      ([key, child]) => [
+        key,
+        sanitizeSecondBrainPayload(child)
+      ]
+    )
+  );
+}
+
+module.exports = NodeHelper.create({
+  _sendSanitizedSocketNotification (notification, payload) {
+    this.sendSocketNotification(
+      notification,
+      sanitizeSecondBrainPayload(payload)
+    );
+  },
+
+  start() {
+    this.config = {
+      configDir: "/etc/magicmirror-secondbrain",
+      maxItems: 3,
+      pollIntervalMs: 60 * 1000
+    };
+
+    this.timer = null;
+    this.polling = false;
+  },
+
+  stop() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  },
+
+  socketNotificationReceived(notification, payload) {
+    if (notification === "SECOND_BRAIN_CONFIG") {
+      this.config = {
+        configDir:
+          payload?.configDir ||
+          "/etc/magicmirror-secondbrain",
+
+        maxItems: Math.max(
+          1,
+          Number(payload?.maxItems || 3)
+        ),
+
+        pollIntervalMs: Math.max(
+          30 * 1000,
+          Number(
+            payload?.pollIntervalMs ||
+            60 * 1000
+          )
+        )
+      };
+
+      this.schedulePolling();
+      this.pollNow();
+
+      return;
+    }
+
+    if (notification === "SECOND_BRAIN_REFRESH") {
+      this.pollNow();
+    }
+  },
+
+  schedulePolling() {
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+
+    this.timer = setInterval(
+      () => this.pollNow(),
+      this.config.pollIntervalMs
+    );
+  },
+
+  async pollNow() {
+    if (this.polling) {
+      return;
+    }
+
+    this.polling = true;
+
+    try {
+      const items = await pollAll(
+        this.config.configDir,
+        {
+          maxItems: this.config.maxItems
+        },
+        console
+      );
+
+      console.log(
+        `[MMM-SecondBrain] Publishing ` +
+        `${items.length} item(s) to display.`
+      );
+
+      this._sendSanitizedSocketNotification(
+        "SECOND_BRAIN_UPDATE",
+        {
+          items,
+          generatedAt: Date.now()
+        }
+      );
+    } catch (error) {
+      console.error(
+        `[MMM-SecondBrain] Poll failed: ` +
+        `${error.stack || error.message}`
+      );
+    } finally {
+      this.polling = false;
+    }
+  }
+});
