@@ -30,7 +30,7 @@ let config = {
         maximumEntries: 100,
         maximumNumberOfDays: 365,
 
-        fetchInterval: 15000,
+        fetchInterval: 900000,
         updateOnFetch: false,
 
         animationSpeed: 0,
@@ -132,7 +132,7 @@ let config = {
         ],
 
         waitFetch: 3000,
-        refreshInterval: 15000,
+        refreshInterval: 60000,
         animationSpeed: 0
       }
     },
@@ -216,9 +216,16 @@ let config = {
       module: "MMM-SecondBrain",
       position: "top_right",
       config: {
-        pollIntervalMs: 3000,
+        /*
+         * Each poll opens a fresh IMAP session per account. The node helper
+         * clamps anything below 60s, so do not lower this to chase latency --
+         * it only earns a throttle from Gmail.
+         */
+        pollIntervalMs: 60000,
         maxItems: 3,
-        configDir: "/etc/magicmirror-secondbrain"
+        maxPackageItems: 3,
+        configDir: "/etc/magicmirror-secondbrain",
+        stateDir: "/var/lib/magicmirror-secondbrain"
       }
     },
     {
@@ -270,7 +277,7 @@ let config = {
         ],
 
         waitFetch: 3000,
-        refreshInterval: 15000,
+        refreshInterval: 60000,
         animationSpeed: 0
       }
     },
