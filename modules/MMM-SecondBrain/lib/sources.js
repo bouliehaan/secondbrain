@@ -2,9 +2,17 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { simpleParser } = require("mailparser");
 const { ImapFlow } = require("imapflow");
 const { resolveVoiceContact } = require("./contacts");
+
+/*
+ * Package state must live outside the module directory. The mirror service runs
+ * as `calendar-display` while the deployed module tree is owned by root, so a
+ * state file sitting next to this source is unwritable in production.
+ */
+const DEFAULT_STATE_DIR = "/var/lib/magicmirror-secondbrain";
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -43,12 +51,32 @@ function cleanText(value, maxLength = 180) {
   return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+/*
+ * A short deterministic digest of the given parts, used to key items that carry
+ * no natural identifier. The same message must yield the same id on every poll,
+ * otherwise deduplication never converges and the state file grows without end.
+ */
+function stableKey(...parts) {
+  return crypto
+    .createHash("sha1")
+    .update(parts.map((part) => String(part ?? "")).join("\u0000"))
+    .digest("hex")
+    .slice(0, 12);
+}
+
+function messageTimestamp(message) {
+  return new Date(
+    message?.internalDate ||
+    message?.envelope?.date ||
+    Date.now()
+  ).getTime();
+}
+
 function stripGoogleVoiceBoilerplate(value) {
   let text = String(value || "")
     .replace(/\r/g, "")
     .trim();
 
-  // SECOND_BRAIN_STRIP_VOICE_URL
   text = text.replace(
     /^\s*(?:<https?:\/\/voice\.google\.com(?:\/[^>]*)?>|https?:\/\/voice\.google\.com(?:\/\S*)?)\s*/i,
     ""
@@ -84,12 +112,6 @@ function stripGoogleVoiceBoilerplate(value) {
   return lines.join(" ").trim();
 }
 
-function displaySender(raw) {
-  const value = cleanText(raw, 100);
-  const withoutAddress = value.replace(/\s*<[^>]+>\s*$/, "").replace(/^"|"$/g, "");
-  return withoutAddress || value || "Unknown sender";
-}
-
 function ageText(timestamp, now = Date.now()) {
   if (!Number.isFinite(timestamp) || timestamp <= 0) {
     return "";
@@ -113,14 +135,6 @@ function ageText(timestamp, now = Date.now()) {
 
   const days = Math.floor(hours / 24);
   return `${days}d`;
-}
-
-function headerValue(headers, name) {
-  const target = String(name).toLowerCase();
-  const found = (headers || []).find(
-    (header) => String(header.name || "").toLowerCase() === target
-  );
-  return found?.value || "";
 }
 
 function voiceClassification(from, subject) {
@@ -171,6 +185,15 @@ function envelopeIdentity(addresses) {
   };
 }
 
+function envelopeAddress(addresses) {
+  const first = Array.isArray(addresses) ? addresses[0] : null;
+  if (!first) {
+    return "Unknown sender";
+  }
+
+  return first.name || first.address || "Unknown sender";
+}
+
 function resolveMailbox(mailboxes, requested, specialUse = null) {
   const name = String(requested || "").trim();
 
@@ -196,9 +219,18 @@ function resolveMailbox(mailboxes, requested, specialUse = null) {
   return insensitive?.path || null;
 }
 
-async function parsedPreview(source, maxLength = 180) {
+/*
+ * Decode a raw message once, returning both the readable text and a
+ * whitespace-free copy of it.
+ *
+ * Tracking numbers are routinely split across line breaks, so carrier patterns
+ * are matched against the compact form. Both are built from the decoded body and
+ * never from the raw MIME source, whose base64 attachment blocks are otherwise a
+ * rich source of phantom 12- and 15-digit "tracking numbers".
+ */
+async function decodeMessage(source) {
   if (!source) {
-    return "";
+    return { text: "", compact: "" };
   }
 
   try {
@@ -208,38 +240,90 @@ async function parsedPreview(source, maxLength = 180) {
       skipImageLinks: true
     });
 
-    return cleanText(stripGoogleVoiceBoilerplate(parsed.text || ""), maxLength);
+    const text = String(parsed.text || "");
+
+    return { text, compact: text.replace(/\s+/g, "") };
   } catch {
-    return "";
+    return { text: "", compact: "" };
   }
 }
 
-async function parsedVoicePreview(source, maxLength = 180) {
-  if (!source) {
-    return "";
+async function parsedPreview(source, maxLength = 180) {
+  const { text } = await decodeMessage(source);
+  return cleanText(stripGoogleVoiceBoilerplate(text), maxLength);
+}
+
+/*
+ * Return envelope summaries for the newest messages in the open mailbox, keeping
+ * only those inside the time window.
+ *
+ * Gmail's time-based IMAP SEARCH has been observed returning no UIDs even when
+ * matching messages are present, so a bounded range of the newest sequence
+ * numbers is scanned instead and the window is enforced locally.
+ */
+async function fetchRecentSummaries(client, since, scanLimit) {
+  const messageCount = Number(client.mailbox?.exists || 0);
+
+  if (messageCount <= 0) {
+    return [];
   }
 
-  try {
-    const parsed = await simpleParser(source, {
-      skipHtmlToText: false,
-      skipTextToHtml: true,
-      skipImageLinks: true
-    });
+  const firstSequence = Math.max(1, messageCount - scanLimit + 1);
 
-    return cleanText(
-      stripGoogleVoiceBoilerplate(parsed.text || ""),
-      maxLength
-    );
-  } catch {
-    return "";
+  const summaries = await client.fetchAll(
+    `${firstSequence}:*`,
+    { envelope: true, internalDate: true },
+    { uid: false }
+  );
+
+  const threshold =
+    since instanceof Date ? since.getTime() : new Date(since).getTime();
+
+  return summaries.filter((message) => {
+    const timestamp = messageTimestamp(message);
+    return Number.isFinite(timestamp) && timestamp >= threshold;
+  });
+}
+
+/*
+ * Attach raw bodies to already-selected summaries. Bodies are fetched only after
+ * filtering, so a full mailbox is never downloaded.
+ */
+async function attachSources(client, messages) {
+  const completed = [];
+
+  for (const message of messages) {
+    let rawSource = null;
+
+    try {
+      const fullMessage = await client.fetchOne(
+        message.uid,
+        { source: true },
+        { uid: true }
+      );
+
+      rawSource = fullMessage?.source || null;
+    } catch {
+      // Header data alone is still enough to display a notification.
+    }
+
+    completed.push({ ...message, source: rawSource });
   }
+
+  return completed;
 }
 
 async function fetchUnreadMailbox(client, mailbox, since, maxResults) {
   let lock;
 
   try {
+    /*
+     * readOnly matters: without it the fetch below sets \Seen, so the mirror
+     * would silently mark real mail as read and the notification would vanish
+     * after a single poll.
+     */
     lock = await client.getMailboxLock(mailbox, { readOnly: true });
+
     const uids = await client.search({ seen: false, since }, { uid: true });
     const selected = uids
       .sort((a, b) => b - a)
@@ -269,113 +353,416 @@ async function fetchRecentMailbox(client, mailbox, since, maxResults) {
   let lock;
 
   try {
-    lock = await client.getMailboxLock(
-      mailbox,
-      { readOnly: true }
-    );
+    lock = await client.getMailboxLock(mailbox, { readOnly: true });
 
-    const messageCount = Number(
-      client.mailbox?.exists || 0
-    );
+    const resultLimit = Math.max(1, Number(maxResults || 100));
+    const scanLimit = Math.min(250, Math.max(50, resultLimit * 2));
 
-    if (messageCount <= 0) {
-      return [];
-    }
-
-    const resultLimit = Math.max(
-      1,
-      Number(maxResults || 100)
-    );
-
-    /*
-     * Gmail's time-based SEARCH was returning no UIDs
-     * even though the messages were present. Scan a
-     * bounded range of the newest sequence numbers
-     * and enforce the exact time window locally.
-     */
-    const scanLimit = Math.min(
-      250,
-      Math.max(50, resultLimit * 2)
-    );
-
-    const firstSequence = Math.max(
-      1,
-      messageCount - scanLimit + 1
-    );
-
-    const summaries = await client.fetchAll(
-      `${firstSequence}:*`,
-      {
-        envelope: true,
-        internalDate: true
-      },
-      { uid: false }
-    );
-
-    const threshold =
-      since instanceof Date
-        ? since.getTime()
-        : new Date(since).getTime();
-
-    const selected = summaries
-      .filter((message) => {
-        const timestamp = new Date(
-          message.internalDate ||
-          message.envelope?.date ||
-          0
-        ).getTime();
-
-        return (
-          Number.isFinite(timestamp) &&
-          timestamp >= threshold
-        );
-      })
-      .sort(
-        (a, b) =>
-          Number(b.uid || 0) -
-          Number(a.uid || 0)
-      )
+    const selected = (await fetchRecentSummaries(client, since, scanLimit))
+      .sort((a, b) => Number(b.uid || 0) - Number(a.uid || 0))
       .slice(0, resultLimit);
 
-    const completed = [];
-
-    /*
-     * Fetch raw bodies only after timestamp filtering.
-     * This avoids downloading every recent inbox body.
-     */
-    for (const message of selected) {
-      let rawSource = null;
-
-      try {
-        const fullMessage =
-          await client.fetchOne(
-            message.uid,
-            { source: true },
-            { uid: true }
-          );
-
-        rawSource =
-          fullMessage?.source || null;
-      } catch {
-        /*
-         * Header data is still enough to display a
-         * notification if body retrieval fails.
-         */
-      }
-
-      completed.push({
-        ...message,
-        source: rawSource
-      });
-    }
-
-    return completed;
+    return await attachSources(client, selected);
   } finally {
     if (lock) {
       lock.release();
     }
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Package tracking
+ * ------------------------------------------------------------------ */
+
+const PACKAGE_SENDER_HINTS = ["amazon", "newegg", "shipment-tracking"];
+
+const PACKAGE_SUBJECT_HINTS = [
+  "tracking",
+  "shipped",
+  "delivery",
+  "delivered",
+  "order",
+  "receipt",
+  "purchase",
+  "confirmation",
+  "payment"
+];
+
+function looksLikePackageMail(message) {
+  const subject = String(message.envelope?.subject || "").toLowerCase();
+  const from = message.envelope?.from?.[0];
+  const sender = String(from?.address || from?.name || "").toLowerCase();
+
+  return (
+    PACKAGE_SENDER_HINTS.some((hint) => sender.includes(hint)) ||
+    PACKAGE_SUBJECT_HINTS.some((hint) => subject.includes(hint))
+  );
+}
+
+/*
+ * Scan the newest slice of a mailbox for order and shipping mail.
+ *
+ * The scan is bounded by sequence number rather than by an open-ended SEARCH, so
+ * that a busy All Mail folder cannot turn one poll into thousands of envelope
+ * fetches.
+ */
+async function fetchPackageEmails(client, mailbox, since, options = {}, log = console) {
+  let lock;
+
+  try {
+    lock = await client.getMailboxLock(mailbox, { readOnly: true });
+
+    const scanLimit = Math.min(500, Math.max(50, Number(options.scanLimit || 250)));
+    const resultLimit = Math.max(1, Number(options.maxResults || 15));
+
+    const candidates = (await fetchRecentSummaries(client, since, scanLimit))
+      .filter(looksLikePackageMail)
+      .sort((a, b) => Number(b.uid || 0) - Number(a.uid || 0))
+      .slice(0, resultLimit);
+
+    return await attachSources(client, candidates);
+  } catch (error) {
+    log.error(`[MMM-SecondBrain] Package scan of '${mailbox}' failed: ${error.message}`);
+    return [];
+  } finally {
+    if (lock) {
+      lock.release();
+    }
+  }
+}
+
+const ETA_PATTERN =
+  /(?:Arriving|Estimated delivery|Expected delivery|Scheduled delivery|Delivery date).{0,15}?([A-Za-z]+,\s*[A-Za-z]+\s*\d{1,2}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+by\s+\d{1,2}\s*[A-Za-z]+)/i;
+
+/*
+ * Each identifier is matched twice, because neither pass alone is sufficient.
+ *
+ * The strict pass runs against the readable text and requires a non-alphanumeric
+ * character or a string edge on both sides. Word boundaries are intact there, so
+ * this is the high-confidence match.
+ *
+ * The relaxed pass runs against the whitespace-stripped copy, which is the only
+ * way to catch an identifier the sending mail client wrapped across two lines.
+ * Stripping whitespace also glues the number to the words on either side of it,
+ * so boundary punctuation cannot be required at all. Instead the guard only
+ * forbids extending the match within its own character class -- enough to stop a
+ * 12-digit pattern matching the middle of a 20-digit run, which is the failure
+ * mode that actually matters.
+ */
+const TRACKING_PATTERNS = {
+  usps: {
+    body: "(94001\\d{17}|92055\\d{17}|94073\\d{17}|93033\\d{17}|92060\\d{17}|92039\\d{17}|92050\\d{17})",
+    guard: "\\d"
+  },
+  ups: {
+    body: "(1Z[0-9A-Z]{16})",
+    guard: "0-9A-Z",
+    flags: "i"
+  },
+  fedex: {
+    body: "(\\d{15}|\\d{12})",
+    guard: "\\d"
+  },
+  amazonOrder: {
+    body: "(\\d{3}-\\d{7}-\\d{7})",
+    guard: "\\d"
+  }
+};
+
+function compilePatterns({ body, guard, flags = "" }) {
+  return {
+    strict: new RegExp(`(?:[^A-Za-z0-9]|^)${body}(?:[^A-Za-z0-9]|$)`, flags),
+    relaxed: new RegExp(`(?<![${guard}])${body}(?![${guard}])`, flags)
+  };
+}
+
+const COMPILED_TRACKING = Object.fromEntries(
+  Object.entries(TRACKING_PATTERNS).map(([key, spec]) => [key, compilePatterns(spec)])
+);
+
+function findTracking(key, text, compact) {
+  const { strict, relaxed } = COMPILED_TRACKING[key];
+  return text.match(strict) || compact.match(relaxed);
+}
+
+const GENERIC_ORDER_PATTERN =
+  /Order\s*(?:(?:number\s+|no\.?\s*|#\s*|:\s*)([A-Za-z0-9-]*\d[A-Za-z0-9-]*)|([A-Za-z0-9-]*\d[A-Za-z0-9-]{3,}))/i;
+
+function detectCarrier(compact, text, subject) {
+  const usps = findTracking("usps", text, compact);
+  if (usps) {
+    return { carrier: "USPS", trackingId: usps[1] };
+  }
+
+  const ups = findTracking("ups", text, compact);
+  if (ups) {
+    return { carrier: "UPS", trackingId: ups[1].toUpperCase() };
+  }
+
+  /*
+   * A bare run of 12 or 15 digits is far too weak a signal on its own, so a
+   * FedEx number is only accepted when the message actually names FedEx.
+   */
+  const mentionsFedex = /fedex/i.test(text) || /fedex/i.test(subject);
+  const fedex = mentionsFedex ? findTracking("fedex", text, compact) : null;
+  if (fedex) {
+    return { carrier: "FedEx", trackingId: fedex[1] };
+  }
+
+  return { carrier: null, trackingId: null };
+}
+
+function storeNameFor(senderDisplayName, sender) {
+  if (senderDisplayName) {
+    return senderDisplayName;
+  }
+
+  if (sender.includes("newegg.com")) {
+    return "Newegg";
+  }
+
+  if (sender.includes("@")) {
+    const domain = sender.split("@")[1].split(".")[0];
+    return domain.charAt(0).toUpperCase() + domain.slice(1);
+  }
+
+  return "Store";
+}
+
+async function extractPackageInfo(message) {
+  const subject = message.envelope?.subject || "";
+  const from = message.envelope?.from?.[0];
+  const sender = String(from?.address || from?.name || "").toLowerCase();
+  const senderDisplayName = from?.name || "";
+
+  const timestamp = messageTimestamp(message);
+  const s = subject.toLowerCase();
+
+  const { text, compact } = await decodeMessage(message.source);
+
+  const etaMatch = text.match(ETA_PATTERN);
+  const etaString = etaMatch?.[1]?.trim() || "";
+
+  const { carrier, trackingId } = detectCarrier(compact, text, subject);
+
+  const withEta = (detail, status) =>
+    etaString && status !== "Delivered" ? `${detail} (ETA: ${etaString})` : detail;
+
+  const isAmazon =
+    sender.includes("amazon") ||
+    s.includes("amazon.com order") ||
+    sender.includes("shipment-tracking");
+
+  const genericOrderMatch =
+    subject.match(GENERIC_ORDER_PATTERN) || text.match(GENERIC_ORDER_PATTERN);
+  const genOrderId = genericOrderMatch
+    ? genericOrderMatch[1] || genericOrderMatch[2]
+    : null;
+
+  /* ---- Storefront order mail (Newegg and friends) ---- */
+  if (
+    !isAmazon &&
+    (genOrderId ||
+      sender.includes("newegg.com") ||
+      s.includes("order confirmed") ||
+      s.includes("receipt for order") ||
+      s.includes("your order"))
+  ) {
+    if (
+      s.includes("refund") || s.includes("canceled") || s.includes("cancelled") ||
+      s.includes("return") || s.includes("cancellation")
+    ) {
+      return null;
+    }
+
+    const lowerBody = text.toLowerCase();
+
+    if (lowerBody.includes("refund")) {
+      return null;
+    }
+
+    const isPhysical =
+      lowerBody.includes("shipping") ||
+      lowerBody.includes("shipped") ||
+      lowerBody.includes(" delivery") ||
+      lowerBody.includes("package") ||
+      lowerBody.includes("tracking") ||
+      lowerBody.includes("arriving") ||
+      lowerBody.includes("on the way");
+
+    // Digital bills and subscriptions carry no physical-shipment signal at all.
+    if (!isPhysical && !carrier && !trackingId && !s.includes("shipped")) {
+      return null;
+    }
+
+    let status = "Ordered";
+    if (
+      s.includes("delivered:") || s.includes("delivery confirmation") ||
+      s.includes("delivered")
+    ) {
+      status = "Delivered";
+    } else if (
+      s.includes("shipped") || s.includes("on the way") || s.includes("has shipped")
+    ) {
+      status = "Shipped";
+    }
+
+    const storeName = storeNameFor(senderDisplayName, sender);
+    const orderKey = genOrderId || `unknown-${stableKey(sender, subject, timestamp)}`;
+    const itemName = genOrderId
+      ? `${storeName} Order #${genOrderId}`
+      : `${storeName} Order`;
+
+    return {
+      id: `package:${storeName.toLowerCase()}:${orderKey}`,
+      kind: "package",
+      label: carrier || storeName,
+      title: cleanText(itemName, 100),
+      detail: withEta(trackingId ? `${status} (${carrier || "Tracking"})` : status, status),
+      timestamp,
+      priority: 95,
+      status,
+      orderId: genOrderId,
+      trackingId
+    };
+  }
+
+  /* ---- Amazon ---- */
+  if (isAmazon) {
+    if (s.includes("refund") || s.includes("return") || s.includes("cancellation")) {
+      return null;
+    }
+
+    if (s.includes("subscribe & save") && !s.includes("shipped")) {
+      return null;
+    }
+
+    let status = "Ordered";
+    if (
+      s.includes("delivered") || s.includes("delivery notification") ||
+      s.includes("delivery confirmation")
+    ) {
+      status = "Delivered";
+    } else if (
+      s.includes("out for delivery") || s.includes("arriving today") ||
+      s.includes("expected today") || s.includes("scheduled for delivery")
+    ) {
+      status = "Out for delivery";
+    } else if (s.includes("shipped") || s.includes("on the way")) {
+      status = "Shipped";
+    } else if (s.includes("delayed") || s.includes("update on")) {
+      status = "Delayed";
+    }
+
+    const titleMatch =
+      subject.match(/order of "([^"]+)"/i) ||
+      subject.match(/Delivered:\s*(.+)/i) ||
+      subject.match(/Out for delivery:\s*(.+)/i) ||
+      subject.match(/Arriving today:\s*(.+)/i) ||
+      subject.match(/Shipped:\s*(.+)/i);
+
+    // Amazon quotes the item in some subject forms and not others.
+    const itemName = titleMatch
+      ? titleMatch[1].trim().replace(/^"(.*)"$/s, "$1")
+      : "Amazon Package";
+
+    const amazonOrder = findTracking("amazonOrder", `${subject}\n${text}`, compact);
+    const orderId = amazonOrder
+      ? amazonOrder[1]
+      : `unknown-${stableKey("amazon", itemName)}`;
+
+    return {
+      id: `package:amazon:${orderId}`,
+      kind: "package",
+      label: carrier || "Amazon",
+      title: cleanText(itemName, 100),
+      detail: withEta(trackingId ? `${status} (${carrier})` : status, status),
+      timestamp,
+      priority: 95,
+      status,
+      orderId,
+      trackingId
+    };
+  }
+
+  /* ---- Bare carrier notification from anyone else ---- */
+  if (trackingId && carrier) {
+    let status = "Shipped";
+    let detail = "On the way";
+
+    if (
+      s.includes("delivered") || s.includes("delivery notification") ||
+      s.includes("delivery confirmation")
+    ) {
+      status = "Delivered";
+      detail = "Delivered";
+    } else if (
+      s.includes("out for delivery") || s.includes("arriving today") ||
+      s.includes("expected today") || s.includes("scheduled for delivery")
+    ) {
+      status = "Out for delivery";
+      detail = "Out for delivery";
+    } else if (s.includes("delayed") || s.includes("update on")) {
+      status = "Delayed";
+      detail = "Delayed";
+    }
+
+    return {
+      id: `package:${carrier.toLowerCase()}:${trackingId}`,
+      kind: "package",
+      label: carrier,
+      title: `Tracking: ${trackingId}`,
+      detail: withEta(detail, status),
+      timestamp,
+      priority: 95,
+      status,
+      orderId: null,
+      trackingId
+    };
+  }
+
+  return null;
+}
+
+/*
+ * Run the package scan for one already-connected account. Failures are contained
+ * here so that a bad package scan can never take down ordinary mail polling.
+ */
+async function collectPackages(client, mailbox, account, results, log) {
+  if (!mailbox || account.monitorPackages === false) {
+    return;
+  }
+
+  const maxAgeDays = Math.max(1, Number(account.packageMaxAgeDays || 7));
+  const since = new Date(Date.now() - maxAgeDays * 86400000);
+
+  const messages = await fetchPackageEmails(
+    client,
+    mailbox,
+    since,
+    {
+      scanLimit: account.packageScanLimit,
+      maxResults: account.packageMaxResults
+    },
+    log
+  );
+
+  for (const message of messages) {
+    try {
+      const info = await extractPackageInfo(message);
+      if (info) {
+        results.push(info);
+      }
+    } catch (error) {
+      log.error(`[MMM-SecondBrain] Package parse failed: ${error.message}`);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Mail sources
+ * ------------------------------------------------------------------ */
+
 async function pollGmail(configDir, log = console) {
   const accountsDir = path.join(configDir, "gmail", "accounts");
   const results = [];
@@ -414,61 +801,57 @@ async function pollGmail(configDir, log = console) {
         account.importantMailbox || "Wall-Display"
       );
 
-      // SECOND_BRAIN: important mailbox is optional
       if (!importantMailbox) {
         log.error(
           `[MMM-SecondBrain] Gmail mailbox '${account.importantMailbox || "Wall-Display"}' ` +
-          "was not found. Important-email polling is skipped, but Google Voice polling continues."
+          "was not found. Important-email polling is skipped; other sources continue."
         );
       }
 
       if (importantMailbox) {
+        const importantSince = new Date(
+          Date.now() - Number(account.maxAgeDays || 14) * 86400000
+        );
 
-      const importantSince = new Date(
-        Date.now() - Number(account.maxAgeDays || 14) * 86400000
-      );
+        const importantMessages = await fetchUnreadMailbox(
+          client,
+          importantMailbox,
+          importantSince,
+          Number(account.maxResults || 8)
+        );
 
-      const importantMessages = await fetchUnreadMailbox(
-        client,
-        importantMailbox,
-        importantSince,
-        Number(account.maxResults || 8)
-      );
+        for (const message of importantMessages) {
+          const sender = envelopeIdentity(message.envelope?.from);
+          const subject = message.envelope?.subject || "No subject";
+          const timestamp = messageTimestamp(message);
+          const voiceLabel = voiceClassification(sender.address, subject);
+          const voiceContact = voiceLabel
+            ? await resolveVoiceContact(configDir, subject, sender.address, log)
+            : null;
+          const preview = await parsedPreview(message.source, 180);
+          const messageKey =
+            message.envelope?.messageId || `${importantMailbox}:${message.uid}`;
 
-      for (const message of importantMessages) {
-        const sender = envelopeIdentity(message.envelope?.from);
-        const subject = message.envelope?.subject || "No subject";
-        const timestamp = new Date(
-          message.internalDate || message.envelope?.date || Date.now()
-        ).getTime();
-        const voiceLabel = voiceClassification(sender.address, subject);
-        const voiceContact = voiceLabel
-          ? await resolveVoiceContact(
-              configDir,
-              subject,
-              sender.address,
-              log
-            )
-          : null;
-        const preview = voiceLabel
-          ? await parsedVoicePreview(message.source, 180)
-          : await parsedPreview(message.source, 180);
-        const messageKey = message.envelope?.messageId || `${importantMailbox}:${message.uid}`;
-
-        results.push({
-          id: `gmail:${alias}:${messageKey}`,
-          kind: voiceLabel ? "voice" : "email",
-          label: voiceLabel || `Email · ${accountName}`,
-          title: voiceLabel
-            ? cleanText(voiceContact?.name || subject, 110)
-            : `${cleanText(sender.display, 70)} — ${cleanText(subject, 100)}`,
-          detail: stripGoogleVoiceBoilerplate(preview),
-          timestamp,
-          priority: voiceLabel ? 100 : 75,
-          source: accountName
-        });
+          results.push({
+            id: `gmail:${alias}:${messageKey}`,
+            kind: voiceLabel ? "voice" : "email",
+            label: voiceLabel || `Email · ${accountName}`,
+            title: voiceLabel
+              ? cleanText(voiceContact?.name || subject, 110)
+              : `${cleanText(sender.display, 70)} — ${cleanText(subject, 100)}`,
+            detail: stripGoogleVoiceBoilerplate(preview),
+            timestamp,
+            priority: voiceLabel ? 100 : 75,
+            source: accountName
+          });
+        }
       }
-      }
+
+      const packageMailbox =
+        resolveMailbox(mailboxes, account.packageMailbox || "All Mail", "\\All") ||
+        importantMailbox;
+
+      await collectPackages(client, packageMailbox, account, results, log);
 
       if (account.monitorVoice !== false) {
         const voiceMailbox = resolveMailbox(
@@ -502,9 +885,7 @@ async function pollGmail(configDir, log = console) {
             continue;
           }
 
-          const timestamp = new Date(
-            message.internalDate || message.envelope?.date || Date.now()
-          ).getTime();
+          const timestamp = messageTimestamp(message);
 
           if (Date.now() - timestamp > voiceMaxAgeMinutes * 60000) {
             continue;
@@ -516,7 +897,7 @@ async function pollGmail(configDir, log = console) {
             sender.address,
             log
           );
-          const preview = await parsedVoicePreview(message.source, 180);
+          const preview = await parsedPreview(message.source, 180);
           const messageKey = message.envelope?.messageId || `${voiceMailbox}:${message.uid}`;
 
           results.push({
@@ -532,7 +913,9 @@ async function pollGmail(configDir, log = console) {
         }
       }
     } catch (error) {
-      log.error(`[MMM-SecondBrain] Gmail IMAP account ${path.basename(accountPath)} failed: ${error.message}`);
+      log.error(
+        `[MMM-SecondBrain] Gmail IMAP account ${path.basename(accountPath)} failed: ${error.message}`
+      );
     } finally {
       if (client) {
         try {
@@ -547,22 +930,12 @@ async function pollGmail(configDir, log = console) {
   return results;
 }
 
-function envelopeAddress(addresses) {
-  const first = Array.isArray(addresses) ? addresses[0] : null;
-  if (!first) {
-    return "Unknown sender";
-  }
-
-  return first.name || first.address || "Unknown sender";
-}
-
 async function pollProton(configDir, log = console) {
   const accountsDir = path.join(configDir, "proton", "accounts");
   const results = [];
 
   for (const accountPath of listJsonFiles(accountsDir)) {
     let client;
-    let lock;
 
     try {
       const account = readJson(accountPath);
@@ -587,69 +960,64 @@ async function pollProton(configDir, log = console) {
       await client.connect();
 
       const mailboxes = await client.list();
-      const requestedMailbox =
-        account.mailbox || "All Mail";
+      const requestedMailbox = account.mailbox || "All Mail";
 
       /*
-       * Prefer the IMAP special-use All Mail folder. This remains
-       * reliable even if Bridge presents the visible folder name
-       * differently.
+       * Prefer the IMAP special-use All Mail folder. This stays reliable even if
+       * Bridge presents the visible folder name differently.
        */
-      const mailbox = resolveMailbox(
-        mailboxes,
-        requestedMailbox,
-        "\\All"
-      );
+      const mailbox = resolveMailbox(mailboxes, requestedMailbox, "\\All");
 
       if (!mailbox) {
-        throw new Error(
-          `Proton mailbox '${requestedMailbox}' was not found`
-        );
+        throw new Error(`Proton mailbox '${requestedMailbox}' was not found`);
       }
 
-      lock = await client.getMailboxLock(
-        mailbox,
-        { readOnly: true }
-      );
-
+      const accountName = account.displayName || account.alias || "Proton Mail";
       const since = new Date(Date.now() - Number(account.maxAgeDays || 14) * 86400000);
-      const uids = await client.search({ seen: false, since }, { uid: true });
-      const selected = uids.sort((a, b) => b - a).slice(0, Number(account.maxResults || 8));
 
-      if (selected.length > 0) {
-        const messages = await client.fetchAll(
-          selected,
-          { envelope: true, internalDate: true },
-          { uid: true }
-        );
+      let lock;
+      try {
+        lock = await client.getMailboxLock(mailbox, { readOnly: true });
 
-        const accountName = account.displayName || account.alias || "Proton Mail";
+        const uids = await client.search({ seen: false, since }, { uid: true });
+        const selected = uids
+          .sort((a, b) => b - a)
+          .slice(0, Number(account.maxResults || 8));
 
-        for (const message of messages) {
-          const sender = envelopeAddress(message.envelope?.from);
-          const subject = message.envelope?.subject || "No subject";
-          const timestamp = new Date(
-            message.internalDate || message.envelope?.date || Date.now()
-          ).getTime();
+        if (selected.length > 0) {
+          const messages = await client.fetchAll(
+            selected,
+            { envelope: true, internalDate: true },
+            { uid: true }
+          );
 
-          results.push({
-            id: `proton:${account.alias || "account"}:${message.uid}`,
-            kind: "email",
-            label: `Proton · ${accountName}`,
-            title: `${cleanText(sender, 70)} — ${cleanText(subject, 105)}`,
-            detail: `Unread in ${mailbox}`,
-            timestamp,
-            priority: 78,
-            source: accountName
-          });
+          for (const message of messages) {
+            results.push({
+              id: `proton:${account.alias || "account"}:${message.uid}`,
+              kind: "email",
+              label: `Proton · ${accountName}`,
+              title:
+                `${cleanText(envelopeAddress(message.envelope?.from), 70)} — ` +
+                `${cleanText(message.envelope?.subject || "No subject", 105)}`,
+              detail: `Unread in ${mailbox}`,
+              timestamp: messageTimestamp(message),
+              priority: 78,
+              source: accountName
+            });
+          }
+        }
+      } finally {
+        if (lock) {
+          lock.release();
         }
       }
+
+      await collectPackages(client, mailbox, account, results, log);
     } catch (error) {
-      log.error(`[MMM-SecondBrain] Proton account ${path.basename(accountPath)} failed: ${error.message}`);
+      log.error(
+        `[MMM-SecondBrain] Proton account ${path.basename(accountPath)} failed: ${error.message}`
+      );
     } finally {
-      if (lock) {
-        lock.release();
-      }
       if (client) {
         try {
           await client.logout();
@@ -662,6 +1030,10 @@ async function pollProton(configDir, log = console) {
 
   return results;
 }
+
+/* ------------------------------------------------------------------ *
+ * Transmission
+ * ------------------------------------------------------------------ */
 
 async function transmissionRpc(config, payload) {
   const headers = {
@@ -836,15 +1208,197 @@ async function pollTransmission(configDir, log = console) {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Aggregation
+ * ------------------------------------------------------------------ */
+
+const PLACEHOLDER_TITLES = new Set(["Amazon Order", "Amazon Package"]);
+
+function isPlaceholderTitle(title) {
+  const value = String(title || "");
+  return PLACEHOLDER_TITLES.has(value) || value.startsWith("Tracking:");
+}
+
+/*
+ * One shipment is announced several times -- ordered, shipped, out for delivery
+ * -- often under different identifiers. Collapse those into a single card that
+ * keeps the newest status while inheriting whichever identifiers and
+ * human-readable title the other messages carried.
+ */
+function mergePackage(target, source) {
+  target.orderId = target.orderId || source.orderId;
+  target.trackingId = target.trackingId || source.trackingId;
+
+  if (isPlaceholderTitle(target.title) && !isPlaceholderTitle(source.title)) {
+    target.title = source.title;
+  }
+}
+
+function samePackage(a, b) {
+  if (b.kind !== "package") {
+    return false;
+  }
+
+  if (a.id === b.id) {
+    return true;
+  }
+
+  if (a.trackingId && b.trackingId && a.trackingId === b.trackingId) {
+    return true;
+  }
+
+  return Boolean(
+    a.orderId &&
+    b.orderId &&
+    a.orderId === b.orderId &&
+    !String(a.orderId).startsWith("unknown-")
+  );
+}
+
 function deduplicate(items) {
-  const map = new Map();
+  const merged = [];
+
   for (const item of items) {
-    const existing = map.get(item.id);
-    if (!existing || Number(item.priority || 0) > Number(existing.priority || 0)) {
-      map.set(item.id, item);
+    if (item.kind === "package") {
+      const index = merged.findIndex((existing) => samePackage(item, existing));
+
+      if (index === -1) {
+        merged.push(item);
+        continue;
+      }
+
+      const existing = merged[index];
+
+      if (Number(item.timestamp || 0) > Number(existing.timestamp || 0)) {
+        mergePackage(item, existing);
+        merged[index] = item;
+      } else {
+        mergePackage(existing, item);
+      }
+
+      continue;
+    }
+
+    const index = merged.findIndex((existing) => existing.id === item.id);
+
+    if (index === -1) {
+      merged.push(item);
+    } else if (Number(item.priority || 0) > Number(merged[index].priority || 0)) {
+      merged[index] = item;
     }
   }
-  return Array.from(map.values());
+
+  return merged;
+}
+
+let stateWriteWarned = false;
+
+/*
+ * Merge this poll's packages with what earlier polls saw, then persist the
+ * result. Retailers stop mentioning a shipment once it is delivered, so without
+ * this the card would vanish the moment its source mail aged out of the scan
+ * window.
+ */
+function persistAndMergePackages(items, stateDir, log) {
+  const stateFile = path.join(stateDir || DEFAULT_STATE_DIR, "package_state.json");
+
+  let cached = [];
+
+  if (fs.existsSync(stateFile)) {
+    try {
+      const parsed = readJson(stateFile);
+      cached = Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      log.error(
+        `[MMM-SecondBrain] Package state unreadable, starting fresh: ${error.message}`
+      );
+    }
+  }
+
+  const now = Date.now();
+  const retainDelivered = 48 * 60 * 60 * 1000;
+
+  cached = cached.filter(
+    (entry) =>
+      !(
+        entry.status === "Delivered" &&
+        now - Number(entry.timestamp || 0) > retainDelivered
+      )
+  );
+
+  const combined = deduplicate([...items, ...cached]);
+
+  try {
+    fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+    writeJsonAtomic(stateFile, combined.filter((item) => item.kind === "package"));
+    stateWriteWarned = false;
+  } catch (error) {
+    // Warn once rather than on every poll.
+    if (!stateWriteWarned) {
+      log.error(
+        `[MMM-SecondBrain] Package state is not writable at ${stateFile} ` +
+        `(${error.code || error.message}). Continuing in memory; package history ` +
+        "will not survive a restart."
+      );
+      stateWriteWarned = true;
+    }
+  }
+
+  return combined;
+}
+
+const isTransmissionItem = (item) => {
+  const id = String(item?.id || "").toLowerCase();
+  const label = String(item?.label || "").toLowerCase();
+
+  return (
+    item?.kind === "download" ||
+    id.startsWith("transmission:") ||
+    label.includes("transmission")
+  );
+};
+
+const isPackageItem = (item) => item?.kind === "package";
+
+/*
+ * Drop packages that have stopped being interesting: anything delivered before
+ * today, anything that was out for delivery on an earlier day (it has almost
+ * certainly arrived), and bare "Ordered" entries with no identifier once a real
+ * shipment is already on the board.
+ */
+function pruneStalePackages(items) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const dayStart = todayStart.getTime();
+
+  const hasActiveShipment = items.some(
+    (item) =>
+      isPackageItem(item) &&
+      ["Shipped", "Delivered", "Out for delivery"].includes(item.status)
+  );
+
+  return items.filter((item) => {
+    if (!isPackageItem(item)) {
+      return true;
+    }
+
+    if (
+      (item.status === "Delivered" || item.status === "Out for delivery") &&
+      item.timestamp < dayStart
+    ) {
+      return false;
+    }
+
+    if (
+      item.status === "Ordered" &&
+      String(item.orderId || "").startsWith("unknown-") &&
+      hasActiveShipment
+    ) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 async function pollAll(configDir, options = {}, log = console) {
@@ -859,102 +1413,65 @@ async function pollAll(configDir, options = {}, log = console) {
     if (result.status === "fulfilled") {
       items.push(...result.value);
     } else {
-      log.error(`[MMM-SecondBrain] Source poll failed: ${result.reason?.message || result.reason}`);
+      log.error(
+        `[MMM-SecondBrain] Source poll failed: ${result.reason?.message || result.reason}`
+      );
     }
   }
 
   const now = Date.now();
 
-  const sorted = deduplicate(items)
+  const sorted = persistAndMergePackages(items, options.stateDir, log)
     .sort((a, b) => {
-      const priorityDifference =
-        Number(b.priority || 0) -
-        Number(a.priority || 0);
+      const priorityDifference = Number(b.priority || 0) - Number(a.priority || 0);
 
       if (priorityDifference !== 0) {
         return priorityDifference;
       }
 
-      return (
-        Number(b.timestamp || 0) -
-        Number(a.timestamp || 0)
-      );
+      return Number(b.timestamp || 0) - Number(a.timestamp || 0);
     });
 
-  const isTransmissionItem = (item) => {
-    const id = String(
-      item?.id || ""
-    ).toLowerCase();
-
-    const label = String(
-      item?.label || ""
-    ).toLowerCase();
-
-    return (
-      item?.kind === "download" ||
-      id.startsWith("transmission:") ||
-      label.includes("transmission")
-    );
-  };
+  const active = pruneStalePackages(sorted);
 
   /*
-   * Notifications and Transmission have independent limits. Therefore a
-   * crowded email inbox can never prevent an active download from reaching
-   * its dedicated bubble.
+   * Notifications, packages and Transmission each get their own limit, so a
+   * crowded inbox can never crowd an active download or a shipment off the
+   * display.
    */
-  const notificationLimit = Math.max(
-    0,
-    Number(
-      options.maxNotificationItems ??
-      options.maxItems ??
-      3
-    )
-  );
+  const limitFor = (value, fallback) => Math.max(0, Number(value ?? fallback));
 
-  const downloadLimit = Math.max(
-    0,
-    Number(
-      options.maxDownloadItems ??
-      1
-    )
+  const notificationLimit = limitFor(
+    options.maxNotificationItems ?? options.maxItems,
+    3
   );
+  const packageLimit = limitFor(options.maxPackageItems, 3);
+  const downloadLimit = limitFor(options.maxDownloadItems, 1);
 
   const selected = [
-    ...sorted
-      .filter(
-        (item) =>
-          !isTransmissionItem(item)
-      )
-      .slice(
-        0,
-        notificationLimit
-      ),
+    ...active
+      .filter((item) => !isTransmissionItem(item) && !isPackageItem(item))
+      .slice(0, notificationLimit),
 
-    ...sorted
-      .filter(
-        (item) =>
-          isTransmissionItem(item)
-      )
-      .slice(
-        0,
-        downloadLimit
-      )
+    ...active.filter(isPackageItem).slice(0, packageLimit),
+
+    ...active.filter(isTransmissionItem).slice(0, downloadLimit)
   ];
 
-  return selected.map(
-    (item) => ({
-      ...item,
-      age: ageText(
-        Number(item.timestamp || 0),
-        now
-      )
-    })
-  );
+  return selected.map((item) => ({
+    ...item,
+    age: ageText(Number(item.timestamp || 0), now)
+  }));
 }
 
 module.exports = {
   pollAll,
   pollGmail,
   pollProton,
-  pollTransmission
+  pollTransmission,
+  // Exported for scripts/dev-poll.js and the checks in scripts/check-packages.js
+  extractPackageInfo,
+  deduplicate,
+  detectCarrier,
+  stableKey
 };

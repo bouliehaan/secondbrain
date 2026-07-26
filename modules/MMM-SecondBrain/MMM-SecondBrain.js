@@ -1,13 +1,25 @@
+/* global Module */
+
+// How often the browser nudges the backend as a liveness check, not a poll rate.
+const LIVENESS_REFRESH_MS = 5 * 60 * 1000;
+
 Module.register("MMM-SecondBrain", {
   defaults: {
+    /*
+     * The backend owns the poll schedule and enforces its own floor; anything
+     * faster than a minute here is clamped there rather than honoured.
+     */
     pollIntervalMs: 60 * 1000,
 
     /*
-     * maxItems remains the maximum number of ordinary notifications.
-     * The backend independently reserves one slot for Transmission.
+     * Notifications, packages and Transmission each get their own slots, so a
+     * busy inbox cannot crowd out a shipment or an active download.
      */
     maxItems: 3,
-    configDir: "/etc/magicmirror-secondbrain"
+    maxPackageItems: 3,
+
+    configDir: "/etc/magicmirror-secondbrain",
+    stateDir: "/var/lib/magicmirror-secondbrain"
   },
 
   start() {
@@ -32,15 +44,14 @@ Module.register("MMM-SecondBrain", {
       10 * 1000
     );
 
+    /*
+     * A slow liveness nudge, not the poll schedule. The backend polls on its own
+     * timer; this only matters if the browser has been suspended and reloaded,
+     * and the backend rate-limits it either way.
+     */
     this.refreshTimer = window.setInterval(
       () => this.requestRefresh(),
-      Math.max(
-        2 * 1000,
-        Number(
-          this.config.pollIntervalMs ||
-          60 * 1000
-        )
-      )
+      LIVENESS_REFRESH_MS
     );
   },
 
@@ -81,15 +92,18 @@ Module.register("MMM-SecondBrain", {
         pollIntervalMs:
           this.config.pollIntervalMs,
 
-        /*
-         * The backend interprets this as the notification limit.
-         * One separate Transmission item is also reserved.
-         */
+        // The backend reads this as the notification limit only.
         maxItems:
           this.config.maxItems,
 
+        maxPackageItems:
+          this.config.maxPackageItems,
+
         configDir:
-          this.config.configDir
+          this.config.configDir,
+
+        stateDir:
+          this.config.stateDir
       }
     );
   },
