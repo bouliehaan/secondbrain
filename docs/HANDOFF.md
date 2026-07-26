@@ -1,59 +1,64 @@
-MAGICMIRROR CLOCK / KIOSK HANDOFF
-================================
+# Kiosk and clock constraints
 
-PRIMARY GOAL
-------------
+Carried over from the original handoff notes. These are hard-won operational
+facts about the physical mirror, not preferences — the clock and kiosk layer is
+the part most easily broken from a laptop, because none of it is visible from
+here.
 
-Replace or improve only the external clock renderer while preserving the
-existing MagicMirror dashboard and layout.
+## Environment
 
-The current separate native clock solved the original time-accuracy problem,
-but its rendering has these defects:
+| | |
+|---|---|
+| OS | Ubuntu Server 24.04.x |
+| MagicMirror | 2.37.x at `/opt/MagicMirror` |
+| Display stack | LightDM + Openbox, X11 on `DISPLAY=:0` |
+| Browser | Chromium snap, kiosk mode |
+| Kiosk user | `calendar-display` |
+| Web port | 43761 (see `system/magicmirror-port`) |
+| Time | Chrony synchronised against NIST |
 
-- Text is always white, including on the light theme.
-- Text appears pixelated.
-- Previous digits remain briefly visible during redraws.
-- Seconds must remain accurately synchronized with the system clock.
-- Seconds must use the same size and weight as the hour/minute text.
-- A colon must appear between minutes and seconds.
+Do not assume this is still exact. Read the live system before changing it —
+`scripts/pull-from-pi.sh --diff` is the cheapest way to see what the mirror
+actually looks like now.
 
-NON-NEGOTIABLE CONSTRAINTS
---------------------------
+## Constraints
 
-- Do not redesign or reflow the MagicMirror layout.
-- Do not remove Chromium kiosk mode merely to accommodate another overlay.
-- Do not change calendar, weather, agenda, notification, or download modules.
-- Do not alter the working system clock/NTP configuration.
-- Do not disable the current native clock until a replacement is visibly proven.
-- Preserve an automatic fallback to the current native clock.
-- Test against the real LightDM/Openbox X11 session on DISPLAY=:0.
-- A process existing is not proof that a window is visible.
-- A window being mapped is not proof that it is above Chromium.
-- Do not use an isolated Xvfb test as production verification.
-- Terminal instructions must be one directly pasteable heredoc block.
+- Do not redesign or reflow the dashboard layout.
+- Do not remove Chromium kiosk mode to accommodate an overlay.
+- Do not alter the working system clock / NTP configuration.
+- Do not disable the current clock until a replacement is *visibly* proven.
+- Preserve an automatic fallback to the native clock.
+- Test against the real LightDM/Openbox session on `DISPLAY=:0`.
+  An isolated Xvfb test is not production verification.
 
-EXPECTED ENVIRONMENT
---------------------
+## Verification traps
 
-- Ubuntu Server 24.04.x
-- MagicMirror 2.37.x
-- LightDM
-- Openbox
-- Chromium snap
-- X11 DISPLAY=:0
-- Kiosk user: calendar-display
-- MagicMirror installation: /opt/MagicMirror
-- MagicMirror web port has previously been 43761
-- Current clock has been launched separately from Chromium
-- Chrony is synchronized against NIST
+These are the specific ways a clock change looks fine and is not:
 
-IMPORTANT
----------
+- **A running process is not a visible window.** Check the X11 window tree.
+- **A mapped window is not a window above Chromium.** Kiosk Chromium will
+  happily cover it.
+- Confirm on the physical display before believing any of it.
 
-Do not assume the expected environment above is still exact. Read the included
-live diagnostics, process list, launchers, configuration files, logs, and X11
-window tree before modifying anything.
+## Clock renderer defects (original goal)
 
-The archive has been sanitized. Credentials, private calendar share tokens,
-email addresses, phone numbers, and obvious authentication secrets have been
-redacted.
+The separate native clock fixed the time-accuracy problem but rendered badly:
+
+- text always white, including on the light theme
+- text visibly pixelated
+- previous digits briefly ghosting during redraw
+- seconds must stay accurate to the system clock
+- seconds must match hour/minute size and weight
+- a colon belongs between minutes and seconds
+
+`clock/magicmirror-python-clock.py` is the current renderer.
+
+## Sanitisation note
+
+This repo began as a sanitised export. Credentials, calendar share tokens, email
+addresses and phone numbers were redacted from it. Real secrets live only on the
+mirror at `/etc/magicmirror-secondbrain/` and are never committed —
+`config/secondbrain/` holds `*.example.json` templates only.
+
+Automated redaction is not a guarantee. Check before sharing anything from here
+publicly.
