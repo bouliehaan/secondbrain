@@ -3,6 +3,13 @@
 const NodeHelper = require("node_helper");
 const { pollAll } = require("./lib/sources");
 
+/*
+ * Every poll opens a fresh IMAP session per account. Polling faster than this
+ * gets the upstream account throttled and, on Gmail, temporarily locked out --
+ * so the floor is enforced here rather than trusted to config.
+ */
+const MINIMUM_POLL_INTERVAL_MS = 60 * 1000;
+
 // MAGICMIRROR-GV-SANITIZER-V1
 const GOOGLE_VOICE_GAP =
   String.raw`(?:\s|&nbsp;|&#160;|<[^>]*>)*`;
@@ -75,12 +82,15 @@ module.exports = NodeHelper.create({
   start() {
     this.config = {
       configDir: "/etc/magicmirror-secondbrain",
+      stateDir: "/var/lib/magicmirror-secondbrain",
       maxItems: 3,
-      pollIntervalMs: 60 * 1000
+      maxPackageItems: 3,
+      pollIntervalMs: MINIMUM_POLL_INTERVAL_MS
     };
 
     this.timer = null;
     this.polling = false;
+    this.lastPollAt = 0;
   },
 
   stop() {
@@ -92,22 +102,41 @@ module.exports = NodeHelper.create({
 
   socketNotificationReceived(notification, payload) {
     if (notification === "SECOND_BRAIN_CONFIG") {
+      const requestedInterval = Number(
+        payload?.pollIntervalMs ||
+        MINIMUM_POLL_INTERVAL_MS
+      );
+
+      if (requestedInterval < MINIMUM_POLL_INTERVAL_MS) {
+        console.warn(
+          `[MMM-SecondBrain] pollIntervalMs of ${requestedInterval}ms is ` +
+          `below the ${MINIMUM_POLL_INTERVAL_MS}ms floor and would get the ` +
+          "mail accounts throttled. Using the floor instead."
+        );
+      }
+
       this.config = {
         configDir:
           payload?.configDir ||
           "/etc/magicmirror-secondbrain",
+
+        stateDir:
+          payload?.stateDir ||
+          "/var/lib/magicmirror-secondbrain",
 
         maxItems: Math.max(
           1,
           Number(payload?.maxItems || 3)
         ),
 
+        maxPackageItems: Math.max(
+          0,
+          Number(payload?.maxPackageItems ?? 3)
+        ),
+
         pollIntervalMs: Math.max(
-          2 * 1000,
-          Number(
-            payload?.pollIntervalMs ||
-            60 * 1000
-          )
+          MINIMUM_POLL_INTERVAL_MS,
+          requestedInterval
         )
       };
 
@@ -118,6 +147,17 @@ module.exports = NodeHelper.create({
     }
 
     if (notification === "SECOND_BRAIN_REFRESH") {
+      /*
+       * A refresh request from the browser is a hint, not a command. The backend
+       * owns the schedule, so an over-eager or repeatedly reloading frontend can
+       * never drive the poll rate past the floor.
+       */
+      const sinceLastPoll = Date.now() - this.lastPollAt;
+
+      if (sinceLastPoll < this.config.pollIntervalMs) {
+        return;
+      }
+
       this.pollNow();
     }
   },
@@ -139,12 +179,15 @@ module.exports = NodeHelper.create({
     }
 
     this.polling = true;
+    this.lastPollAt = Date.now();
 
     try {
       const items = await pollAll(
         this.config.configDir,
         {
-          maxItems: this.config.maxItems
+          maxItems: this.config.maxItems,
+          maxPackageItems: this.config.maxPackageItems,
+          stateDir: this.config.stateDir
         },
         console
       );
