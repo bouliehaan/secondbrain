@@ -85,12 +85,68 @@ module.exports = NodeHelper.create({
       stateDir: "/var/lib/magicmirror-secondbrain",
       maxItems: 3,
       maxPackageItems: 3,
+      packageStaleAfterHours: 36,
       pollIntervalMs: MINIMUM_POLL_INTERVAL_MS
     };
 
     this.timer = null;
     this.polling = false;
     this.lastPollAt = 0;
+    this.webhookItems = new Map();
+
+    if (this.expressApp) {
+      this.expressApp.post("/secondbrain/webhook", (req, res) => {
+        const handlePayload = (payload) => {
+          const { id, title, detail, kind, ttl } = payload || {};
+          
+          if (!id) {
+            return res.status(400).json({ error: "Missing 'id' in payload" });
+          }
+
+          const expiresAt = typeof ttl === "number" ? Date.now() + ttl * 1000 : null;
+
+          this.webhookItems.set(id, {
+            id: `webhook:${id}`,
+            kind: kind || "warning",
+            label: "Webhook",
+            title: title || "Alert",
+            detail: detail || "",
+            timestamp: Date.now(),
+            expiresAt
+          });
+
+          // Trigger a poll to instantly show the new item
+          this.pollNow();
+          res.json({ success: true, id });
+        };
+
+        if (req.body && Object.keys(req.body).length > 0) {
+          let body = req.body;
+          if (typeof body === 'string') {
+              try { body = JSON.parse(body); } catch(e) {}
+          }
+          handlePayload(body);
+        } else {
+          let data = "";
+          req.on("data", chunk => { data += chunk; });
+          req.on("end", () => {
+              let parsed = {};
+              try { parsed = JSON.parse(data); } catch(e) {}
+              handlePayload(parsed);
+          });
+        }
+      });
+
+      this.expressApp.delete("/secondbrain/webhook/:id", (req, res) => {
+        const { id } = req.params;
+        if (this.webhookItems.has(id)) {
+          this.webhookItems.delete(id);
+          this.pollNow();
+          return res.json({ success: true, deleted: true });
+        }
+        res.status(404).json({ error: "Not found" });
+      });
+    }
   },
 
   stop() {
@@ -132,6 +188,15 @@ module.exports = NodeHelper.create({
         maxPackageItems: Math.max(
           0,
           Number(payload?.maxPackageItems ?? 3)
+        ),
+
+        /*
+         * How long a shipment stays on the wall after the last mail about it.
+         * Zero or absent falls back to the library default.
+         */
+        packageStaleAfterHours: Math.max(
+          0,
+          Number(payload?.packageStaleAfterHours ?? 36)
         ),
 
         pollIntervalMs: Math.max(
@@ -187,20 +252,37 @@ module.exports = NodeHelper.create({
         {
           maxItems: this.config.maxItems,
           maxPackageItems: this.config.maxPackageItems,
+          packageStaleAfterHours: this.config.packageStaleAfterHours,
           stateDir: this.config.stateDir
         },
         console
       );
 
+      // Clean up expired webhooks
+      const now = Date.now();
+      for (const [id, item] of this.webhookItems.entries()) {
+        if (item.expiresAt && now > item.expiresAt) {
+          this.webhookItems.delete(id);
+        }
+      }
+
+      const activeWebhooks = Array.from(this.webhookItems.values()).map(item => {
+        // Strip expiresAt before sending to frontend
+        const { expiresAt, ...rest } = item;
+        return rest;
+      });
+
+      const finalItems = [...activeWebhooks, ...items];
+
       console.log(
         `[MMM-SecondBrain] Publishing ` +
-        `${items.length} item(s) to display.`
+        `${finalItems.length} item(s) to display.`
       );
 
       this._sendSanitizedSocketNotification(
         "SECOND_BRAIN_UPDATE",
         {
-          items,
+          items: finalItems,
           generatedAt: Date.now()
         }
       );

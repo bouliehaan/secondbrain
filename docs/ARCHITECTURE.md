@@ -65,8 +65,18 @@ competing for one shared list.
 
 **Gmail** (`pollGmail`) — three separate scans per account: unread mail in a
 dedicated label (default `Wall-Display`), Google Voice notifications in the
-inbox, and package mail in All Mail. Mailboxes are resolved by IMAP special-use
-where possible, since Gmail localises visible folder names.
+inbox, and package mail in All Mail.
+
+A configured mailbox name is resolved first and IMAP special-use is the
+fallback, not the other way round — special-use still covers Gmail localising
+its visible folder names, but resolving it first meant an explicit
+`packageMailbox` was silently ignored.
+
+Google Voice cards expire on `voiceDisplayMinutes` (default 60) regardless of
+which of the two scans found them. `voiceMaxAgeMinutes` only sets how far back
+the inbox scan looks, and is raised to the display window if it is shorter. A
+text picked up from the important mailbox previously had no age limit at all
+and sat on the wall until it was read for real.
 
 **Proton** (`pollProton`) — talks to the local Proton Mail Bridge on
 `127.0.0.1:1143`, not to Proton directly. The bridge must be running.
@@ -125,8 +135,49 @@ inheriting the best title and any identifiers the other messages carried.
 **Persistence.** Retailers stop mentioning a shipment once delivered, so state
 outlives the mail. `package_state.json` lives in `stateDir`
 (`/var/lib/magicmirror-secondbrain`) — *not* beside the module, which the
-service user cannot write. Delivered items are kept 48h. An unwritable directory
-degrades to in-memory with one warning rather than one per poll.
+service user cannot write. An unwritable directory degrades to in-memory with
+one warning rather than one per poll.
+
+**State must expire.** Every cached package carries a `lastSeenAt`, refreshed
+whenever a message in the current scan still describes it. An entry is dropped
+when it is delivered and older than 48h, when nothing has mentioned it for 6h,
+or when it is 10 days old whatever its status. Without the middle rule an order
+that never produced a delivery mail — most of them — stayed cached forever and
+was republished on every poll, which is why archiving the mail never cleared
+the card.
+
+The forget-pass only runs if some account actually read its package mailbox.
+`fetchPackageEmails` returns `null` on failure rather than `[]` precisely so
+that "the mailbox is empty" and "the mailbox could not be read" stay
+distinguishable; otherwise one outage longer than 6h would erase every shipment.
+
+`lastSeenAt` is stripped before the payload reaches the browser. It changes
+every poll, and the frontend skips its DOM update by comparing the serialised
+payload against the previous one — a field that always differs would defeat
+that and flash the wall once a minute.
+
+**Two different expiries, and only one of them ends up mattering.** Bounding the
+state file stops a card outliving its *mail*. It does nothing about a card
+outliving its *usefulness*, because while the mail is still inside the scan
+window every poll simply rebuilds the card from that same message and refreshes
+its `lastSeenAt`. Expiring the cached entry is futile in that window.
+
+So the rule that actually retires a shipment is a display filter:
+`pruneStalePackages` drops anything whose newest message is older than
+`packageStaleAfterHours` (default 36). `deduplicate` keeps the newest message
+for a shipment, so `timestamp` is the age of the latest news about it — one that
+shipped days ago and has said nothing since has almost certainly arrived.
+
+This is what catches `Shipped` and `Delayed`, which reach none of the other
+rules: they are not `Delivered`, not `Out for delivery`, and not old enough for
+the 10-day ceiling, so before this they sat on the wall for the entire
+`packageMaxAgeDays` window.
+
+**Archiving.** The default package mailbox is All Mail, which by definition
+still holds archived mail, so archiving an order does not remove it from the
+scan and is not a way to dismiss a card. Point `packageMailbox` at `INBOX` if
+you want it to be — that setting is honoured now that a configured name beats
+special-use.
 
 ## Configuration
 
