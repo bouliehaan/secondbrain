@@ -18,6 +18,14 @@ Module.register("MMM-SecondBrain", {
     maxItems: 3,
     maxPackageItems: 3,
 
+    /*
+     * How long a shipment stays on the wall after the last mail that mentioned
+     * it. Not the same as how far back the mailbox is scanned: the mail sits in
+     * All Mail for a week, so without this a package that shipped days ago and
+     * went quiet keeps being rebuilt from the same message.
+     */
+    packageStaleAfterHours: 36,
+
     configDir: "/etc/magicmirror-secondbrain",
     stateDir: "/var/lib/magicmirror-secondbrain"
   },
@@ -98,6 +106,9 @@ Module.register("MMM-SecondBrain", {
 
         maxPackageItems:
           this.config.maxPackageItems,
+
+        packageStaleAfterHours:
+          this.config.packageStaleAfterHours,
 
         configDir:
           this.config.configDir,
