@@ -11,9 +11,16 @@
  *   node scripts/check-packages.js
  */
 
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
 const {
   extractPackageInfo,
-  deduplicate
+  deduplicate,
+  resolveMailbox,
+  persistAndMergePackages,
+  pruneStalePackages
 } = require("../modules/MMM-SecondBrain/lib/sources.js");
 
 let failures = 0;
@@ -281,6 +288,172 @@ async function run() {
   check(
     "a refund does not become a package",
     (await extractPackageInfo(refund)) === null
+  );
+
+  /* ---------------------------------------------------------------- *
+   * Regression: a package must not live in the state file forever.
+   *
+   * Only Delivered entries were ever pruned, so an order that never
+   * produced a delivery mail stayed cached permanently and was
+   * republished on every poll -- archiving the order and shipping mail
+   * did nothing, because nothing ever removed the card.
+   * ---------------------------------------------------------------- */
+  const quiet = { error() {} };
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "secondbrain-checks-"));
+
+  const day = 86400000;
+  const hour = 3600000;
+
+  const stuck = {
+    id: "package:amazon:114-0000000-0000001",
+    kind: "package",
+    title: "Something ordered a week ago",
+    status: "Shipped",
+    orderId: "114-0000000-0000001",
+    trackingId: null,
+    timestamp: Date.now() - 7 * day,
+    lastSeenAt: Date.now() - 2 * day
+  };
+
+  fs.writeFileSync(
+    path.join(stateDir, "package_state.json"),
+    JSON.stringify([stuck])
+  );
+
+  const afterScan = persistAndMergePackages([], stateDir, quiet, true);
+
+  check(
+    "a shipment no mail has mentioned for days is forgotten",
+    !afterScan.some((item) => item.id === stuck.id),
+    `still present: ${JSON.stringify(afterScan.map((i) => i.id))}`
+  );
+
+  /*
+   * ...but only when a scan actually ran. A mail outage contributes no
+   * messages, and must not be mistaken for "nothing is in flight".
+   */
+  fs.writeFileSync(
+    path.join(stateDir, "package_state.json"),
+    JSON.stringify([stuck])
+  );
+
+  const afterOutage = persistAndMergePackages([], stateDir, quiet, false);
+
+  check(
+    "a failed mail scan does not erase remembered shipments",
+    afterOutage.some((item) => item.id === stuck.id),
+    "the card was dropped even though no mailbox could be read"
+  );
+
+  /* A shipment the current scan still sees is kept. */
+  const fresh = {
+    ...stuck,
+    id: "package:amazon:114-0000000-0000002",
+    orderId: "114-0000000-0000002",
+    timestamp: Date.now() - hour
+  };
+  delete fresh.lastSeenAt;
+
+  fs.writeFileSync(path.join(stateDir, "package_state.json"), "[]");
+
+  const kept = persistAndMergePackages([fresh], stateDir, quiet, true);
+
+  check(
+    "a shipment the scan still sees stays on the board",
+    kept.some((item) => item.id === fresh.id),
+    "a live shipment was dropped"
+  );
+
+  check(
+    "lastSeenAt is recorded so the next poll can age it out",
+    Number(kept.find((item) => item.id === fresh.id)?.lastSeenAt) > 0,
+    "no lastSeenAt was stamped"
+  );
+
+  fs.rmSync(stateDir, { recursive: true, force: true });
+
+  /* ---------------------------------------------------------------- *
+   * Regression: a shipment that went quiet days ago leaves the wall.
+   *
+   * Bounding the state file was not enough on its own. The shipping mail
+   * stays in All Mail for packageMaxAgeDays, so every poll rebuilt the
+   * card from the same message and refreshed its lastSeenAt -- a package
+   * that shipped two or three days ago and was never marked delivered sat
+   * on the display for the whole scan window. "Shipped" and "Delayed"
+   * reached none of the other prune rules.
+   * ---------------------------------------------------------------- */
+  const shipmentAged = (hours, status = "Shipped") => ({
+    id: `package:amazon:aged-${hours}-${status}`,
+    kind: "package",
+    status,
+    title: `Shipped ${hours}h ago`,
+    orderId: `114-0000000-000${hours}`,
+    timestamp: Date.now() - hours * 3600000
+  });
+
+  const board = pruneStalePackages(
+    [
+      shipmentAged(2 * 24),
+      shipmentAged(3 * 24),
+      shipmentAged(4, "Shipped"),
+      shipmentAged(8, "Delayed")
+    ],
+    36 * 3600000
+  );
+
+  const survived = board.map((item) => item.title);
+
+  check(
+    "a shipment that went quiet two days ago is dropped",
+    !survived.includes("Shipped 48h ago"),
+    `still shown: ${JSON.stringify(survived)}`
+  );
+
+  check(
+    "a shipment that went quiet three days ago is dropped",
+    !survived.includes("Shipped 72h ago"),
+    `still shown: ${JSON.stringify(survived)}`
+  );
+
+  check(
+    "a shipment with news today is kept",
+    survived.includes("Shipped 4h ago"),
+    `board was ${JSON.stringify(survived)}`
+  );
+
+  check(
+    "a Delayed shipment is aged out on the same rule",
+    pruneStalePackages([shipmentAged(5 * 24, "Delayed")], 36 * 3600000).length === 0,
+    "a stale Delayed card survived"
+  );
+
+  check(
+    "the stale window is configurable",
+    pruneStalePackages([shipmentAged(2 * 24)], 7 * 24 * 3600000).length === 1,
+    "a longer window did not keep the card"
+  );
+
+  /* ---------------------------------------------------------------- *
+   * Regression: an explicitly configured mailbox beats special-use.
+   *
+   * Resolving special-use first meant packageMailbox: "INBOX" silently
+   * kept scanning All Mail, so the setting appeared to do nothing.
+   * ---------------------------------------------------------------- */
+  const gmailFolders = [
+    { path: "INBOX", specialUse: "\\Inbox" },
+    { path: "[Gmail]/All Mail", specialUse: "\\All" }
+  ];
+
+  check(
+    "a configured mailbox name wins over special-use",
+    resolveMailbox(gmailFolders, "INBOX", "\\All") === "INBOX",
+    `got ${resolveMailbox(gmailFolders, "INBOX", "\\All")}`
+  );
+
+  check(
+    "special-use still resolves a name that does not match",
+    resolveMailbox(gmailFolders, "All Mail", "\\All") === "[Gmail]/All Mail",
+    `got ${resolveMailbox(gmailFolders, "All Mail", "\\All")}`
   );
 
   console.log(

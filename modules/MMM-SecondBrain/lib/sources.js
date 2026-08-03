@@ -14,6 +14,78 @@ const { resolveVoiceContact } = require("./contacts");
  */
 const DEFAULT_STATE_DIR = "/var/lib/magicmirror-secondbrain";
 
+/*
+ * How long a Google Voice notification stays on the wall.
+ *
+ * This is deliberately not the same knob as the scan window: how far back to
+ * look and how long to keep showing something are different questions, and only
+ * the second one decides when a text finally leaves the display.
+ */
+const DEFAULT_VOICE_DISPLAY_MINUTES = 60;
+
+/*
+ * A package card outlives the mail that announced it, because retailers stop
+ * mentioning a shipment once it has been delivered.
+ *
+ * It must not outlive it forever, though. An order that never produces a
+ * delivery mail -- the common case, since plenty of shipments are only ever
+ * "Ordered" or "Shipped" -- used to stay in package_state.json permanently and
+ * be republished on every poll. That is why archiving the order and shipping
+ * mail did not clear the card: nothing ever removed it. Once no message in the
+ * scan has mentioned a shipment for this long, it is forgotten.
+ */
+const PACKAGE_FORGET_AFTER_MS = 6 * 60 * 60 * 1000;
+
+/* A hard ceiling on a package card's life, whatever its status claims. */
+const PACKAGE_MAX_AGE_MS = 10 * 24 * 60 * 60 * 1000;
+
+/*
+ * How long a shipment stays on the wall after the last thing anyone said about
+ * it. This has to be a *display* rule, not a state one: the mail that created
+ * the card is still sitting in All Mail for `packageMaxAgeDays`, so expiring the
+ * cached entry would only make the next poll rebuild it from the same message.
+ * Bounding the state file stops a card outliving its mail; this is what stops it
+ * outliving its usefulness.
+ */
+const PACKAGE_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
+
+/*
+ * ImapFlow reports every NO/BAD response as the same bare "Command failed" and
+ * hangs the actual reason off the error object. Logging only `message` turns a
+ * permanent failure into an undiagnosable one -- which is exactly what the
+ * Proton path did. `executedCommand` is ImapFlow's own logging copy, compiled
+ * with credentials already masked.
+ */
+function imapErrorDetail(error) {
+  if (!error) {
+    return "unknown error";
+  }
+
+  const parts = [error.message || String(error)];
+
+  if (error.responseText && error.responseText !== error.message) {
+    parts.push(error.responseText);
+  }
+
+  if (error.serverResponseCode) {
+    parts.push(`[${error.serverResponseCode}]`);
+  }
+
+  if (error.authenticationFailed) {
+    parts.push("authentication failed");
+  }
+
+  if (error.code && error.code !== error.serverResponseCode) {
+    parts.push(`(${error.code})`);
+  }
+
+  if (error.executedCommand) {
+    parts.push(`while running: ${error.executedCommand}`);
+  }
+
+  return parts.join(" — ");
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -194,17 +266,19 @@ function envelopeAddress(addresses) {
   return first.name || first.address || "Unknown sender";
 }
 
+/*
+ * A configured name wins; special-use is the fallback, not the override.
+ *
+ * Resolving special-use first meant `packageMailbox: "INBOX"` silently kept
+ * scanning All Mail, because the \All folder was matched before the requested
+ * name was ever looked at -- the setting appeared to do nothing at all.
+ *
+ * Falling back to special-use still covers the case it was added for: Gmail
+ * localises its visible folder names, so a default like "All Mail" will not
+ * match by name on a non-English account, and \All finds it anyway.
+ */
 function resolveMailbox(mailboxes, requested, specialUse = null) {
   const name = String(requested || "").trim();
-
-  if (specialUse) {
-    const special = mailboxes.find(
-      (mailbox) => String(mailbox.specialUse || "").toLowerCase() === specialUse.toLowerCase()
-    );
-    if (special) {
-      return special.path;
-    }
-  }
 
   const exact = mailboxes.find((mailbox) => mailbox.path === name);
   if (exact) {
@@ -215,8 +289,20 @@ function resolveMailbox(mailboxes, requested, specialUse = null) {
   const insensitive = mailboxes.find(
     (mailbox) => String(mailbox.path || "").toLowerCase() === lowered
   );
+  if (insensitive) {
+    return insensitive.path;
+  }
 
-  return insensitive?.path || null;
+  if (specialUse) {
+    const special = mailboxes.find(
+      (mailbox) => String(mailbox.specialUse || "").toLowerCase() === specialUse.toLowerCase()
+    );
+    if (special) {
+      return special.path;
+    }
+  }
+
+  return null;
 }
 
 /*
@@ -422,8 +508,10 @@ async function fetchPackageEmails(client, mailbox, since, options = {}, log = co
 
     return await attachSources(client, candidates);
   } catch (error) {
-    log.error(`[MMM-SecondBrain] Package scan of '${mailbox}' failed: ${error.message}`);
-    return [];
+    log.error(
+      `[MMM-SecondBrain] Package scan of '${mailbox}' failed: ${imapErrorDetail(error)}`
+    );
+    return null;
   } finally {
     if (lock) {
       lock.release();
@@ -728,7 +816,7 @@ async function extractPackageInfo(message) {
  * Run the package scan for one already-connected account. Failures are contained
  * here so that a bad package scan can never take down ordinary mail polling.
  */
-async function collectPackages(client, mailbox, account, results, log) {
+async function collectPackages(client, mailbox, account, results, log, report = null) {
   if (!mailbox || account.monitorPackages === false) {
     return;
   }
@@ -747,6 +835,20 @@ async function collectPackages(client, mailbox, account, results, log) {
     log
   );
 
+  /*
+   * A failed scan returns null rather than an empty array. The difference
+   * matters: "the mailbox holds no package mail" and "the mailbox could not be
+   * read" look identical downstream, and treating the second as the first would
+   * let one outage expire every remembered shipment.
+   */
+  if (messages === null) {
+    return;
+  }
+
+  if (report) {
+    report.scanned = true;
+  }
+
   for (const message of messages) {
     try {
       const info = await extractPackageInfo(message);
@@ -763,7 +865,7 @@ async function collectPackages(client, mailbox, account, results, log) {
  * Mail sources
  * ------------------------------------------------------------------ */
 
-async function pollGmail(configDir, log = console) {
+async function pollGmail(configDir, log = console, report = null) {
   const accountsDir = path.join(configDir, "gmail", "accounts");
   const results = [];
 
@@ -778,6 +880,21 @@ async function pollGmail(configDir, log = console) {
 
       const accountName = account.displayName || account.email || account.alias || "Gmail";
       const alias = account.alias || account.email || "account";
+
+      /*
+       * One window governs every Google Voice card, whichever mailbox it was
+       * found in. A text picked up from the important mailbox used to have no
+       * age limit at all beyond maxAgeDays, so it sat on the wall until it was
+       * read for real -- up to a fortnight.
+       */
+      const voiceDisplayMs =
+        Math.max(
+          1,
+          Number(account.voiceDisplayMinutes || DEFAULT_VOICE_DISPLAY_MINUTES)
+        ) * 60000;
+
+      const voiceHasExpired = (timestamp) =>
+        Date.now() - Number(timestamp || 0) > voiceDisplayMs;
 
       client = new ImapFlow({
         host: account.host || "imap.gmail.com",
@@ -825,6 +942,12 @@ async function pollGmail(configDir, log = console) {
           const subject = message.envelope?.subject || "No subject";
           const timestamp = messageTimestamp(message);
           const voiceLabel = voiceClassification(sender.address, subject);
+
+          // A text routed into the important mailbox is still a text.
+          if (voiceLabel && voiceHasExpired(timestamp)) {
+            continue;
+          }
+
           const voiceContact = voiceLabel
             ? await resolveVoiceContact(configDir, subject, sender.address, log)
             : null;
@@ -851,7 +974,7 @@ async function pollGmail(configDir, log = console) {
         resolveMailbox(mailboxes, account.packageMailbox || "All Mail", "\\All") ||
         importantMailbox;
 
-      await collectPackages(client, packageMailbox, account, results, log);
+      await collectPackages(client, packageMailbox, account, results, log, report);
 
       if (account.monitorVoice !== false) {
         const voiceMailbox = resolveMailbox(
@@ -864,9 +987,15 @@ async function pollGmail(configDir, log = console) {
           throw new Error("Gmail INBOX could not be found for Google Voice monitoring.");
         }
 
+        /*
+         * How far back to look. Scanning a shorter span than the display window
+         * would retire a text early no matter what the display window says, so
+         * the two are kept consistent here rather than left to config.
+         */
         const voiceMaxAgeMinutes = Math.max(
           5,
-          Number(account.voiceMaxAgeMinutes || 60)
+          Number(account.voiceMaxAgeMinutes || 60),
+          voiceDisplayMs / 60000
         );
         const voiceSince = new Date(Date.now() - voiceMaxAgeMinutes * 60000);
         const voiceMessages = await fetchRecentMailbox(
@@ -887,7 +1016,7 @@ async function pollGmail(configDir, log = console) {
 
           const timestamp = messageTimestamp(message);
 
-          if (Date.now() - timestamp > voiceMaxAgeMinutes * 60000) {
+          if (voiceHasExpired(timestamp)) {
             continue;
           }
 
@@ -914,7 +1043,8 @@ async function pollGmail(configDir, log = console) {
       }
     } catch (error) {
       log.error(
-        `[MMM-SecondBrain] Gmail IMAP account ${path.basename(accountPath)} failed: ${error.message}`
+        `[MMM-SecondBrain] Gmail IMAP account ${path.basename(accountPath)} failed: ` +
+        imapErrorDetail(error)
       );
     } finally {
       if (client) {
@@ -930,7 +1060,7 @@ async function pollGmail(configDir, log = console) {
   return results;
 }
 
-async function pollProton(configDir, log = console) {
+async function pollProton(configDir, log = console, report = null) {
   const accountsDir = path.join(configDir, "proton", "accounts");
   const results = [];
 
@@ -1012,10 +1142,11 @@ async function pollProton(configDir, log = console) {
         }
       }
 
-      await collectPackages(client, mailbox, account, results, log);
+      await collectPackages(client, mailbox, account, results, log, report);
     } catch (error) {
       log.error(
-        `[MMM-SecondBrain] Proton account ${path.basename(accountPath)} failed: ${error.message}`
+        `[MMM-SecondBrain] Proton account ${path.basename(accountPath)} failed: ` +
+        imapErrorDetail(error)
       );
     } finally {
       if (client) {
@@ -1139,6 +1270,7 @@ async function pollTransmission(configDir, log = console) {
             "eta",
             "error",
             "errorString",
+            "addedDate",
             "doneDate",
             "isFinished"
           ]
@@ -1154,6 +1286,7 @@ async function pollTransmission(configDir, log = console) {
       const progress = Math.round(Number(torrent.percentDone || 0) * 100);
       const hasError = Number(torrent.error || 0) !== 0;
       const downloading = [3, 4].includes(Number(torrent.status)) && progress < 100;
+      const addedTimestamp = Number(torrent.addedDate || 0) * 1000 || now;
       const doneTimestamp = Number(torrent.doneDate || 0) * 1000;
       const recentlyCompleted =
         progress >= 100 &&
@@ -1180,7 +1313,14 @@ async function pollTransmission(configDir, log = console) {
           label: "Downloading",
           title: cleanText(torrent.name, 120),
           detail: `${progress}% · ${formatBytesPerSecond(torrent.rateDownload)} · ${formatEta(torrent.eta)}`,
-          timestamp: now,
+          /*
+           * When it was added, not when it was polled. Every active torrent
+           * shares a priority, so timestamp is the only thing separating them;
+           * stamping them all with `now` left the sort a no-op and handed the
+           * single download slot to whichever torrent Transmission listed first
+           * -- which is ID order, so always the oldest one still running.
+           */
+          timestamp: addedTimestamp,
           priority: 45,
           progress
         });
@@ -1228,6 +1368,15 @@ function isPlaceholderTitle(title) {
 function mergePackage(target, source) {
   target.orderId = target.orderId || source.orderId;
   target.trackingId = target.trackingId || source.trackingId;
+
+  /*
+   * A shipment counts as still current if *any* of the messages that describe it
+   * turned up in the latest scan, so the freshest sighting wins the merge.
+   */
+  target.lastSeenAt = Math.max(
+    Number(target.lastSeenAt || 0),
+    Number(source.lastSeenAt || 0)
+  );
 
   if (isPlaceholderTitle(target.title) && !isPlaceholderTitle(source.title)) {
     target.title = source.title;
@@ -1299,7 +1448,7 @@ let stateWriteWarned = false;
  * this the card would vanish the moment its source mail aged out of the scan
  * window.
  */
-function persistAndMergePackages(items, stateDir, log) {
+function persistAndMergePackages(items, stateDir, log, packagesScanned = true) {
   const stateFile = path.join(stateDir || DEFAULT_STATE_DIR, "package_state.json");
 
   let cached = [];
@@ -1318,15 +1467,48 @@ function persistAndMergePackages(items, stateDir, log) {
   const now = Date.now();
   const retainDelivered = 48 * 60 * 60 * 1000;
 
-  cached = cached.filter(
-    (entry) =>
-      !(
-        entry.status === "Delivered" &&
-        now - Number(entry.timestamp || 0) > retainDelivered
-      )
+  /*
+   * Anything this poll found is, by definition, still backed by a message that
+   * is sitting in the mailbox right now. State files written before lastSeenAt
+   * existed fall back to the message timestamp rather than looking infinitely
+   * stale on the first poll after an upgrade.
+   */
+  const seenNow = items.map((item) =>
+    item.kind === "package" ? { ...item, lastSeenAt: now } : item
   );
 
-  const combined = deduplicate([...items, ...cached]);
+  const remembered = cached.map((entry) => ({
+    ...entry,
+    lastSeenAt: Number(entry.lastSeenAt) || Number(entry.timestamp) || 0
+  }));
+
+  const combined = deduplicate([...seenNow, ...remembered]).filter((item) => {
+    if (item.kind !== "package") {
+      return true;
+    }
+
+    if (now - Number(item.timestamp || 0) > PACKAGE_MAX_AGE_MS) {
+      return false;
+    }
+
+    if (
+      item.status === "Delivered" &&
+      now - Number(item.timestamp || 0) > retainDelivered
+    ) {
+      return false;
+    }
+
+    /*
+     * Only forget on the strength of a scan that actually ran. A mail source
+     * that is down contributes nothing, and without this guard an outage longer
+     * than the window would quietly erase every remembered shipment.
+     */
+    if (!packagesScanned) {
+      return true;
+    }
+
+    return now - Number(item.lastSeenAt || 0) <= PACKAGE_FORGET_AFTER_MS;
+  });
 
   try {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true });
@@ -1361,12 +1543,15 @@ const isTransmissionItem = (item) => {
 const isPackageItem = (item) => item?.kind === "package";
 
 /*
- * Drop packages that have stopped being interesting: anything delivered before
- * today, anything that was out for delivery on an earlier day (it has almost
- * certainly arrived), and bare "Ordered" entries with no identifier once a real
- * shipment is already on the board.
+ * Drop packages that have stopped being interesting: anything nothing has said
+ * anything new about in a day and a half, anything delivered before today,
+ * anything that was out for delivery on an earlier day (it has almost certainly
+ * arrived), and bare "Ordered" entries with no identifier once a real shipment
+ * is already on the board.
  */
-function pruneStalePackages(items) {
+function pruneStalePackages(items, staleAfterMs = PACKAGE_STALE_AFTER_MS) {
+  const now = Date.now();
+
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const dayStart = todayStart.getTime();
@@ -1380,6 +1565,17 @@ function pruneStalePackages(items) {
   return items.filter((item) => {
     if (!isPackageItem(item)) {
       return true;
+    }
+
+    /*
+     * `deduplicate` keeps the newest message for a shipment, so timestamp is the
+     * age of the latest news about it. A shipment stops being news long before
+     * its mail leaves the scan window: one that shipped days ago and has said
+     * nothing since has almost certainly arrived, whatever status it got stuck
+     * on -- "Shipped" and "Delayed" never reach any of the rules below.
+     */
+    if (now - Number(item.timestamp || 0) > staleAfterMs) {
+      return false;
     }
 
     if (
@@ -1402,9 +1598,16 @@ function pruneStalePackages(items) {
 }
 
 async function pollAll(configDir, options = {}, log = console) {
+  /*
+   * Set by whichever accounts managed to read their package mailbox this poll.
+   * It gates the forget-pass below, so a dead mail source cannot be mistaken for
+   * an empty one.
+   */
+  const packageScan = { scanned: false };
+
   const settled = await Promise.allSettled([
-    pollGmail(configDir, log),
-    pollProton(configDir, log),
+    pollGmail(configDir, log, packageScan),
+    pollProton(configDir, log, packageScan),
     pollTransmission(configDir, log)
   ]);
 
@@ -1421,7 +1624,12 @@ async function pollAll(configDir, options = {}, log = console) {
 
   const now = Date.now();
 
-  const sorted = persistAndMergePackages(items, options.stateDir, log)
+  const sorted = persistAndMergePackages(
+    items,
+    options.stateDir,
+    log,
+    packageScan.scanned
+  )
     .sort((a, b) => {
       const priorityDifference = Number(b.priority || 0) - Number(a.priority || 0);
 
@@ -1432,7 +1640,12 @@ async function pollAll(configDir, options = {}, log = console) {
       return Number(b.timestamp || 0) - Number(a.timestamp || 0);
     });
 
-  const active = pruneStalePackages(sorted);
+  const staleAfterMs =
+    Number(options.packageStaleAfterHours) > 0
+      ? Number(options.packageStaleAfterHours) * 3600000
+      : PACKAGE_STALE_AFTER_MS;
+
+  const active = pruneStalePackages(sorted, staleAfterMs);
 
   /*
    * Notifications, packages and Transmission each get their own limit, so a
@@ -1458,7 +1671,13 @@ async function pollAll(configDir, options = {}, log = console) {
     ...active.filter(isTransmissionItem).slice(0, downloadLimit)
   ];
 
-  return selected.map((item) => ({
+  /*
+   * lastSeenAt is bookkeeping for the state file and must not reach the browser.
+   * It changes on every poll, and the frontend skips its DOM update by comparing
+   * the serialised payload against the last one -- shipping a field that always
+   * differs would defeat that guard and make the wall flash once a minute.
+   */
+  return selected.map(({ lastSeenAt, ...item }) => ({
     ...item,
     age: ageText(Number(item.timestamp || 0), now)
   }));
@@ -1473,5 +1692,8 @@ module.exports = {
   extractPackageInfo,
   deduplicate,
   detectCarrier,
-  stableKey
+  stableKey,
+  resolveMailbox,
+  persistAndMergePackages,
+  pruneStalePackages
 };

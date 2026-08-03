@@ -1,12 +1,14 @@
 let config = {
-  address: "127.0.0.1",
+  address: "0.0.0.0",
   port: 43761,
   basePath: "/",
 
   ipWhitelist: [
     "127.0.0.1",
     "::ffff:127.0.0.1",
-    "::1"
+    "::1",
+    "192.168.1.0/24",
+    "::ffff:192.168.1.0/24"
   ],
 
   language: "en",
@@ -224,6 +226,15 @@ let config = {
         pollIntervalMs: 60000,
         maxItems: 3,
         maxPackageItems: 3,
+
+        /*
+         * How long a shipment stays on the wall after the last mail about it.
+         * The mail itself lingers in All Mail for a week, so this -- not the
+         * scan window -- is what decides when a package card goes away. Lower
+         * it if shipments outstay their welcome.
+         */
+        packageStaleAfterHours: 36,
+
         configDir: "/etc/magicmirror-secondbrain",
         stateDir: "/var/lib/magicmirror-secondbrain"
       }

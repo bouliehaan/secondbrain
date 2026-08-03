@@ -16,9 +16,13 @@
 
   "monitorVoice": true,
   "voiceMailbox": "INBOX",
+
+  "_comment_voice": "voiceMaxAgeMinutes is how far back to scan; voiceDisplayMinutes is how long a text stays on the wall. Only the second decides when a card disappears.",
   "voiceMaxAgeMinutes": 240,
+  "voiceDisplayMinutes": 60,
   "voiceMaxResults": 100,
 
+  "_comment_packages": "packageMailbox 'All Mail' still contains archived mail, so archiving an order will not clear its card. Set it to 'INBOX' if you want archiving to be how you dismiss a package.",
   "monitorPackages": true,
   "packageMailbox": "All Mail",
   "packageMaxAgeDays": 7,
