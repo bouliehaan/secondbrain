@@ -1,7 +1,7 @@
 "use strict";
 
 const NodeHelper = require("node_helper");
-const { pollAll } = require("./lib/sources");
+const { pollAll, cachedItems } = require("./lib/sources");
 
 /*
  * Every poll opens a fresh IMAP session per account. Polling faster than this
@@ -92,6 +92,7 @@ module.exports = NodeHelper.create({
     this.timer = null;
     this.polling = false;
     this.lastPollAt = 0;
+    this.published = false;
     this.webhookItems = new Map();
 
     if (this.expressApp) {
@@ -205,6 +206,7 @@ module.exports = NodeHelper.create({
         )
       };
 
+      this.publishCached();
       this.schedulePolling();
       this.pollNow();
 
@@ -224,6 +226,61 @@ module.exports = NodeHelper.create({
       }
 
       this.pollNow();
+    }
+  },
+
+  /*
+   * Put the remembered shipments on the wall straight away.
+   *
+   * The frontend hides itself until its first update, and the first poll waits
+   * on every source -- so a slow Gmail or a sulking Proton Bridge used to leave
+   * the panel invisible for minutes, looking for all the world like a module
+   * that had failed to start. This costs a file read and fills the panel in
+   * about a second; the real poll overwrites it moments later.
+   */
+  publishCached() {
+    /*
+     * Only ever before the first real poll. The browser re-sends its config on
+     * resume and while retrying, and only packages are cached -- so publishing
+     * this later would drop mail, Voice and downloads off the wall until the
+     * next poll came round.
+     */
+    if (this.published) {
+      return;
+    }
+
+    try {
+      const items = cachedItems(
+        this.config.stateDir,
+        {
+          maxItems: this.config.maxItems,
+          maxPackageItems: this.config.maxPackageItems,
+          packageStaleAfterHours: this.config.packageStaleAfterHours
+        },
+        console
+      );
+
+      if (items.length === 0) {
+        return;
+      }
+
+      console.log(
+        `[MMM-SecondBrain] Showing ${items.length} remembered item(s) ` +
+        "while the first poll runs."
+      );
+
+      this._sendSanitizedSocketNotification(
+        "SECOND_BRAIN_UPDATE",
+        {
+          items,
+          generatedAt: Date.now()
+        }
+      );
+    } catch (error) {
+      // A cached render is an optimisation; never let it break startup.
+      console.error(
+        `[MMM-SecondBrain] Cached render failed: ${error.message}`
+      );
     }
   },
 
@@ -274,10 +331,18 @@ module.exports = NodeHelper.create({
 
       const finalItems = [...activeWebhooks, ...items];
 
+      /*
+       * The elapsed time is here because its absence cost an afternoon: a poll
+       * that took four minutes logged exactly the same line as one that took
+       * two seconds, so a slow source looked identical to a broken module.
+       */
       console.log(
         `[MMM-SecondBrain] Publishing ` +
-        `${finalItems.length} item(s) to display.`
+        `${finalItems.length} item(s) to display ` +
+        `(poll took ${((Date.now() - this.lastPollAt) / 1000).toFixed(1)}s).`
       );
+
+      this.published = true;
 
       this._sendSanitizedSocketNotification(
         "SECOND_BRAIN_UPDATE",

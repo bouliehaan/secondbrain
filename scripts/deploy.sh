@@ -8,6 +8,12 @@
 # also rewrote the mirror's config with sed on every run and restarted lightdm,
 # tearing down the whole X session. Both are gone.
 #
+# It then spent a week shipping the repo's redacted config.js over the mirror's
+# real one and restarting the server without reloading the kiosk, which stopped
+# the calendar dead in two independent ways and said nothing. So it now restores
+# the private calendar urls before installing, reloads the browser after the
+# restart, and refuses to call a deploy finished until events actually fetch.
+#
 # Usage:
 #   scripts/deploy.sh                 deploy modules + config
 #   scripts/deploy.sh --modules-only  leave config/config.js and custom.css alone
@@ -31,7 +37,7 @@ for arg in "$@"; do
   case "$arg" in
     --modules-only) MODULES_ONLY=1 ;;
     --dry-run)      DRY_RUN="--dry-run" ;;
-    -h|--help)      sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help)      sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -88,6 +94,9 @@ rsync -az $DRY_RUN system/openbox/autostart "$REMOTE:$STAGE/openbox-autostart"
 if [ "$MODULES_ONLY" -eq 0 ]; then
   say "Transferring config"
   rsync -az $DRY_RUN config/config.js "$REMOTE:$STAGE/config.js"
+  # The private calendar urls are redacted in the repo. They are merged back in
+  # on the mirror, just before install -- see merge-config-secrets.js.
+  rsync -az $DRY_RUN scripts/merge-config-secrets.js "$REMOTE:$STAGE/"
   if [ -f config/custom.css ]; then
     rsync -az $DRY_RUN config/custom.css "$REMOTE:$STAGE/custom.css"
   else
@@ -128,6 +137,13 @@ ssh -t "$REMOTE" "set -euo pipefail
   sudo chmod 700 '$STATE_DIR'
 
   if [ -f '$STAGE/config.js' ]; then
+    # The repo carries REDACTED_PRIVATE_PATH where the Nextcloud and Jane urls
+    # belong. Copy the live ones back in first; a deploy that shipped the
+    # placeholders took personal events off the wall for a week without
+    # logging a thing. This exits non-zero rather than install a 404.
+    echo '--> restoring private calendar urls'
+    node '$STAGE/merge-config-secrets.js' '$STAGE/config.js' '$MM_ROOT/config/config.js'
+
     echo '--> config.js'
     [ -f '$MM_ROOT/config/config.js' ] && \
       sudo cp '$MM_ROOT/config/config.js' '$MM_ROOT/config/config.js.bak'
@@ -156,6 +172,15 @@ ssh -t "$REMOTE" "set -euo pipefail
 
   echo '--> restarting magicmirror'
   sudo systemctl restart magicmirror
+
+  # The stock calendar module registers its fetchers when the page loads, and
+  # never again. Restarting the server without reloading the browser leaves a
+  # magicmirror with no calendar fetchers at all: no fetches, no errors, and a
+  # month grid frozen at whatever it last drew. calendar-kiosk runs chromium in
+  # a supervising loop, so killing it is how you reload the wall.
+  echo '--> reloading the kiosk browser'
+  sudo pkill -u ${SERVICE_USER} -f magicmirror-kiosk || \
+    echo '    no kiosk browser was running; it will pick up the new config when it starts'
 "
 
 # ---------------------------------------------------------------------------
@@ -177,6 +202,20 @@ ssh "$REMOTE" "
   sudo journalctl -u magicmirror --since '2 minutes ago' --no-pager \
     | grep -i 'secondbrain' | tail -15 || echo '    (nothing logged yet)'
 "
+
+# ---------------------------------------------------------------------------
+# An active unit is not a syncing calendar either. Give the kiosk time to come
+# back and register its fetchers, then ask whether events are really arriving.
+# ---------------------------------------------------------------------------
+say "Checking calendar sync"
+sleep 25
+
+if ! ssh "$REMOTE" "node -" < scripts/check-calendars.js; then
+  echo >&2
+  echo "The wall is up but its calendar is not syncing. Details above." >&2
+  echo "Previous config: ${MM_ROOT}/config/config.js.bak" >&2
+  exit 1
+fi
 
 say "Deployed"
 cat <<EOF

@@ -50,6 +50,33 @@ const PACKAGE_MAX_AGE_MS = 10 * 24 * 60 * 60 * 1000;
 const PACKAGE_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
 
 /*
+ * How long one source may take before the poll gives up waiting on it.
+ *
+ * This bounds a hang; it is not a latency target. A normal poll finishes in about
+ * 45 seconds and the slow tail reaches three minutes, so a tight deadline would
+ * spend its time abandoning sources that were about to succeed -- and an
+ * abandoned IMAP session is not free, because the next poll opens another one
+ * beside it.
+ *
+ * The reason there is a deadline at all: pollNow() skips while a poll is in
+ * flight, so a source that never returns stops the wall publishing *anything*,
+ * with no error line to say why. Measured on 2026-08-07 that cost 24 minutes of
+ * silence, which is long enough to lose a text outright -- they only live an
+ * hour, while packages are remembered in package_state.json and lose nothing.
+ */
+const DEFAULT_SOURCE_TIMEOUT_MS = 120000;
+
+/*
+ * How stale a source's previous answer may be before a timeout stops reusing it.
+ *
+ * Voice, mail and downloads have no persistence anywhere: if a hung source is
+ * simply dropped from the poll, its cards blink off the wall and back on again
+ * when it recovers. Replaying its last answer for a couple of minutes rides out
+ * a hang without pretending indefinitely that stale news is current.
+ */
+const SOURCE_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
+
+/*
  * ImapFlow reports every NO/BAD response as the same bare "Command failed" and
  * hangs the actual reason off the error object. Logging only `message` turns a
  * permanent failure into an undiagnosable one -- which is exactly what the
@@ -84,6 +111,28 @@ function imapErrorDetail(error) {
   }
 
   return parts.join(" — ");
+}
+
+/**
+ * Stop an IMAP session's asynchronous failures from killing the process.
+ *
+ * ImapFlow reports a connection that breaks between commands as an 'error' event
+ * on the client rather than through the command promise, and Node turns an
+ * 'error' event with no listener into an uncaught exception -- which would take
+ * the whole node helper down. A session abandoned by the poll deadline is
+ * precisely the session most likely to break with nobody left awaiting it.
+ *
+ * Swallowing is safe because the failure that matters is always reported
+ * elsewhere: either the awaited command rejects and the caller logs it, or
+ * pollAll logs the timeout that abandoned the session.
+ *
+ * @param {object} client an ImapFlow instance
+ * @returns {object} the same client
+ */
+function survivesAsyncErrors(client) {
+  client.on("error", () => {});
+
+  return client;
 }
 
 function readJson(filePath) {
@@ -474,6 +523,173 @@ const PACKAGE_SUBJECT_HINTS = [
   "payment"
 ];
 
+/*
+ * What a card says when the subject line does not actually tell us anything.
+ *
+ * "Ordered" used to be the fallback, which made it the one status nobody had to
+ * earn: every unrecognised subject became a confident claim that a purchase had
+ * been made. That is the worst way for this parser to be wrong -- being told you
+ * bought something you did not is alarming in a way that a missing card is not.
+ * Every stage below now has to be *said*, and anything else reports this and
+ * claims nothing.
+ */
+const UNKNOWN_STATUS = "Update";
+
+/*
+ * The delivery vocabulary, newest stage first.
+ *
+ * All three parser branches -- storefront, Amazon, bare carrier -- read from
+ * this one table, because when they each kept their own copy they drifted.
+ * Storefront mail never learned "out for delivery" and Amazon never learned
+ * "delivering today", so in both cases a package already on the van showed on
+ * the wall as though it had just been bought that morning. Add a phrase here
+ * and every sender understands it.
+ */
+const DELIVERY_STAGE_PHRASES = [
+  ["Delivered", [
+    "delivered:", "delivery confirmation", "delivery notification", "delivered"
+  ]],
+  /*
+   * A failed attempt outranks everything below it. It is the one stage that
+   * needs the wall's owner to do something -- arrange redelivery, or go and
+   * fetch it -- so it must not be buried under "Out for delivery", and
+   * pruneStalePackages deliberately leaves it alone the next day.
+   */
+  ["Delivery attempted", [
+    "delivery attempted", "attempted delivery", "unable to deliver",
+    "delivery exception", "sorry we missed you"
+  ]],
+  ["Out for delivery", [
+    "out for delivery", "arriving today", "delivering today", "now delivering",
+    "arrives today", "will arrive today", "expected today", "scheduled for delivery"
+  ]],
+  ["Shipped", ["has shipped", "shipped", "on the way", "on its way"]],
+  ["Delayed", ["delayed", "update on", "running late", "arriving late"]],
+  /*
+   * Last, and evidence-only. Everything above describes a parcel that already
+   * exists, so a subject announcing one of those stages is never also an order
+   * confirmation -- but a confirmation almost always mentions the order.
+   */
+  ["Ordered", [
+    "order confirmed", "order confirmation", "confirmation of your order",
+    "order placed", "thanks for your order", "thank you for your order",
+    "receipt for order", "we received your order", "we've received your order",
+    "order of"
+  ]]
+];
+
+/*
+ * Words that invert the phrase following them.
+ *
+ * Plain substring matching reads "your order will be delivered tomorrow" as
+ * delivered and sends somebody out to an empty porch, and reads "your order has
+ * not shipped yet" as shipped. Both are the same failure as the "Ordered"
+ * fallback: stating something specific that is not true.
+ */
+const NEGATORS = new RegExp(
+  "\\b(?:" +
+  "not|never|no longer|isn't|wasn't|won't|will|would|shall|to be|due to be|" +
+  "about to be|expected to be|scheduled to be|hasn't|haven't|before|once|" +
+  "when|if|unable to|failed to|couldn't|cannot|can't" +
+  ")\\b(?:\\s+\\w+){0,2}\\s*$"
+);
+
+/*
+ * How far back to look for a negator, and how many words may sit between it and
+ * the phrase. Two covers the auxiliaries English puts there -- "will *be*
+ * delivered", "has not *been* delivered", "has not *yet been* delivered" --
+ * without reaching across punctuation into an unrelated clause, so "Do not
+ * reply -- your package has shipped" still reads as shipped.
+ */
+const NEGATOR_WINDOW = 40;
+
+/**
+ * Compile one phrase into a word-boundary matcher.
+ *
+ * Boundaries matter as much as the phrase: a bare `includes("delivered")` also
+ * fires on "undelivered". A trailing boundary is only added when the phrase
+ * ends in a word character, so "delivered:" still matches.
+ *
+ * @param {string} phrase the literal phrase
+ * @returns {RegExp} a global matcher for it
+ */
+function phrasePattern(phrase) {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const trailing = /[a-z0-9]$/i.test(phrase) ? "\\b" : "";
+
+  return new RegExp(`\\b${escaped}${trailing}`, "gi");
+}
+
+const DELIVERY_STAGES = DELIVERY_STAGE_PHRASES.map(([status, phrases]) => ({
+  status,
+  patterns: phrases.map(phrasePattern)
+}));
+
+/*
+ * Which stages a sender can report differs. A bare carrier notice is already a
+ * shipment -- the carrier and tracking number are the evidence -- so "Shipped"
+ * stays its floor. Storefronts are not trusted with "Delayed", because "update
+ * on your order" is as often marketing as it is news.
+ */
+const STOREFRONT_STAGES = [
+  "Delivered", "Delivery attempted", "Out for delivery", "Shipped", "Ordered"
+];
+const RETAILER_STAGES = [
+  "Delivered", "Delivery attempted", "Out for delivery", "Shipped", "Delayed",
+  "Ordered"
+];
+const CARRIER_STAGES = [
+  "Delivered", "Delivery attempted", "Out for delivery", "Delayed"
+];
+
+/**
+ * Does this subject assert this phrase, rather than deny or postpone it?
+ * @param {string} subject the subject line
+ * @param {RegExp} pattern a compiled phrase matcher
+ * @returns {boolean} true if the phrase appears un-negated at least once
+ */
+function asserts(subject, pattern) {
+  pattern.lastIndex = 0;
+
+  let match = pattern.exec(subject);
+
+  while (match !== null) {
+    const before = subject.slice(
+      Math.max(0, match.index - NEGATOR_WINDOW),
+      match.index
+    );
+
+    if (!NEGATORS.test(before)) {
+      return true;
+    }
+
+    match = pattern.exec(subject);
+  }
+
+  return false;
+}
+
+/**
+ * Read a shipment's stage out of its subject line.
+ * @param {string} subject the lowercased subject
+ * @param {string[]} allowed which stages this kind of sender reports
+ * @param {string} fallback the stage to report when the subject says nothing
+ * @returns {string} the status to show on the card
+ */
+function deliveryStatus(subject, allowed, fallback) {
+  for (const { status, patterns } of DELIVERY_STAGES) {
+    if (!allowed.includes(status)) {
+      continue;
+    }
+
+    if (patterns.some((pattern) => asserts(subject, pattern))) {
+      return status;
+    }
+  }
+
+  return fallback;
+}
+
 function looksLikePackageMail(message) {
   const subject = String(message.envelope?.subject || "").toLowerCase();
   const from = message.envelope?.from?.[0];
@@ -683,17 +899,13 @@ async function extractPackageInfo(message) {
       return null;
     }
 
-    let status = "Ordered";
-    if (
-      s.includes("delivered:") || s.includes("delivery confirmation") ||
-      s.includes("delivered")
-    ) {
-      status = "Delivered";
-    } else if (
-      s.includes("shipped") || s.includes("on the way") || s.includes("has shipped")
-    ) {
-      status = "Shipped";
-    }
+    /*
+     * Losing "Out for delivery" here cost the card more than a label: it is what
+     * pruneStalePackages uses to retire a shipment the next day, and what keeps
+     * it clear of the rule that drops unidentified "Ordered" entries once a real
+     * shipment is on the board.
+     */
+    const status = deliveryStatus(s, STOREFRONT_STAGES, UNKNOWN_STATUS);
 
     const storeName = storeNameFor(senderDisplayName, sender);
     const orderKey = genOrderId || `unknown-${stableKey(sender, subject, timestamp)}`;
@@ -725,28 +937,20 @@ async function extractPackageInfo(message) {
       return null;
     }
 
-    let status = "Ordered";
-    if (
-      s.includes("delivered") || s.includes("delivery notification") ||
-      s.includes("delivery confirmation")
-    ) {
-      status = "Delivered";
-    } else if (
-      s.includes("out for delivery") || s.includes("arriving today") ||
-      s.includes("expected today") || s.includes("scheduled for delivery")
-    ) {
-      status = "Out for delivery";
-    } else if (s.includes("shipped") || s.includes("on the way")) {
-      status = "Shipped";
-    } else if (s.includes("delayed") || s.includes("update on")) {
-      status = "Delayed";
-    }
+    const status = deliveryStatus(s, RETAILER_STAGES, UNKNOWN_STATUS);
 
+    // Amazon quotes the item after a stage prefix, and uses several prefixes for
+    // the same stage. A prefix missing from this list costs the card its product
+    // name and leaves it reading "Amazon Package".
     const titleMatch =
       subject.match(/order of "([^"]+)"/i) ||
       subject.match(/Delivered:\s*(.+)/i) ||
       subject.match(/Out for delivery:\s*(.+)/i) ||
       subject.match(/Arriving today:\s*(.+)/i) ||
+      subject.match(/Delivering today:\s*(.+)/i) ||
+      subject.match(/Now delivering:\s*(.+)/i) ||
+      subject.match(/Delivery attempted:\s*(.+)/i) ||
+      subject.match(/Attempted delivery:\s*(.+)/i) ||
       subject.match(/Shipped:\s*(.+)/i);
 
     // Amazon quotes the item in some subject forms and not others.
@@ -775,25 +979,10 @@ async function extractPackageInfo(message) {
 
   /* ---- Bare carrier notification from anyone else ---- */
   if (trackingId && carrier) {
-    let status = "Shipped";
-    let detail = "On the way";
-
-    if (
-      s.includes("delivered") || s.includes("delivery notification") ||
-      s.includes("delivery confirmation")
-    ) {
-      status = "Delivered";
-      detail = "Delivered";
-    } else if (
-      s.includes("out for delivery") || s.includes("arriving today") ||
-      s.includes("expected today") || s.includes("scheduled for delivery")
-    ) {
-      status = "Out for delivery";
-      detail = "Out for delivery";
-    } else if (s.includes("delayed") || s.includes("update on")) {
-      status = "Delayed";
-      detail = "Delayed";
-    }
+    // A carrier notice is already a shipment, so "Shipped" is the floor here
+    // rather than something the subject has to say.
+    const status = deliveryStatus(s, CARRIER_STAGES, "Shipped");
+    const detail = status === "Shipped" ? "On the way" : status;
 
     return {
       id: `package:${carrier.toLowerCase()}:${trackingId}`,
@@ -896,7 +1085,7 @@ async function pollGmail(configDir, log = console, report = null) {
       const voiceHasExpired = (timestamp) =>
         Date.now() - Number(timestamp || 0) > voiceDisplayMs;
 
-      client = new ImapFlow({
+      client = survivesAsyncErrors(new ImapFlow({
         host: account.host || "imap.gmail.com",
         port: Number(account.port || 993),
         secure: account.secure !== false,
@@ -908,7 +1097,7 @@ async function pollGmail(configDir, log = console, report = null) {
           rejectUnauthorized: account.rejectUnauthorized !== false
         },
         logger: false
-      });
+      }));
 
       await client.connect();
       const mailboxes = await client.list();
@@ -1073,7 +1262,7 @@ async function pollProton(configDir, log = console, report = null) {
         continue;
       }
 
-      client = new ImapFlow({
+      client = survivesAsyncErrors(new ImapFlow({
         host: account.host || "127.0.0.1",
         port: Number(account.port || 1143),
         secure: Boolean(account.secure),
@@ -1085,7 +1274,7 @@ async function pollProton(configDir, log = console, report = null) {
           rejectUnauthorized: account.rejectUnauthorized === true
         },
         logger: false
-      });
+      }));
 
       await client.connect();
 
@@ -1559,7 +1748,8 @@ function pruneStalePackages(items, staleAfterMs = PACKAGE_STALE_AFTER_MS) {
   const hasActiveShipment = items.some(
     (item) =>
       isPackageItem(item) &&
-      ["Shipped", "Delivered", "Out for delivery"].includes(item.status)
+      ["Shipped", "Delivered", "Out for delivery", "Delivery attempted"]
+        .includes(item.status)
   );
 
   return items.filter((item) => {
@@ -1586,7 +1776,7 @@ function pruneStalePackages(items, staleAfterMs = PACKAGE_STALE_AFTER_MS) {
     }
 
     if (
-      item.status === "Ordered" &&
+      ["Ordered", UNKNOWN_STATUS].includes(item.status) &&
       String(item.orderId || "").startsWith("unknown-") &&
       hasActiveShipment
     ) {
@@ -1597,39 +1787,165 @@ function pruneStalePackages(items, staleAfterMs = PACKAGE_STALE_AFTER_MS) {
   });
 }
 
+/*
+ * The last answer each source gave, for replaying over a hang.
+ *
+ * Packages are deliberately not kept here. They already survive a missing source
+ * through package_state.json, and replaying them would refresh their lastSeenAt
+ * as though the mail had been seen again -- which is exactly what
+ * PACKAGE_FORGET_AFTER_MS exists to prevent.
+ */
+const lastGoodBySource = new Map();
+
+function rememberSourceItems(name, items) {
+  lastGoodBySource.set(name, {
+    at: Date.now(),
+    items: items.filter((item) => !isPackageItem(item))
+  });
+}
+
+function recentSourceItems(name) {
+  const remembered = lastGoodBySource.get(name);
+
+  if (!remembered || Date.now() - remembered.at > SOURCE_FALLBACK_MAX_AGE_MS) {
+    return null;
+  }
+
+  return remembered;
+}
+
+/**
+ * Run one source against a deadline.
+ *
+ * A source that misses it is abandoned rather than cancelled: ImapFlow offers no
+ * abort hook, and its own `finally` closes the session whenever it does finish.
+ * Letting it run is safe because only pollAll writes state -- a straggler that
+ * lands after the deadline has nowhere to put its results, so it cannot disturb
+ * the poll that went on without it.
+ *
+ * @param {string} name the source, for logging
+ * @param {Promise<object[]>} work the in-flight source poll
+ * @param {number} timeoutMs how long to wait
+ * @returns {Promise<object>} {name, items, error, timedOut, elapsed}
+ */
+function withDeadline(name, work, timeoutMs) {
+  const started = Date.now();
+
+  /*
+   * The loser of the race is still live. Without this its eventual rejection
+   * arrives with nothing attached and takes the whole helper down as an
+   * unhandled rejection.
+   */
+  work.catch(() => {});
+
+  let timer;
+
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(
+      () => resolve({ name, items: [], timedOut: true }),
+      timeoutMs
+    );
+  });
+
+  return Promise.race([
+    work.then(
+      (items) => ({ name, items: Array.isArray(items) ? items : [] }),
+      (error) => ({ name, items: [], error })
+    ),
+    deadline
+  ])
+    .then((outcome) => ({ ...outcome, elapsed: Date.now() - started }))
+    .finally(() => clearTimeout(timer));
+}
+
 async function pollAll(configDir, options = {}, log = console) {
   /*
    * Set by whichever accounts managed to read their package mailbox this poll.
    * It gates the forget-pass below, so a dead mail source cannot be mistaken for
-   * an empty one.
+   * an empty one. A source that times out leaves this false, which is the answer
+   * that keeps its remembered shipments on the wall.
    */
   const packageScan = { scanned: false };
 
-  const settled = await Promise.allSettled([
-    pollGmail(configDir, log, packageScan),
-    pollProton(configDir, log, packageScan),
-    pollTransmission(configDir, log)
+  const timeoutMs = Math.max(
+    30000,
+    Number(options.sourceTimeoutMs || DEFAULT_SOURCE_TIMEOUT_MS)
+  );
+
+  const outcomes = await Promise.all([
+    withDeadline("Gmail", pollGmail(configDir, log, packageScan), timeoutMs),
+    withDeadline("Proton", pollProton(configDir, log, packageScan), timeoutMs),
+    withDeadline("Transmission", pollTransmission(configDir, log), timeoutMs)
   ]);
 
   const items = [];
-  for (const result of settled) {
-    if (result.status === "fulfilled") {
-      items.push(...result.value);
-    } else {
+
+  for (const outcome of outcomes) {
+    if (outcome.timedOut) {
+      const fallback = recentSourceItems(outcome.name);
+
+      /*
+       * Say so on every timeout. A hung source used to produce no log line at
+       * all -- the poll simply never published -- and a gap in the journal is
+       * the hardest possible thing to notice.
+       */
       log.error(
-        `[MMM-SecondBrain] Source poll failed: ${result.reason?.message || result.reason}`
+        `[MMM-SecondBrain] ${outcome.name} did not answer within ` +
+        `${Math.round(timeoutMs / 1000)}s; publishing without it` +
+        (fallback
+          ? `, reusing its ${fallback.items.length} item(s) from ` +
+            `${Math.round((Date.now() - fallback.at) / 1000)}s ago.`
+          : ".")
+      );
+
+      if (fallback) {
+        items.push(...fallback.items);
+      }
+
+      continue;
+    }
+
+    if (outcome.error) {
+      log.error(
+        `[MMM-SecondBrain] Source poll failed: ` +
+        `${outcome.error?.message || outcome.error}`
+      );
+      continue;
+    }
+
+    /*
+     * Name a source that nearly missed the deadline. Every poll used to log the
+     * same line whatever it had spent its time on, so working out which source
+     * was slow meant reading the journal for gaps -- and a source creeping
+     * towards the deadline is the warning that comes before a blackout.
+     */
+    if (outcome.elapsed > timeoutMs / 2) {
+      log.error(
+        `[MMM-SecondBrain] ${outcome.name} took ` +
+        `${(outcome.elapsed / 1000).toFixed(1)}s of its ` +
+        `${Math.round(timeoutMs / 1000)}s deadline.`
       );
     }
+
+    rememberSourceItems(outcome.name, outcome.items);
+    items.push(...outcome.items);
   }
 
+  return present(
+    persistAndMergePackages(items, options.stateDir, log, packageScan.scanned),
+    options
+  );
+}
+
+/*
+ * Sort, prune, cap and dress a set of items for the wall. Split out of pollAll
+ * so that cachedItems() below can put something on screen without waiting for
+ * the network, and get exactly the display the next real poll will produce.
+ */
+function present(merged, options = {}) {
   const now = Date.now();
 
-  const sorted = persistAndMergePackages(
-    items,
-    options.stateDir,
-    log,
-    packageScan.scanned
-  )
+  const sorted = merged
     .sort((a, b) => {
       const priorityDifference = Number(b.priority || 0) - Number(a.priority || 0);
 
@@ -1683,8 +1999,48 @@ async function pollAll(configDir, options = {}, log = console) {
   }));
 }
 
+/*
+ * What the wall can show before any network call finishes.
+ *
+ * The first poll after a restart takes as long as its slowest source -- Gmail
+ * on a bad day, Proton always -- and the panel stays hidden the whole time,
+ * because it only reveals itself once an update arrives. Measured against the
+ * journal that window ran from 18 seconds to over four minutes, and a slow one
+ * is indistinguishable from a dead module.
+ *
+ * Shipments already survive restarts in package_state.json, so they can go up
+ * immediately. Reads only: no network, and no write, so a render can never
+ * disturb the state the real poll is about to merge into.
+ *
+ * @param {string} stateDir where package_state.json lives
+ * @param {object} [options] the same display options pollAll takes
+ * @param {object} [log] logger
+ * @returns {object[]} display-ready items, empty if there is nothing cached
+ */
+function cachedItems(stateDir, options = {}, log = console) {
+  const stateFile = path.join(stateDir || DEFAULT_STATE_DIR, "package_state.json");
+
+  let cached = [];
+
+  try {
+    if (fs.existsSync(stateFile)) {
+      const parsed = readJson(stateFile);
+      cached = Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (error) {
+    // Not worth failing a render over; the real poll will report it properly.
+    log.error(
+      `[MMM-SecondBrain] Could not read cached packages: ${error.message}`
+    );
+    return [];
+  }
+
+  return present(cached, options);
+}
+
 module.exports = {
   pollAll,
+  cachedItems,
   pollGmail,
   pollProton,
   pollTransmission,

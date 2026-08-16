@@ -310,6 +310,27 @@ async function loadContacts(configDir, log = console) {
       `[MMM-SecondBrain] Nextcloud contacts failed: ${error.message}`
     );
 
+    /*
+     * Back off on failure as well as on success.
+     *
+     * Leaving expiresAt in the past made every voice message in the scan retry
+     * the full CardDAV discovery and REPORT. That put the one network call which
+     * runs *only* when there is a text to show onto the critical path of the
+     * whole poll, and the poll publishes nothing until it returns -- so a slow
+     * Nextcloud delayed texts precisely when there were texts to delay.
+     *
+     * The stale map is still served, so cards keep their names; this only bounds
+     * how often a sulking server is asked again. A short window, because the
+     * cheap recovery matters more than the saved request.
+     */
+    if (cache.key !== key) {
+      cache.key = key;
+      cache.contacts = new Map();
+    }
+
+    cache.expiresAt = Date.now() +
+      Math.max(1, Number(config.retryMinutes || 2)) * 60000;
+
     return cache.contacts;
   }
 }
