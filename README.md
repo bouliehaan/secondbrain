@@ -17,7 +17,7 @@ modules/      the three modules written here
 config/       config.js, and *.example.json credential templates
 system/       systemd unit, openbox/lightdm, kiosk launchers, chrony
 clock/        the python clock renderer
-scripts/      deploy, pull, bootstrap, dev tools
+scripts/      deploy, pull, bootstrap, calendar health, dev tools
 docs/         ARCHITECTURE.md, HANDOFF.md
 ```
 
@@ -41,12 +41,74 @@ scripts/deploy.sh --modules-only   # leave config.js and custom.css alone
 
 The mirror defaults to `jake@192.168.1.10`; override with `SECONDBRAIN_REMOTE`.
 
+## Is the calendar actually syncing?
+
+```bash
+scripts/check-calendars.sh
+```
+
+Reads the mirror's live config, fetches every calendar in it, checks that
+something is actually fetching them, and prints today's events — so you can
+compare the feeds against what the wall is showing. No sudo, changes nothing.
+Run it whenever the wall looks stale; the calendar has failed silently twice,
+and neither failure showed up in the log.
+
+Times come out in the kiosk's timezone, which is set by `export TZ` in
+`calendar-kiosk` and is *not* the machine's — the box itself is `Etc/UTC`.
+
+## Private calendar urls
+
+Two of the four calendars are secrets: a Nextcloud public-share token and a Jane
+booking token. Like every other credential they stay out of this repo, so
+`config/config.js` carries `REDACTED_PRIVATE_PATH` where they belong.
+
+**The mirror's own `config.js` is the only copy.** `deploy.sh` reads the live
+urls off the mirror and merges them into the file it installs, so deploying
+never overwrites them, and it aborts rather than install a placeholder.
+
+That is a repair, not a design. For a week `deploy.sh` shipped the redacted file
+verbatim; both private calendars answered 404 and nothing logged it, so personal
+events quietly stopped appearing on the wall. If it happens again:
+
+```bash
+scripts/restore-calendar-urls.sh --dry-run   # recover the urls, change nothing
+scripts/restore-calendar-urls.sh             # install them and reload the wall
+```
+
+It recovers the urls from `journalctl`, which logs them on every fetch, and
+keeps them on the mirror. Journal retention is finite — keep a copy of the
+mirror's `config.js` somewhere backed up.
+
+## Restarting magicmirror is not enough
+
+The stock calendar module registers its fetchers when the **page** loads and
+never again. Restart the service without reloading the kiosk browser and you get
+a server with no calendar fetchers at all: no fetches, no errors, and a month
+grid frozen at whatever it last drew. It stayed that way for six days before
+anyone noticed.
+
+`deploy.sh` and `restore-calendar-urls.sh` reload the browser for you. By hand:
+
+```bash
+ssh jake@192.168.1.10 "sudo pkill -u calendar-display -f magicmirror-kiosk"
+```
+
+`calendar-kiosk` supervises chromium in a loop, so killing it is the reload.
+
 ## Working on the notification logic
 
 Verify the package parser with no mail account and no mirror:
 
 ```bash
 node scripts/check-packages.js
+```
+
+Verify that one sick source cannot take the wall down with it. This stands up a
+fake IMAP server and a fake Nextcloud on loopback, so it also needs no account
+and no mirror. Allow about half a minute — it waits out a real deadline:
+
+```bash
+node scripts/check-poll-resilience.js
 ```
 
 Run a real poll and see what the wall would show:
@@ -83,12 +145,18 @@ scripts/deploy.sh       # install this repo's own modules and config
 ```
 
 Then place real credentials in `/etc/magicmirror-secondbrain/` on the mirror,
-using `config/secondbrain/*.example.json` as the shape.
+using `config/secondbrain/*.example.json` as the shape, and install a
+`config.js` carrying the real private calendar urls once — see
+[Private calendar urls](#private-calendar-urls). Deploys preserve them after
+that, but there is nothing for the first deploy to preserve.
 
 ## Notes
 
 - **Credentials never enter this repo.** They live at
-  `/etc/magicmirror-secondbrain/` on the mirror and are gitignored here.
+  `/etc/magicmirror-secondbrain/` on the mirror and are gitignored here. The two
+  private calendar urls are the awkward exception: MagicMirror wants them inside
+  `config.js`, so the mirror's copy of that file is authoritative and deploys
+  merge them forward.
 - **Do not lower `pollIntervalMs` below 60s.** Every poll opens a fresh IMAP
   session per account; `node_helper.js` clamps anything faster, because the
   alternative is getting the account throttled.

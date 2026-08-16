@@ -25,15 +25,76 @@ kiosk browser and may not. They talk over socket notifications.
 2. `node_helper` clamps the interval to a **60s floor** and starts its timer. It
    owns the schedule — a `SECOND_BRAIN_REFRESH` from the browser is a hint that
    gets ignored if the last poll was recent.
-3. Each tick calls `pollAll(configDir, options, log)`, which runs the three
-   sources concurrently under `Promise.allSettled` — one dead source cannot take
-   down the others.
-4. Package results are merged with persisted state, stale ones pruned.
-5. Items are sorted by priority, then recency, and capped **per category** so a
-   busy inbox cannot crowd out a shipment or a download.
-6. `SECOND_BRAIN_UPDATE` goes to the browser, which diffs against the last
+3. Before polling anything, `cachedItems()` reads `package_state.json` and
+   publishes the remembered shipments. See
+   [Why the panel renders twice](#why-the-panel-renders-twice).
+4. Each tick calls `pollAll(configDir, options, log)`, which runs the three
+   sources concurrently, each under its own **120s deadline** — neither a dead
+   source nor a hung one can take down the others. See
+   [Why each source has a deadline](#why-each-source-has-a-deadline).
+5. Package results are merged with persisted state, stale ones pruned.
+6. Items are sorted by priority, then recency, and capped **per category** so a
+   busy inbox cannot crowd out a shipment or a download. `pollAll` and the
+   cached render share this step (`present()`), so the early paint is exactly
+   what the poll will produce.
+7. `SECOND_BRAIN_UPDATE` goes to the browser, which diffs against the last
    payload and skips the DOM update when nothing changed. Without that the wall
    visibly flashes on every poll.
+
+### Why the panel renders twice
+
+The frontend hides itself until its first update, and the first poll takes as
+long as its slowest source. Measured against the journal that window ran from 18
+seconds to **over four minutes** — during which the panel is invisible, nothing
+is logged, and a slow Gmail is indistinguishable from a module that failed to
+start. It has been mistaken for a broken deploy.
+
+So the cached render goes up first. It reads only — no network, no write — so it
+cannot disturb the state the real poll is about to merge, and it is published
+**only before the first poll of a process**: the browser re-sends its config on
+resume, and only packages are cached, so a later cached publish would knock
+mail, Voice and downloads off the wall until the next poll.
+
+Every publish now logs how long its poll took, because a four-minute poll and a
+two-second one used to log the same line.
+
+### Why each source has a deadline
+
+`pollNow()` returns immediately while a poll is in flight, so a source that never
+answers does not just lose its own results — it stops the wall publishing
+**anything**, and logs nothing while it does. On 2026-08-07 that cost 23.8
+minutes of silence between two publishes, and the only clue in the journal was
+the gap itself.
+
+Texts pay for this and packages do not. A shipment is remembered in
+`package_state.json` and loses nothing to a stall; a Google Voice card lives 60
+minutes from the moment the message arrives, so a long enough blackout means a
+text is never seen at all. The wall keeps publishing its unchanged package count
+throughout, which is why the symptom reads as "texts stopped working".
+
+So each source races a deadline (`DEFAULT_SOURCE_TIMEOUT_MS`, 120s, floored at
+30s). It bounds a hang; it is not a latency target — a normal poll takes about
+45s and the slow tail reaches three minutes, so a tighter deadline would spend
+its time abandoning sources that were about to succeed.
+
+Three consequences worth knowing:
+
+- A source that misses the deadline is **abandoned, not cancelled** — ImapFlow
+  has no abort hook. Its own `finally` closes the session whenever it finishes,
+  and only `pollAll` writes state, so a straggler has nowhere to put its results.
+- Because abandoned sessions can break with nobody awaiting them, both IMAP
+  clients get an `error` listener (`survivesAsyncErrors`). Node turns an `error`
+  event with no listener into an uncaught exception, which would kill the helper.
+- Voice, mail and downloads have no persistence anywhere, so a timed-out source
+  **replays its last answer** for up to 5 minutes rather than letting its cards
+  blink off the wall and back on. Packages are excluded from that replay: they
+  already survive a missing source, and replaying them would refresh
+  `lastSeenAt` as though the mail had been seen again.
+
+The one network call that runs *only* when a text exists — the Nextcloud contacts
+lookup — sits inside this same path, so `loadContacts` backs off on failure as
+well as on success. Without that, `expiresAt` stayed in the past and every voice
+message in the scan retried the full CardDAV discovery.
 
 ### Why the 60s floor exists
 
@@ -107,6 +168,33 @@ first; bodies are fetched for survivors only.
 **Parsing.** `extractPackageInfo` tries three shapes in order — storefront order
 mail, Amazon, then a bare carrier notification — and returns `null` for refunds,
 cancellations and digital receipts.
+
+### Every status has to be earned
+
+The status shown on a card is read from the subject line, which is a blunt
+instrument, so the design question is not how often it is right but **how it is
+wrong**. Two rules, both bought with real mistakes:
+
+**Nothing is assumed.** `Ordered` used to be the fallback in `deliveryStatus()`,
+which made it the one status nobody had to earn: any subject the phrase lists
+did not recognise became a confident claim that a purchase had been made. Telling
+someone they bought something they did not is the most alarming way for this to
+be wrong — worse than showing no status at all. Every stage in `DELIVERY_STAGES`
+must now be stated outright, and anything else reports `UNKNOWN_STATUS`
+("Update"), which claims nothing and invites a look at the inbox.
+
+**Negation is honoured.** `includes("delivered")` also fires on "will be
+delivered tomorrow" and on "undelivered", and `includes("shipped")` on "has not
+shipped yet". Phrases are matched on word boundaries, and a match is discarded
+if a negator sits within two words in front of it — enough for "will *be*
+delivered" and "has not *yet been* delivered", not enough to reach across
+punctuation, so "Do not reply — your package has shipped" still reads as
+shipped.
+
+The stage table is still a list of strings somebody wrote, and Amazon will
+invent new ones. The point of these two rules is that the failure mode when that
+happens is a card reading "Update" rather than a card telling you something
+untrue.
 
 **Tracking numbers are matched twice, never against raw MIME.** Matching the raw
 source means matching base64 attachment payloads, which will happily yield a

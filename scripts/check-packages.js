@@ -20,7 +20,8 @@ const {
   deduplicate,
   resolveMailbox,
   persistAndMergePackages,
-  pruneStalePackages
+  pruneStalePackages,
+  cachedItems
 } = require("../modules/MMM-SecondBrain/lib/sources.js");
 
 let failures = 0;
@@ -123,6 +124,212 @@ async function run() {
     "wrapped-number status is read from the subject",
     wrappedInfo?.status === "Out for delivery",
     `got ${wrappedInfo?.status}`
+  );
+
+  /* ---------------------------------------------------------------- *
+   * Regression: every branch reads the same delivery vocabulary.
+   *
+   * Amazon and bare carrier mail understood "out for delivery"; storefront
+   * mail did not, and fell through to "Ordered". A package on the van showed
+   * on the wall as if it had just been bought that morning.
+   * ---------------------------------------------------------------- */
+  const storefrontStatus = async (subject, text) =>
+    (await extractPackageInfo(
+      message({
+        from: "orders@example-shop.com",
+        name: "Example Shop",
+        subject,
+        body: plainMime(
+          `From: Example Shop <orders@example-shop.com>\nSubject: ${subject}`,
+          text
+        )
+      })
+    ))?.status;
+
+  const onTheVan = "Order #ES-88214 is on its way. Tracking: 1Z999AA10123456784";
+
+  check(
+    "storefront out-for-delivery mail is not filed as Ordered",
+    (await storefrontStatus("Your order is out for delivery", onTheVan)) === "Out for delivery",
+    `got ${await storefrontStatus("Your order is out for delivery", onTheVan)}`
+  );
+  check(
+    "storefront arriving-today mail is not filed as Ordered",
+    (await storefrontStatus("Arriving today: your order", onTheVan)) === "Out for delivery",
+    `got ${await storefrontStatus("Arriving today: your order", onTheVan)}`
+  );
+  check(
+    "a storefront shipment notice is still Shipped",
+    (await storefrontStatus("Your order has shipped", onTheVan)) === "Shipped",
+    `got ${await storefrontStatus("Your order has shipped", onTheVan)}`
+  );
+  check(
+    "a storefront order confirmation is still Ordered",
+    (await storefrontStatus("Your order confirmed", onTheVan)) === "Ordered",
+    `got ${await storefrontStatus("Your order confirmed", onTheVan)}`
+  );
+
+  /* ---------------------------------------------------------------- *
+   * Amazon announces the same stage under several prefixes. Each branch
+   * used to carry its own phrase list, and Amazon's was missing the
+   * "delivering" forms -- a package on the van read as "Ordered", with the
+   * product name lost to the "Amazon Package" placeholder.
+   * ---------------------------------------------------------------- */
+  const amazon = async (subject) =>
+    await extractPackageInfo(
+      message({
+        from: "shipment-tracking@amazon.com",
+        name: "Amazon.com",
+        subject,
+        body: plainMime(
+          `From: Amazon.com <shipment-tracking@amazon.com>\nSubject: ${subject}`,
+          "Your package with order 114-3941689-1234567 is on its way."
+        )
+      })
+    );
+
+  for (const subject of [
+    'Out for delivery: "Blue Widget, 3-pack"',
+    'Arriving today: "Blue Widget, 3-pack"',
+    'Delivering today: "Blue Widget, 3-pack"',
+    'Now delivering: "Blue Widget, 3-pack"'
+  ]) {
+    const info = await amazon(subject);
+
+    check(
+      `amazon "${subject.split(":")[0]}" is Out for delivery`,
+      info?.status === "Out for delivery",
+      `got ${info?.status}`
+    );
+    check(
+      `amazon "${subject.split(":")[0]}" keeps the product name`,
+      info?.title === "Blue Widget, 3-pack",
+      `got ${info?.title}`
+    );
+  }
+
+  check(
+    "an amazon order confirmation is still Ordered",
+    (await amazon('Your Amazon.com order of "Blue Widget, 3-pack"'))?.status === "Ordered",
+    `got ${(await amazon('Your Amazon.com order of "Blue Widget, 3-pack"'))?.status}`
+  );
+  check(
+    "an amazon shipment notice is still Shipped",
+    (await amazon('Shipped: "Blue Widget, 3-pack"'))?.status === "Shipped",
+    `got ${(await amazon('Shipped: "Blue Widget, 3-pack"'))?.status}`
+  );
+  check(
+    "an amazon delivery notice is still Delivered",
+    (await amazon('Delivered: "Blue Widget, 3-pack"'))?.status === "Delivered",
+    `got ${(await amazon('Delivered: "Blue Widget, 3-pack"'))?.status}`
+  );
+
+  /* ---------------------------------------------------------------- *
+   * A failed delivery attempt is its own stage, and the one that actually
+   * needs somebody to do something. It read as "Ordered" -- the wall said a
+   * package had been bought that morning when in fact the driver had been
+   * and gone.
+   * ---------------------------------------------------------------- */
+  const attempted = await amazon('Delivery attempted: "BuddyZone Retractable Baby..."');
+
+  check(
+    "a failed delivery attempt is not filed as Ordered",
+    attempted?.status === "Delivery attempted",
+    `got ${attempted?.status}`
+  );
+  check(
+    "a failed delivery attempt keeps the product name",
+    attempted?.title === "BuddyZone Retractable Baby...",
+    `got ${attempted?.title}`
+  );
+  check(
+    "\"attempted delivery\" reads the same as \"delivery attempted\"",
+    (await amazon('Attempted delivery: "Blue Widget, 3-pack"'))?.status === "Delivery attempted",
+    `got ${(await amazon('Attempted delivery: "Blue Widget, 3-pack"'))?.status}`
+  );
+
+  /*
+   * An attempt still needs collecting tomorrow, so unlike Delivered and Out for
+   * delivery it must survive the overnight prune.
+   */
+  const yesterday = Date.now() - 20 * 60 * 60 * 1000;
+  const survives = pruneStalePackages(
+    [{
+      id: "package:amazon:114-1", kind: "package", title: "BuddyZone",
+      status: "Delivery attempted", timestamp: yesterday, lastSeenAt: yesterday,
+      orderId: "114-1", priority: 95
+    }],
+    36 * 60 * 60 * 1000
+  );
+
+  check(
+    "a failed attempt from yesterday is still on the board",
+    survives.length === 1,
+    `got ${survives.length} item(s)`
+  );
+
+  /* ---------------------------------------------------------------- *
+   * The parser must never invent a purchase.
+   *
+   * "Ordered" was the fallback, so every subject the phrase lists did not
+   * recognise became a confident claim that something had been bought. Being
+   * told you ordered a package you did not is the most alarming way for this
+   * to be wrong, and it is worse than showing nothing. Every stage now has to
+   * be stated outright; anything else claims nothing.
+   * ---------------------------------------------------------------- */
+  for (const [sender, subject] of [
+    ["storefront", "We have news about your order"],
+    ["storefront", "An important message about your recent purchase"],
+    ["amazon", "Your Amazon.com order status"],
+    ["amazon", "A message about your package"]
+  ]) {
+    const status = sender === "amazon"
+      ? (await amazon(subject))?.status
+      : await storefrontStatus(subject, onTheVan);
+
+    check(
+      `an unrecognised ${sender} subject does not claim Ordered`,
+      status !== undefined && status !== "Ordered",
+      `got ${status} for "${subject}"`
+    );
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Nor may it read a negated phrase as an assertion. Substring matching
+   * called "will be delivered tomorrow" delivered, which sends somebody out
+   * to an empty porch, and called "has not shipped yet" shipped.
+   * ---------------------------------------------------------------- */
+  for (const [subject, mustNotBe] of [
+    ["Your package will be delivered tomorrow", "Delivered"],
+    ["Your order has not been delivered", "Delivered"],
+    ["Your order has not yet been delivered", "Delivered"],
+    ["Your item is scheduled to be delivered Friday", "Delivered"],
+    ["Your order has not shipped yet", "Shipped"],
+    ["Your package will be out for delivery tomorrow", "Out for delivery"],
+    ["Undelivered: action needed", "Delivered"]
+  ]) {
+    const status = (await amazon(subject))?.status;
+
+    check(
+      `"${subject}" is not read as ${mustNotBe}`,
+      status !== mustNotBe,
+      `got ${status}`
+    );
+  }
+
+  /*
+   * The negation window must not reach across punctuation into another
+   * clause, or boilerplate would suppress real news.
+   */
+  check(
+    "a negator in an unrelated clause does not suppress the real status",
+    (await amazon("Do not reply - your package has shipped"))?.status === "Shipped",
+    `got ${(await amazon("Do not reply - your package has shipped"))?.status}`
+  );
+  check(
+    "a plainly delivered package is still Delivered",
+    (await amazon("Your package was delivered"))?.status === "Delivered",
+    `got ${(await amazon("Your package was delivered"))?.status}`
   );
 
   /* ---------------------------------------------------------------- *
@@ -455,6 +662,50 @@ async function run() {
     resolveMailbox(gmailFolders, "All Mail", "\\All") === "[Gmail]/All Mail",
     `got ${resolveMailbox(gmailFolders, "All Mail", "\\All")}`
   );
+
+  /* ---------------------------------------------------------------- *
+   * The wall shows remembered shipments before the first poll finishes.
+   *
+   * That poll waits on every source, and the panel hides itself until an
+   * update arrives, so a slow Gmail left the display blank for minutes and
+   * looked exactly like a module that had failed to start. This render must
+   * touch nothing: it runs while the real poll is in flight, and writing
+   * would race the state it is about to merge.
+   * ---------------------------------------------------------------- */
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "secondbrain-cache-"));
+  const cacheFile = path.join(cacheDir, "package_state.json");
+  const threeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
+
+  fs.writeFileSync(cacheFile, JSON.stringify([{
+    id: "package:amazon:114-1", kind: "package", label: "Amazon",
+    title: "BuddyZone Retractable Baby...", detail: "Delivery attempted",
+    status: "Delivery attempted", timestamp: threeHoursAgo,
+    lastSeenAt: threeHoursAgo, priority: 95, orderId: "114-1"
+  }]));
+
+  const fingerprint = fs.readFileSync(cacheFile, "utf8");
+  const rendered = cachedItems(cacheDir, { maxPackageItems: 3 });
+
+  check(
+    "remembered shipments render before any poll runs",
+    rendered.length === 1 && rendered[0].status === "Delivery attempted",
+    `got ${JSON.stringify(rendered.map((item) => item.status))}`
+  );
+  check(
+    "the cached render does not write to the state file",
+    fs.readFileSync(cacheFile, "utf8") === fingerprint
+  );
+  check(
+    "the cached render strips lastSeenAt like a real poll does",
+    rendered.every((item) => !("lastSeenAt" in item))
+  );
+  check(
+    "a missing state directory renders nothing rather than throwing",
+    Array.isArray(cachedItems(path.join(cacheDir, "absent"), {})) &&
+      cachedItems(path.join(cacheDir, "absent"), {}).length === 0
+  );
+
+  fs.rmSync(cacheDir, { recursive: true, force: true });
 
   console.log(
     `\n${failures === 0 ? "All checks passed." : `${failures} check(s) failed.`}\n`
