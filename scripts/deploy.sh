@@ -61,6 +61,20 @@ node scripts/check-packages.js >/dev/null || {
 }
 echo "    checks pass"
 
+say "Running Now Playing display checks"
+node scripts/check-nowplaying.js >/dev/null || {
+  echo "Now Playing checks failed. Run 'node scripts/check-nowplaying.js' to see why." >&2
+  exit 1
+}
+echo "    checks pass"
+
+say "Running freeze watch checks"
+node scripts/check-freeze-watch.js >/dev/null || {
+  echo "Freeze watch checks failed. Run 'node scripts/check-freeze-watch.js' to see why." >&2
+  exit 1
+}
+echo "    checks pass"
+
 say "Checking connectivity to ${REMOTE}"
 if ! ssh -o BatchMode=yes -o ConnectTimeout=8 "$REMOTE" true 2>/dev/null; then
   echo "Cannot reach ${REMOTE} over SSH." >&2
@@ -85,6 +99,8 @@ rsync -az $DRY_RUN --delete \
   modules/MMM-SecondBrain \
   modules/MMM-SolarTheme \
   modules/MMM-CalendarLiveHeader \
+  modules/NowPlaying \
+  modules/FreezeWatch \
   "$REMOTE:$STAGE/modules/"
 
 say "Transferring system files"
@@ -120,7 +136,7 @@ say "Installing on the mirror"
 ssh -t "$REMOTE" "set -euo pipefail
 
   echo '--> modules'
-  for m in MMM-SecondBrain MMM-SolarTheme MMM-CalendarLiveHeader; do
+  for m in MMM-SecondBrain MMM-SolarTheme MMM-CalendarLiveHeader NowPlaying FreezeWatch; do
     sudo mkdir -p '$MM_ROOT/modules/'\$m
     sudo rsync -a --delete --exclude node_modules \
       '$STAGE/modules/'\$m/ '$MM_ROOT/modules/'\$m/
@@ -189,18 +205,23 @@ ssh -t "$REMOTE" "set -euo pipefail
 say "Verifying"
 sleep 12
 
+# No sudo on journalctl. This step runs over a pipe with no terminal, so a sudo
+# here cannot prompt and the whole verification silently degrades to
+# "a password is required" -- which it did, hiding whether the deploy worked at
+# the exact moment you want to know. The login user is in `adm`, which already
+# grants journal reads, so sudo was never needed.
 ssh "$REMOTE" "
   if ! systemctl is-active --quiet magicmirror; then
     echo 'magicmirror is not running:'
-    sudo journalctl -u magicmirror -n 40 --no-pager
+    journalctl -u magicmirror -n 40 --no-pager
     exit 1
   fi
   echo '    service is active'
 
   echo
-  echo '    recent SecondBrain output:'
-  sudo journalctl -u magicmirror --since '2 minutes ago' --no-pager \
-    | grep -i 'secondbrain' | tail -15 || echo '    (nothing logged yet)'
+  echo '    recent module output:'
+  journalctl -u magicmirror --since '2 minutes ago' --no-pager \
+    | grep -iE 'secondbrain|nowplaying' | tail -20 || echo '    (nothing logged yet)'
 "
 
 # ---------------------------------------------------------------------------
@@ -226,5 +247,5 @@ display looks wrong, the previous config is at:
   ${MM_ROOT}/config/custom.css.bak
 
 Watch it live with:
-  ssh ${REMOTE} "sudo journalctl -u magicmirror -f | grep -i secondbrain"
+  ssh ${REMOTE} "journalctl -u magicmirror -f | grep -iE 'secondbrain|nowplaying'"
 EOF

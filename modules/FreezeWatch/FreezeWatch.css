@@ -1,0 +1,250 @@
+/******************************************************************************
+ * FREEZE WATCH
+ *
+ * One bubble in the right-hand rail, the same shape as the notification cards
+ * and the radio card next door: same panel colour, same radius, same uppercase
+ * micro-label. It belongs to the dashboard rather than interrupting it.
+ *
+ * The escalation from watch to warning is deliberately not "add red". Red is
+ * the wrong colour twice over -- it fights the sage accent this dashboard is
+ * built on, and it reads as *fault* rather than as *weather*, so the first
+ * glance is "something is broken" instead of "it is cold". Cold blue says the
+ * true thing, sits inside the existing palette, and can be turned up without
+ * turning the room into a warning light.
+ *
+ * What actually escalates, in order of how much it costs the eye:
+ *
+ *   watch      hairline accent edge, panel background, 14px headline
+ *   warning    thicker brighter edge, faint ice wash, 16px headline,
+ *              and a 6px dot that breathes
+ *
+ * Nothing full-bleed, nothing saturated, and the only moving thing on the card
+ * is the dot. This card may be up for a fortnight; it has to be liveable.
+ *
+ * Colours are tokens. custom.css defines the --calm-* family twice -- once
+ * under :root/html.solar-dark and once under html.solar-light -- and the
+ * --freeze-* family below follows the same pattern, so MMM-SolarTheme swaps
+ * both underneath this file and it needs no light-mode rules of its own. The
+ * literals are fallbacks for the case where custom.css has not loaded, and are
+ * the dark values on purpose: the wall boots dark.
+ ******************************************************************************/
+
+:root,
+html.solar-dark {
+  --freeze-ice: #7fb0cc;
+  --freeze-ice-strong: #a9d6ef;
+
+  --freeze-edge: rgba(127, 176, 204, 0.30);
+  --freeze-edge-strong: rgba(169, 214, 239, 0.46);
+
+  --freeze-wash: rgba(127, 176, 204, 0.085);
+}
+
+html.solar-light {
+  --freeze-ice: #3f7291;
+  --freeze-ice-strong: #22566f;
+
+  --freeze-edge: rgba(63, 114, 145, 0.30);
+  --freeze-edge-strong: rgba(34, 86, 111, 0.44);
+
+  --freeze-wash: rgba(63, 114, 145, 0.075);
+}
+
+.freezewatch-shell {
+  box-sizing: border-box;
+
+  width: 100%;
+  min-width: 0;
+
+  padding: 10px 12px;
+
+  overflow: hidden;
+
+  border: 1px solid var(--calm-line-soft, rgba(255, 255, 255, 0.08));
+
+  /*
+   * The accent lives on the left edge rather than as a separate element: it is
+   * the one piece of the card that has to read from across the room, and a
+   * border cannot be knocked out of alignment by a long headline wrapping.
+   */
+  border-left: 3px solid var(--freeze-edge);
+  border-radius: 16px;
+
+  background: var(--calm-panel, #202425) !important;
+
+  box-shadow: 0 5px 16px var(--calm-shadow, rgba(0, 0, 0, 0.22));
+
+  color: var(--calm-text, #f0f1ed) !important;
+}
+
+/*
+ * The module hides itself through MagicMirror when there is nothing to say.
+ * This is the belt to that braces: a shell that somehow renders empty must not
+ * leave an empty bubble sitting in the rail.
+ */
+.freezewatch-empty {
+  display: none !important;
+}
+
+/******************************************************************************
+ * LABEL ROW
+ ******************************************************************************/
+
+.freezewatch-label-row {
+  display: flex;
+  align-items: center;
+
+  gap: 6px;
+
+  min-width: 0;
+}
+
+.freezewatch-dot {
+  flex: 0 0 auto;
+
+  width: 6px;
+  height: 6px;
+
+  border-radius: 50%;
+
+  background: var(--freeze-ice);
+}
+
+.freezewatch-label {
+  flex: 0 0 auto;
+
+  color: var(--freeze-ice) !important;
+
+  font-size: 9px !important;
+  font-weight: 700;
+  line-height: 1.15;
+
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+/*
+ * "stale" -- the reading is old enough that the card is a recollection rather
+ * than an observation. Dimmed to the faintest text on the wall, because it
+ * qualifies the card without being the thing you are meant to read.
+ */
+.freezewatch-stale {
+  min-width: 0;
+
+  overflow: hidden;
+
+  color: var(--calm-faint, #78807e) !important;
+
+  font-size: 9px !important;
+  font-weight: 700;
+  line-height: 1.15;
+
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.freezewatch-stale::before {
+  content: "· ";
+}
+
+/******************************************************************************
+ * THE LINE THE MODULE EXISTS FOR
+ ******************************************************************************/
+
+.freezewatch-headline {
+  margin-top: 3px;
+
+  color: var(--calm-text, #f0f1ed) !important;
+
+  font-size: 14px !important;
+  font-weight: 650;
+  line-height: 1.22;
+}
+
+.freezewatch-detail {
+  margin-top: 2px;
+
+  overflow: hidden;
+
+  color: var(--calm-muted, #aab1af) !important;
+
+  font-size: 10px !important;
+  line-height: 1.22;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/******************************************************************************
+ * WARNING
+ *
+ * It is already below the threshold outside. Everything here is one step up
+ * from the watch above -- and one step only.
+ ******************************************************************************/
+
+.freezewatch-warning {
+  border-left-width: 4px;
+  border-left-color: var(--freeze-edge-strong);
+
+  border-top-color: var(--freeze-edge);
+  border-right-color: var(--freeze-edge);
+  border-bottom-color: var(--freeze-edge);
+
+  /*
+   * A wash rather than a fill. Layering a low-alpha ice tint over the panel
+   * token keeps the card the same family as its neighbours in both themes,
+   * where a flat colour would have to be picked twice and would still sit on
+   * top of the dashboard rather than in it.
+   */
+  background:
+    linear-gradient(var(--freeze-wash), var(--freeze-wash)),
+    var(--calm-panel, #202425) !important;
+}
+
+.freezewatch-warning .freezewatch-label {
+  color: var(--freeze-ice-strong) !important;
+}
+
+.freezewatch-warning .freezewatch-dot {
+  background: var(--freeze-ice-strong);
+}
+
+.freezewatch-warning .freezewatch-headline {
+  font-size: 16px !important;
+  font-weight: 700;
+}
+
+.freezewatch-warning .freezewatch-detail {
+  color: var(--calm-text, #f0f1ed) !important;
+}
+
+/*
+ * Slow on purpose. Four and a half seconds is a breath rather than a blink --
+ * it catches the eye when you walk past and disappears when you are reading
+ * something else on the wall. Anything faster is an alarm, and this card can be
+ * up for two weeks.
+ */
+@keyframes freezewatch-breathe {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.4;
+    transform: scale(0.78);
+  }
+}
+
+.freezewatch-warning .freezewatch-dot {
+  animation: freezewatch-breathe 4.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .freezewatch-warning .freezewatch-dot {
+    animation: none;
+  }
+}

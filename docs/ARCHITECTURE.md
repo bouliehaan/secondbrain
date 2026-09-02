@@ -274,14 +274,190 @@ special-use.
 | `config/config.js` | dashboard layout, module list — deployed whole |
 | `config/secondbrain/*.example.json` | credential templates |
 | `/etc/magicmirror-secondbrain/` | the real credentials, on the mirror only |
+| `/etc/magicmirror-secondbrain/samo.json` | samo API token; absent means Now Playing is off |
 | `/var/lib/magicmirror-secondbrain/` | runtime state, owned by `calendar-display` |
 
 Real credentials are gitignored and never leave the mirror.
 
+## Now Playing
+
+```
+  samo-server ──► NowPlaying/lib/samo-client.js ──► node_helper.js ──socket──► NowPlaying.js
+  (loopback)          (fetch, artwork,               (10s schedule,              (render)
+                       caching)                       change detection)
+                            │
+                            ▼
+                  lib/now-playing.js
+                  (pure: snapshot → card)
+```
+
+A separate module from `MMM-SecondBrain`, deliberately. The two share a wall and
+nothing else:
+
+- **Different cadence.** Now Playing polls every 10s; the mail sources are
+  floored at 60s because each poll opens a fresh IMAP session. Folding this in
+  would either show finished tracks or get the mail accounts throttled.
+- **Different blast radius.** They are separate node helpers with separate
+  timers, so a stalled IMAP source cannot freeze the radio card, and a stopped
+  samo-server cannot delay a text message. The failure this avoids is documented
+  above under [Why each source has a deadline](#why-each-source-has-a-deadline).
+- **Different lifecycle.** A notification is an event with an expiry. Now Playing
+  is a status: it has no age, no priority, and no place in the per-category caps.
+
+### Where the answer comes from
+
+samo-radio is a headless player daemon holding the sound card open, tuned to a
+Samo channel or an internet station, and falling back to that station when a
+cast queue runs out. It reports a complete status snapshot — never a delta — and
+samo-server passes it through at `GET /api/v1/samo-radio/devices`, state
+included, so one request answers everything.
+
+The daemon refreshes its own channel metadata every 10 seconds by asking
+samo-server (`/api/v1/channels/{id}/now` for a channel, the station record's ICY
+`nowPlaying` for internet radio). That is why the wall polls at 10s: it is
+exactly as fresh as the answer can be, and faster returns the same bytes.
+
+### What the card decides
+
+`lib/now-playing.js` is a pure function from snapshot to card and holds every
+judgement worth testing. The rules it encodes:
+
+| Situation | Headline | Why |
+|---|---|---|
+| Channel with a track | the track | the station is what you set; the track is what you cannot know |
+| Channel between items | the channel name | better than an empty card for the few seconds it lasts |
+| Station with a programme | the programme | real information the stream volunteered |
+| Station echoing its own name | the station | that is not a track, and saying so beats inventing one |
+| Cast queue | the item | already resolved by the API layer |
+
+Two behaviours are ported from the samo client's own
+`mobile-radio-metadata.ts`, so the wall and the phone disagree as little as
+possible: the redundant-station-label test, and preferring a parsed artist over
+a split of the raw ICY line.
+
+### Artwork, and why it is fetched server-side
+
+A channel's status carries no picture — only the catalog does. So the cover for
+a Samo channel costs three extra calls: the channel's `now` for an `itemRef`,
+the track or episode for its album and parent, then the cover itself at
+`?width=256`. They are cached by now-playing identity, because a three-minute
+track would otherwise pay for them eighteen times.
+
+The bytes are fetched by the node helper and handed to the browser as a data
+URI. Signing an `<img src>` would mean putting a samo credential in a page
+served to the whole LAN — samo has a `stream_token` parameter for exactly that,
+and it is still the wrong trade when this process already holds the token and
+can hand over finished pixels.
+
+### Publishing
+
+The helper compares each payload against the last and stays quiet when nothing
+changed. The frontend does the same check, but it has to happen on both sides:
+a card carries its cover inline, and pushing tens of kilobytes of unchanged
+base64 down the socket every ten seconds for the browser to discard is work
+nobody needs done.
+
+## Freeze Watch
+
+```
+  weather (current)  ─┐
+                      ├─ WEATHER_UPDATED ─► FreezeWatch.js ──► lib/freeze-watch.js
+  weather (forecast) ─┘      (browser)        (merge, render)     (pure: readings → card)
+```
+
+No node helper and no fetch of its own. The two stock weather modules already
+poll open-meteo every fifteen minutes and broadcast the result to every module
+on the page, so this one reads that. A second fetch would be a second set of
+numbers, free to disagree with the ones the wall is showing two cards further
+down the same rail.
+
+`lib/freeze-watch.js` is a pure function from readings to card and holds every
+judgement worth testing. `scripts/check-freeze-watch.js` exercises it with no
+weather provider, no browser and no mirror.
+
+### The two broadcasts must be merged, not assigned
+
+`config.js` runs two weather instances — one `type: "current"`, one
+`type: "forecast"` — and **both** send `WEATHER_UPDATED`. Neither payload
+carries both halves: the forecast instance sends no current conditions, and the
+current instance sends an empty `forecastArray`.
+
+So the frontend accumulates. Assigning the whole reading would have each
+broadcast wipe out what the other had just supplied, and the module would flip
+between knowing the current temperature and knowing the forecast every fifteen
+minutes — showing a watch when it should show a warning, and losing the
+overnight low from the warning's detail line.
+
+`readWeatherPayload` returns `null` rather than `[]` for an absent forecast
+precisely so "there is no forecast in *this* payload" stays distinguishable from
+"the forecast is empty", which is the same distinction `fetchPackageEmails`
+draws next door and for the same reason.
+
+### What the card decides
+
+| Situation | Level | Why |
+|---|---|---|
+| below the threshold right now | warning | the cold is here; the forecast is no longer the headline |
+| forecast low below it, within 36h | watch | a chore to do before bed |
+| forecast low below it, further out | nothing | a card up since Tuesday stops being read |
+| a low that already happened this morning | nothing | that weather finished twelve hours ago |
+| nothing fresh for over six hours | nothing | a dead feed must not keep insisting it is cold |
+
+Three details that are each a specific way of being wrong:
+
+**A daily low lands before dawn.** open-meteo reports one low against the whole
+day, dated local midnight. Read naively, a 6am low of 11° is still "today's low"
+at six in the evening, and the wall spends a mild evening advising a chore over
+weather that is long gone. `lowArrivesAt` treats a daily low as arriving at 7am
+local, which is both roughly true and enough to retire it once it has passed.
+
+**Thresholds need hysteresis.** It takes `thresholdF` to raise the card and
+`thresholdF + clearMarginF` to let it go. Without that, a temperature parked on
+15° flips the card on and off on every provider update, which on a wall is a
+light blinking in the corner of a room all night.
+
+**The card must agree with itself.** The wall runs `roundTemp: true`, so
+comparisons are made on the *rounded* value. Comparing the raw one would put a
+card up reading "Forecast low 15°" under a rule that says "below 15", which
+reads as a bug rather than as a rounding choice. It costs half a degree against
+a threshold that is a rule of thumb anyway.
+
+### Two units traps, both already sprung upstream
+
+`WEATHER_UPDATED` is converted to imperial *before it is sent* when
+`config.units === "imperial"`, which it is here — so everything downstream is
+Fahrenheit and no conversion happens in this module.
+
+That conversion is `value * 1.8 + 32` with no null check, so a provider
+reporting no temperature arrives as a confident **32**. There is no way to tell
+that from a real 32° reading, and no need to: 32 is above any sane freeze
+threshold, so a missing reading fails safe as "not cold enough to alert" rather
+than as a false alarm. `undefined` becomes `NaN` and is rejected outright.
+
+The second trap is the timestamps. The openmeteo provider builds its dates from
+`timeformat=unixtime`, and `WeatherObject.simpleClone()` flattens them through
+`valueOf()`. A seconds value arriving where milliseconds are expected does not
+throw — it silently places every forecast low in 1970, where it is neither ahead
+of us nor inside the lookahead window, and the module goes quiet for an entire
+winter with nothing in the log. `toEpochMs` normalises by magnitude.
+
+### Stale readings keep their card
+
+The two ways to be wrong are not symmetric. Dripping the faucets on a mild night
+wastes a little water; not dripping them on a cold one costs a plumber. So a
+reading older than `staleAfterMinutes` keeps its card and says how old it is,
+rather than silently taking the advice down.
+
+That only holds so far. Past `giveUpAfterHours` the module stops claiming to
+know the weather at all — a card that goes on insisting on a finished cold snap
+is the failure this dashboard has already been burned by twice elsewhere, where
+a dead feed kept displaying confident stale information and nothing logged it.
+
 ## Other modules
 
-`MMM-SolarTheme` switches light/dark on sun position. `MMM-CalendarLiveHeader`
-renders the greeting header. `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are
+`MMM-SolarTheme` switches light/dark on sun position — it reads the same
+`WEATHER_UPDATED` broadcast as `FreezeWatch`, for `sunrise` and `sunset`.
+`MMM-CalendarLiveHeader` renders the greeting header. `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are
 upstream, pinned in `config/third-party-modules.json` and installed by
 `scripts/bootstrap.sh`.
 
