@@ -1,0 +1,211 @@
+/******************************************************************************
+ * NOW PLAYING
+ *
+ * One bubble in the right-hand rail, matching the notification cards next door:
+ * same panel colour, same radius, same accent bar, same uppercase micro-label.
+ *
+ * Colours are all --calm-* tokens. custom.css defines the whole family twice --
+ * once under :root/html.solar-dark and once under html.solar-light -- so this
+ * file needs no light-mode rules of its own; the solar theme swaps the tokens
+ * underneath it. The literals here are fallbacks for the case where custom.css
+ * has not loaded, and are the dark values on purpose: the wall boots dark.
+ ******************************************************************************/
+
+.nowplaying-shell {
+  display: flex;
+  align-items: center;
+
+  box-sizing: border-box;
+
+  width: 100%;
+  min-width: 0;
+
+  padding: 9px 10px;
+
+  gap: 10px;
+
+  overflow: hidden;
+
+  border: 1px solid var(--calm-line-soft, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+
+  background: var(--calm-panel, #202425) !important;
+
+  box-shadow: 0 5px 16px var(--calm-shadow, rgba(0, 0, 0, 0.22));
+
+  color: var(--calm-text, #f0f1ed) !important;
+}
+
+/*
+ * The module hides itself through MagicMirror when there is nothing playing.
+ * This is the belt to that braces: a shell that somehow renders empty must not
+ * leave an empty bubble sitting in the rail.
+ */
+.nowplaying-empty {
+  display: none !important;
+}
+
+.nowplaying-card {
+  display: flex;
+  align-items: center;
+
+  box-sizing: border-box;
+
+  width: 100%;
+  min-width: 0;
+
+  gap: 10px;
+}
+
+/******************************************************************************
+ * COVER ART
+ ******************************************************************************/
+
+.nowplaying-art {
+  flex: 0 0 auto;
+
+  width: 48px;
+  height: 48px;
+
+  overflow: hidden;
+
+  border: 1px solid var(--calm-line-soft, rgba(255, 255, 255, 0.07));
+  border-radius: 8px;
+
+  background: var(--calm-surface, #272c2d);
+}
+
+.nowplaying-art img {
+  display: block;
+
+  width: 100%;
+  height: 100%;
+
+  /*
+   * Covers are square by convention but not by guarantee -- a podcast feed's
+   * artwork or a station logo can be anything. Cropping to fill keeps the row
+   * height fixed, which matters more here than seeing every pixel of a logo.
+   */
+  object-fit: cover;
+}
+
+/******************************************************************************
+ * TEXT
+ ******************************************************************************/
+
+.nowplaying-body {
+  /*
+   * min-width: 0 is what actually makes the ellipsis work. Without it a flex
+   * child refuses to shrink below its content, so a long title pushes the
+   * bubble wider than the rail instead of truncating.
+   */
+  min-width: 0;
+  flex: 1 1 auto;
+
+  overflow: hidden;
+}
+
+.nowplaying-label-row {
+  display: flex;
+  align-items: baseline;
+
+  gap: 6px;
+
+  min-width: 0;
+}
+
+.nowplaying-label {
+  flex: 0 0 auto;
+
+  color: var(--calm-accent, #8ba9a2) !important;
+
+  font-size: 9px !important;
+  font-weight: 700;
+  line-height: 1.15;
+
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+/*
+ * The station. Dimmer than the label and allowed to truncate, because it is the
+ * least important thing in the card -- you chose the station, you know what it
+ * is; the point of the card is what is on it.
+ */
+.nowplaying-context {
+  min-width: 0;
+
+  overflow: hidden;
+
+  color: var(--calm-faint, #78807e) !important;
+
+  font-size: 9px !important;
+  font-weight: 700;
+  line-height: 1.15;
+
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.nowplaying-context::before {
+  content: "· ";
+}
+
+/*
+ * The one line the whole module exists to show. Bigger than a notification
+ * title (13px) because this is a single card rather than one of a stack, and
+ * because a song title read from the far side of a room is the whole point.
+ */
+.nowplaying-title {
+  margin-top: 2px;
+
+  overflow: hidden;
+
+  color: var(--calm-text, #f0f1ed) !important;
+
+  font-size: 15px !important;
+  font-weight: 650;
+  line-height: 1.2;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.nowplaying-meta {
+  margin-top: 2px;
+
+  overflow: hidden;
+
+  color: var(--calm-muted, #aab1af) !important;
+
+  font-size: 10px !important;
+  line-height: 1.22;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/******************************************************************************
+ * STATES
+ ******************************************************************************/
+
+/*
+ * Paused is rare on a device whose job is to be on air, so it earns a visible
+ * difference rather than a subtle one: if the wall says paused, somebody wants
+ * to know why the room is quiet.
+ */
+.nowplaying-paused .nowplaying-title,
+.nowplaying-paused .nowplaying-meta {
+  opacity: 0.55;
+}
+
+.nowplaying-paused .nowplaying-label {
+  color: var(--calm-faint, #78807e) !important;
+}
+
+.nowplaying-paused .nowplaying-art {
+  opacity: 0.5;
+}

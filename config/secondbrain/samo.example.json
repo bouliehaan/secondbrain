@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "samo-server credentials for the Now Playing card.",
+    "",
+    "Copy this to /etc/magicmirror-secondbrain/samo.json ON THE MIRROR and put a",
+    "real token in it. Never commit the filled-in copy -- .gitignore keeps every",
+    "non-example json in this directory out of the repo.",
+    "",
+    "Without this file the Now Playing module simply does not run, which is the",
+    "supported way to turn it off.",
+    "",
+    "baseUrl  -- where samo-server listens. The mirror and samo-server are the",
+    "            same machine, so loopback is both the default and the right",
+    "            answer; a LAN address works and only adds a hop.",
+    "token    -- a samo API token. Make one in samo under its user/token",
+    "            settings. It is only ever used server-side: the module fetches",
+    "            cover art itself and hands the browser finished pixels, so the",
+    "            token never reaches the kiosk page.",
+    "deviceId -- which samo-radio device to watch. Leave empty and the module",
+    "            picks the one that is actually playing, falling back to the",
+    "            first enabled one. Set it if you have more than one box and",
+    "            only care about the room the wall is in. GET /api/v1/samo-radio",
+    "            /devices lists the ids.",
+    "timeoutMs -- per-request deadline. 6s is generous for loopback."
+  ],
+
+  "baseUrl": "http://127.0.0.1:6969",
+  "token": "REPLACE_WITH_SAMO_API_TOKEN",
+  "deviceId": "",
+  "timeoutMs": 6000
+}

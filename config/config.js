@@ -155,6 +155,55 @@ let config = {
       }
     },
 
+    /*
+     * Drip-the-faucets alert. Reads the two weather modules below rather than
+     * fetching anything of its own, so it can never disagree with the numbers
+     * shown further down the rail.
+     *
+     * It sits directly under the clock because when it has something to say it
+     * is the most important thing in the rail, and because it is absent for
+     * most of the year -- nothing is displaced by a card that is not there.
+     */
+    {
+      module: "FreezeWatch",
+      position: "top_right",
+      classes: "side-freezewatch",
+
+      config: {
+        /*
+         * Degrees Fahrenheit. Below this the wall says something: a quiet
+         * watch when the forecast low is coming, a louder warning when it is
+         * already this cold outside. Raise it for more margin -- the common
+         * advice for exposed pipes is nearer 20.
+         */
+        thresholdF: 15,
+
+        /*
+         * It has to warm up this much before the card comes down. Without it a
+         * temperature parked on the threshold blinks the card on and off all
+         * night, which on a wall is a light flickering in the corner of the
+         * room.
+         */
+        clearMarginF: 2,
+
+        /*
+         * How far ahead a forecast low may raise a watch. 36 hours covers
+         * tonight and, late in the evening, tomorrow night. Raising it puts
+         * the card up days early and leaves it up for the whole cold snap,
+         * which is the fastest way to make it stop being read.
+         */
+        lookaheadHours: 36,
+
+        /*
+         * A stale reading keeps its card and says how old it is, because
+         * failing to drip costs more than dripping needlessly. Past
+         * giveUpAfterHours it stops claiming to know the weather at all.
+         */
+        staleAfterMinutes: 90,
+        giveUpAfterHours: 6
+      }
+    },
+
     {
       module: "weather",
       position: "top_right",
@@ -211,6 +260,37 @@ let config = {
         updateInterval: 900000,
         initialLoadDelay: 1000,
         animationSpeed: 0
+      }
+    },
+
+    /*
+     * What samo-radio is playing, if anything. The card hides itself whenever
+     * the device is idle, unreachable or unconfigured, so it costs nothing in
+     * the rail when the room is quiet.
+     *
+     * It sits with the other ambient status above, rather than below the
+     * notifications, so that a card appearing does not shove unread mail down
+     * the wall every time the radio comes on.
+     */
+    {
+      module: "NowPlaying",
+      position: "top_right",
+      classes: "side-nowplaying",
+
+      config: {
+        /*
+         * The samo-radio daemon refreshes its own channel metadata every 10s,
+         * so this is as fresh as the answer can be. It is a loopback call to
+         * samo-server on this same box and shares nothing with the mail poll --
+         * a stalled IMAP session cannot freeze this card, and this card cannot
+         * delay a text message.
+         */
+        pollIntervalMs: 10000,
+
+        showAlbum: true,
+        showArtwork: true,
+
+        configDir: "/etc/magicmirror-secondbrain"
       }
     },
 
