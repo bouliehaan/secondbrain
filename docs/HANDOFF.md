@@ -17,9 +17,9 @@ here.
 | Web port | 43761 (see `system/magicmirror-port`) |
 | Time | Chrony synchronised against NIST |
 
-Do not assume this is still exact. Read the live system before changing it —
-`scripts/pull-from-pi.sh --diff` is the cheapest way to see what the mirror
-actually looks like now.
+Do not assume this is still exact. Read the live system before changing it:
+diff the mirror's own files against this repo rather than trusting either side,
+because a hand-edited mirror may be the one that is right.
 
 ## Constraints
 
