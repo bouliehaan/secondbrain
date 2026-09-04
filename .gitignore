@@ -32,3 +32,7 @@ Thumbs.db
 *.before-*
 *.bak
 *.orig
+
+# Maintainer tooling: these ssh into MY mirror (jake@192.168.1.10) and are no
+# use to anyone else, so they stay on disk and out of the repo.
+scripts/*.sh

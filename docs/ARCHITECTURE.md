@@ -458,9 +458,8 @@ a dead feed kept displaying confident stale information and nothing logged it.
 `MMM-SolarTheme` switches light/dark on sun position — it reads the same
 `WEATHER_UPDATED` broadcast as `FreezeWatch`, for `sunrise` and `sunset`.
 `MMM-CalendarLiveHeader` renders the greeting header. `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are
-upstream, pinned in `config/third-party-modules.json` and installed by
-`scripts/bootstrap.sh`.
+upstream, pinned in `config/third-party-modules.json` and installed from there.
 
 `MMT-CalmCurrentWeather` is referenced by `config.js` as a weather `themeDir` but
-has no source here — it exists only on the mirror. `scripts/pull-from-pi.sh`
-recovers it.
+has no source here — it exists only on the mirror, and has to be copied back off
+it.

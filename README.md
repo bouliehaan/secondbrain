@@ -9,65 +9,64 @@ Runs on a headless Ubuntu box driving a display through LightDM, Openbox and
 Chromium in kiosk mode. The mirror is `jake@192.168.1.10`; override with
 `SECONDBRAIN_REMOTE`.
 
-## Install
+## Installing the modules
 
-On a fresh mirror, from a clone of this repo:
+These are ordinary MagicMirror modules. Into an existing MagicMirror:
 
 ```bash
-scripts/bootstrap.sh    # install the pinned third-party modules
-scripts/deploy.sh       # install this repo's own modules and config
+cp -r modules/MMM-SecondBrain modules/NowPlaying modules/FreezeWatch \
+      modules/MMM-SolarTheme modules/MMM-CalendarLiveHeader ~/MagicMirror/modules/
+cd ~/MagicMirror/modules/MMM-SecondBrain && npm ci --omit=dev
 ```
 
-Then put real credentials in `/etc/magicmirror-secondbrain/` on the mirror,
-using `config/secondbrain/*.example.json` as the shape, and install a `config.js`
-carrying the real private calendar urls once — see
-[Private calendar urls](#private-calendar-urls). Deploys preserve them after
-that, but there is nothing for the first deploy to preserve.
+`config/config.js` here is a worked example of how they are wired together;
+`config/third-party-modules.json` pins the third-party modules this dashboard
+also uses, which are deliberately **not** vendored.
 
-Third-party modules are **not** vendored. They are pinned in
-`config/third-party-modules.json` and installed by `bootstrap.sh`.
+Credentials go in `/etc/magicmirror-secondbrain/` on the machine running the
+mirror, shaped like `config/secondbrain/*.example.json`. Nothing reads
+credentials out of this repo.
 
-To turn NowPlaying on, put a samo API token on the mirror:
+For NowPlaying, that is a samo API token:
 
 ```bash
-scp config/secondbrain/samo.example.json jake@192.168.1.10:/tmp/samo.json
-# edit in the real token, then:
-ssh jake@192.168.1.10 "sudo mv /tmp/samo.json /etc/magicmirror-secondbrain/samo.json"
+sudo install -m 600 /dev/stdin /etc/magicmirror-secondbrain/samo.json <<'EOF'
+{ "baseUrl": "http://192.168.1.10:6969", "token": "your-samo-api-token" }
+EOF
 ```
 
 Without that file the module does not run, which is the supported way to leave
-it off.
+it off. The token is only ever used server-side: cover art is fetched by the
+node helper and handed to the browser as a data URI, so no credential reaches
+the kiosk page — which is served to anything on the LAN that asks.
 
-## Everyday use
-
-```bash
-scripts/deploy.sh
-scripts/deploy.sh --dry-run        # show what would transfer
-scripts/deploy.sh --modules-only   # leave config.js and custom.css alone
-```
-
-Checks syntax, runs every offline check, ships whole module directories,
-installs dependencies from the lockfile, restarts `magicmirror`, then reads the
-log back to confirm it actually came up.
+`system/` carries the systemd unit, the LightDM/Openbox configuration and the
+kiosk launchers for the display side, if you want the whole wall rather than the
+modules.
 
 ## Checks
 
-All of these need no mirror, no account and no credentials — except
-`check-calendars.sh`, which reads the mirror's live config and changes nothing.
+These need no mirror, no account and no credentials — they stand up fakes:
 
 | | |
 |---|---|
-| `scripts/check-calendars.sh` | Fetch every calendar and print today's events, to compare against the wall |
 | `node scripts/check-nowplaying.js` | The NowPlaying display logic and fetch path |
 | `node scripts/check-freeze-watch.js` | Both freeze levels, the thresholds, the payload it reads |
 | `node scripts/check-packages.js` | The package parser |
 | `node scripts/check-poll-resilience.js` | That one sick source cannot take the wall down (~30s; it waits out a real deadline) |
 | `node scripts/dev-poll.js <config dir> --twice` | A real poll, diffed against itself — ids that churn mean duplicate cards |
 
-Run `check-calendars.sh` whenever the wall looks stale. The calendar has failed
-silently twice, and neither failure showed up in the log. Its times come out in
-the kiosk's timezone, set by `export TZ` in `calendar-kiosk` — the box itself is
-`Etc/UTC`.
+`scripts/check-calendars.js` runs **on the mirror** and reads its live config:
+it fetches every calendar, checks something is actually fetching them, and
+prints today's events so you can compare the feeds against what the wall is
+showing. It changes nothing and needs no sudo. Run it whenever the wall looks
+stale — the calendar has failed silently twice, and neither failure showed up in
+the log. Its times come out in the kiosk's timezone, set by `export TZ` in
+`calendar-kiosk`; the box itself is `Etc/UTC`.
+
+`dev-poll.js` needs a config dir with real credentials (`gmail/`, `proton/`,
+`transmission.json`). On the mirror that is `/etc/magicmirror-secondbrain`;
+`config/secondbrain/` here holds templates only.
 
 ## Restarting magicmirror is not enough
 
@@ -77,10 +76,10 @@ a server with no calendar fetchers at all: no fetches, no errors, and a month
 grid frozen at whatever it last drew. It stayed that way for six days before
 anyone noticed.
 
-`deploy.sh` and `restore-calendar-urls.sh` reload the browser for you. By hand:
+Reload it by hand after a restart:
 
 ```bash
-ssh jake@192.168.1.10 "sudo pkill -u calendar-display -f magicmirror-kiosk"
+ssh <mirror> "sudo pkill -u calendar-display -f magicmirror-kiosk"
 ```
 
 `calendar-kiosk` supervises chromium in a loop, so killing it is the reload.
@@ -91,34 +90,15 @@ Two of the four calendars are secrets: a Nextcloud public-share token and a Jane
 booking token. Like every other credential they stay out of this repo, so
 `config/config.js` carries `REDACTED_PRIVATE_PATH` where they belong.
 
-**The mirror's own `config.js` is the only copy.** `deploy.sh` reads the live
-urls off the mirror and merges them into the file it installs, so deploying
-never overwrites them, and it aborts rather than install a placeholder.
+**The mirror's own `config.js` is the only copy**, and anything that installs a
+config must merge the live urls forward rather than overwrite them —
+`scripts/merge-config-secrets.js` is what does that here.
 
-That is a repair, not a design. For a week `deploy.sh` shipped the redacted file
+That is a repair, not a design. For a week a deploy shipped the redacted file
 verbatim; both private calendars answered 404, nothing logged it, and personal
-events quietly stopped appearing. If it happens again:
-
-```bash
-scripts/restore-calendar-urls.sh --dry-run   # recover the urls, change nothing
-scripts/restore-calendar-urls.sh             # install them and reload the wall
-```
-
-It recovers them from `journalctl`, which logs them on every fetch. Journal
-retention is finite — keep a copy of the mirror's `config.js` backed up.
-
-## Recovering state from the mirror
-
-Some things have only ever existed there — `custom.css` above all, roughly 1800
-lines styling the whole dashboard.
-
-```bash
-scripts/pull-from-pi.sh --diff   # report drift, write nothing
-scripts/pull-from-pi.sh          # also fetch what the repo is missing
-```
-
-It reports drift rather than overwriting, because on a hand-edited mirror either
-side may be the one you want. It copies no secrets.
+events quietly stopped appearing. `scripts/restore-calendar-urls.js` recovers
+them from `journalctl`, which logs them on every fetch — but journal retention
+is finite, so keep a copy of the mirror's `config.js` backed up.
 
 ## Layout
 
@@ -132,7 +112,7 @@ modules/      the five modules written here
 config/       config.js, and *.example.json credential templates
 system/       systemd unit, openbox/lightdm, kiosk launchers, chrony
 clock/        the python clock renderer
-scripts/      deploy, pull, bootstrap, calendar health, dev tools
+scripts/      offline checks and dev tools
 ```
 
 ## Rules that are load-bearing
