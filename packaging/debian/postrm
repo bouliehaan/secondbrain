@@ -1,0 +1,24 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        # Only on purge, never on remove. Both directories hold things that
+        # should survive reinstalling the package: /etc/magicmirror-secondbrain
+        # is every credential the wall has, and the state directory is what
+        # makes package tracking remember what it already showed.
+        rm -rf /var/lib/magicmirror-secondbrain
+        rm -rf /etc/magicmirror-secondbrain
+
+        deb-systemd-helper purge magicmirror.service >/dev/null 2>&1 || true
+        deb-systemd-helper unmask magicmirror.service >/dev/null 2>&1 || true
+
+        # The account is left alone on purpose. It owns a home directory with
+        # an X session in it, and deluser on a user who is currently autologged
+        # into LightDM is a good way to end up with a wall showing a greeter
+        # nobody can dismiss.
+        ;;
+esac
+
+systemctl --system daemon-reload >/dev/null 2>&1 || true
+exit 0

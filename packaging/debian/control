@@ -1,0 +1,23 @@
+Package: secondbrain
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: bouliehaan <debus.jacob@gmail.com>
+Depends: nodejs (>= 22.21.1), lightdm, openbox, chrony, curl, picom, unclutter,
+ x11-xserver-utils, python3, python3-gi, gir1.2-gtk-3.0
+Recommends: chromium
+Section: misc
+Priority: optional
+Homepage: https://github.com/bouliehaan/secondbrain
+Description: wall-mounted dashboard for a headless kiosk display
+ Drives a wall-mounted display through LightDM, Openbox and Chromium in kiosk
+ mode: calendar, weather, Google Voice messages, important mail, package
+ shipments, Transmission downloads, what samo-radio is playing, and a
+ drip-the-faucets freeze alert.
+ .
+ The package owns the display side -- the service user, the systemd unit, the
+ LightDM autologin drop-in, the kiosk supervisor and the clock. Credentials are
+ never shipped; they go in /etc/magicmirror-secondbrain/ and the package
+ creates that directory but never writes into it.
+ .
+ It is not a container, because it drives a real display through a real X
+ session.

@@ -1,0 +1,17 @@
+# Settings for the secondbrain wall. Sourced by /usr/bin/secondbrain-server.
+# This is a dpkg conffile: your edits survive upgrades.
+
+# Which node runs MagicMirror. Unset means "whatever is first on PATH", which
+# on a box where nodejs came from apt is /usr/bin/node.
+#
+# This box historically ran a tarball unpacked into /opt. If you still want
+# that one, name it here rather than editing the unit:
+#SECONDBRAIN_NODE=/opt/node-v22.23.1-linux-x64/bin/node
+
+# Where MagicMirror is installed.
+#SECONDBRAIN_MM_ROOT=/opt/MagicMirror
+
+# Which browser the kiosk supervisor launches. Unset means: try the snap first
+# (this box's chromium is a snap, not a deb), then fall back to whatever
+# `chromium` or `chromium-browser` is on PATH.
+#SECONDBRAIN_CHROMIUM=/snap/bin/chromium

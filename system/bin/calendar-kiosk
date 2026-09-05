@@ -1,10 +1,47 @@
 #!/usr/bin/env bash
 set -u
 
-export TZ="America/Denver"
+# Settings come from the package's defaults file when there is one, so the
+# timezone and the browser are not baked into this script. The fallbacks are
+# what this wall has always used, so an unconfigured box behaves as before.
+if [[ -r /etc/default/secondbrain ]]; then
+    set -a
+    source /etc/default/secondbrain
+    set +a
+fi
 
-URL="http://127.0.0.1:43761"
+# The kiosk's own timezone. The box itself is Etc/UTC; this is what the wall
+# reads in, and what check-calendars.js reports event times against.
+export TZ="${SECONDBRAIN_TZ:-America/Denver}"
+
+URL="http://127.0.0.1:${SECONDBRAIN_PORT:-43761}"
 PROFILE="$HOME/snap/chromium/common/magicmirror-kiosk-chrony"
+
+# This box's chromium is a snap, so the snap path is tried first. Falling back
+# to PATH is what lets the package install on a box where it is a deb.
+resolve_chromium() {
+    local candidate
+
+    if [[ -n "${SECONDBRAIN_CHROMIUM:-}" ]]; then
+        printf '%s\n' "$SECONDBRAIN_CHROMIUM"
+        return 0
+    fi
+
+    for candidate in /snap/bin/chromium chromium chromium-browser; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if ! CHROMIUM="$(resolve_chromium)"; then
+    echo "calendar-kiosk: no chromium found." >&2
+    echo "Set SECONDBRAIN_CHROMIUM in /etc/default/secondbrain." >&2
+    exit 1
+fi
 
 chrony_is_ready() {
     local tracking reference leap offset
@@ -71,10 +108,10 @@ chrony_is_ready() {
 }
 
 while true; do
-[[:space:]]*#
-[[:space:]]*# Chromium is not allowed to start until the Linux clock is
-[[:space:]]*# synchronized by Chrony and within 10 ms of its reference.
-[[:space:]]*#/
+    #
+    # Chromium is not allowed to start until the Linux clock is
+    # synchronized by Chrony and within 10 ms of its reference.
+    #
     until chrony_is_ready; do
         sleep 1
     done
@@ -93,7 +130,7 @@ while true; do
 
     SESSION_URL="${URL}/?kiosk_session=$(date +%s%N)"
 
-    /snap/bin/chromium \
+    "$CHROMIUM" \
         --user-data-dir="$PROFILE" \
         --kiosk \
         --app="$SESSION_URL" \

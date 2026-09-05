@@ -1,0 +1,126 @@
+# Builds the install file people actually use: one .deb, attached to the release.
+#
+# secondbrain cannot be a container -- it drives a real display through a real X
+# session, the same reason samo-radio cannot be one. The package is the install
+# path.
+#
+# Architecture: all. There is no compile step; everything shipped is JavaScript,
+# Python or config.
+
+name: Release
+
+on:
+    push:
+        tags: ['v*']
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: Tag to build a release for
+                required: true
+
+permissions:
+    contents: write
+
+jobs:
+    gates:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22.21.1'
+            - run: make check-all
+
+    release:
+        needs: gates
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.inputs.tag || github.ref }}
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22.21.1'
+
+            - name: Work out the version
+              id: version
+              run: |
+                  raw="${{ github.event.inputs.tag || github.ref_name }}"
+                  echo "tag=${raw}" >> "$GITHUB_OUTPUT"
+                  # Debian versions do not carry the leading v.
+                  echo "deb=${raw#v}" >> "$GITHUB_OUTPUT"
+
+            - name: Build the package
+              env:
+                  VERSION: ${{ steps.version.outputs.deb }}
+              run: packaging/build-deb.sh
+
+            - name: Check the package is well formed
+              run: |
+                  set -euo pipefail
+                  sudo apt-get update -qq
+                  sudo apt-get install -y -qq lintian
+                  dpkg-deb --info dist/secondbrain_all.deb
+                  dpkg-deb --contents dist/secondbrain_all.deb
+                  # Advisory: a personal-repo package is never going into
+                  # Debian, so style tags are noise. A hard failure here would
+                  # block releases on lintian's opinions.
+                  lintian --no-tag-display-limit dist/secondbrain_all.deb || true
+
+                  # The version in the control file is the one that matters,
+                  # since the filename deliberately does not carry it.
+                  dpkg-deb --field dist/secondbrain_all.deb Version \
+                      | grep -qx "${{ steps.version.outputs.deb }}"
+
+                  # It has to actually place the things postinst expects.
+                  # Listed into a variable rather than piped into `grep -q`:
+                  # grep exits on the first match, tar loses the pipe, and under
+                  # pipefail that fails the step on a perfectly good package.
+                  contents="$(dpkg-deb --fsys-tarfile dist/secondbrain_all.deb | tar -tf -)"
+                  for path in \
+                      ./usr/bin/secondbrain-server \
+                      ./usr/bin/calendar-kiosk \
+                      ./usr/bin/magicmirror-python-clock.py \
+                      ./lib/systemd/system/magicmirror.service \
+                      ./etc/lightdm/lightdm.conf.d/50-calendar-kiosk.conf \
+                      ./usr/share/secondbrain/openbox/autostart \
+                      ./opt/MagicMirror/serveronly/index.js \
+                      ./opt/MagicMirror/js/app.js \
+                      ./opt/MagicMirror/modules/MMM-CalendarExt3/MMM-CalendarExt3.js \
+                      ./opt/MagicMirror/modules/MMM-CalendarExt3Agenda/MMM-CalendarExt3Agenda.js \
+                      ./opt/MagicMirror/modules/MMM-SecondBrain/node_helper.js \
+                      ./opt/MagicMirror/modules/MMM-SecondBrain/node_modules/imapflow/package.json \
+                      ./usr/share/doc/secondbrain/examples/gmail/accounts/personal.example.json \
+                      ./usr/share/doc/secondbrain/examples/proton/accounts/personal.example.json
+                  do
+                      case "$contents" in
+                          *"$path"*) echo "contains $path" ;;
+                          *) echo "package is missing $path" >&2; exit 1 ;;
+                      esac
+                  done
+
+                  # The package must never carry a live config.js or a real
+                  # credential. Both have their own way of going wrong quietly.
+                  case "$contents" in
+                      *./opt/MagicMirror/config/config.js*)
+                          echo "package would overwrite the live config" >&2; exit 1 ;;
+                  esac
+                  # MagicMirror lists electron as an optional dependency and the
+                  # unit runs serveronly. If it ever appears here, --omit=optional
+                  # was lost and the package just grew ~200MB of dead weight.
+                  if printf '%s\n' "$contents" | grep -q 'node_modules/electron/'; then
+                      echo "package contains electron; --omit=optional was lost" >&2
+                      exit 1
+                  fi
+                  if printf '%s\n' "$contents" | grep -qE '/secondbrain/[a-z-]+\.json$'; then
+                      echo "package carries a non-example credential file" >&2; exit 1
+                  fi
+
+            - name: Publish
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  gh release upload "${{ steps.version.outputs.tag }}" dist/*.deb --clobber \
+                      || gh release create "${{ steps.version.outputs.tag }}" dist/*.deb \
+                           --title "secondbrain ${{ steps.version.outputs.tag }}" --generate-notes
