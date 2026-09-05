@@ -1,0 +1,56 @@
+#!/bin/sh
+#
+# What the systemd unit actually starts.
+#
+# The unit used to name /opt/node-v22.23.1-linux-x64/bin/node directly -- a
+# hand-unpacked tarball, pinned by full path including the patch version. Any
+# node upgrade meant editing a unit file, and the pin made the repo's copy of
+# the unit useless on any box but this one.
+#
+# systemd will not accept a variable as the first token of ExecStart, so
+# indirecting through a script is the only way to make the interpreter a
+# setting rather than a constant. Override either value in
+# /etc/default/secondbrain.
+set -eu
+
+[ -r /etc/default/secondbrain ] && . /etc/default/secondbrain
+
+MM_ROOT="${SECONDBRAIN_MM_ROOT:-/opt/MagicMirror}"
+
+if [ -n "${SECONDBRAIN_NODE:-}" ]; then
+    NODE="$SECONDBRAIN_NODE"
+else
+    NODE="$(command -v node 2>/dev/null || true)"
+fi
+
+if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
+    echo "secondbrain: no usable node found." >&2
+    echo "Set SECONDBRAIN_NODE in /etc/default/secondbrain, or install nodejs." >&2
+    exit 1
+fi
+
+# MagicMirror 2.37 pins node ">=22.21.1 <23 || >=24" and the 23.x line is
+# excluded deliberately. Ubuntu's own nodejs does not satisfy this, which is why
+# this box has a tarball in /opt -- that pin is correct, not clutter.
+#
+# Checked here because the failure is otherwise silent and late: node starts,
+# MagicMirror refuses, and the wall goes dark with the reason buried in the
+# journal. Better to say so on the way up.
+if ! "$NODE" -e '
+    const [a, b, c] = process.versions.node.split(".").map(Number);
+    process.exit(((a === 22 && (b > 21 || (b === 21 && c >= 1))) || a >= 24) ? 0 : 1);
+' 2>/dev/null; then
+    echo "secondbrain: $NODE is $("$NODE" -v 2>/dev/null), which MagicMirror rejects." >&2
+    echo "It needs >=22.21.1 <23, or >=24. Point SECONDBRAIN_NODE at one in" >&2
+    echo "/etc/default/secondbrain." >&2
+    exit 1
+fi
+
+if [ ! -d "$MM_ROOT" ]; then
+    echo "secondbrain: $MM_ROOT does not exist." >&2
+    echo "Set SECONDBRAIN_MM_ROOT in /etc/default/secondbrain." >&2
+    exit 1
+fi
+
+cd "$MM_ROOT"
+exec "$NODE" --run server

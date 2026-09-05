@@ -39,9 +39,9 @@ unconfigured all render as nothing, because on a wall they mean the same thing.
 To turn it on, put a samo API token on the mirror:
 
 ```bash
-scp config/secondbrain/samo.example.json jake@192.168.1.10:/tmp/samo.json
+scp config/secondbrain/samo.example.json <mirror>:/tmp/samo.json
 # edit in the real token, then:
-ssh jake@192.168.1.10 "sudo mv /tmp/samo.json /etc/magicmirror-secondbrain/samo.json"
+ssh <mirror> "sudo mv /tmp/samo.json /etc/magicmirror-secondbrain/samo.json"
 ```
 
 Without that file the module does not run, which is the supported way to leave

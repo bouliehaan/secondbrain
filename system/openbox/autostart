@@ -15,8 +15,8 @@ xset s noblank
 
 picom -b &
 unclutter -idle 0.5 -root &
-/usr/local/bin/calendar-kiosk &
+/usr/bin/calendar-kiosk &
 
 # BEGIN MAGICMIRROR PYTHON CLOCK
-/usr/local/bin/magicmirror-python-clock.py &
+/usr/bin/magicmirror-python-clock.py &
 # END MAGICMIRROR PYTHON CLOCK

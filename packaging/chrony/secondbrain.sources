@@ -1,0 +1,14 @@
+# NIST time sources for the wall.
+#
+# A drop-in, not a replacement for /etc/chrony/chrony.conf -- that file belongs
+# to the chrony package, and the repo's copy of it was the stock Ubuntu one with
+# these four lines swapped in. Shipping the whole file would clobber a conffile
+# that is not ours to own; the stock file already reads this directory.
+#
+# These are load-bearing, not a preference: calendar-kiosk refuses to start
+# Chromium until chrony reports Leap status Normal and the system clock within
+# 10ms of its reference. A wall whose clock is wrong shows the wrong day.
+server time-a-b.nist.gov iburst
+server time-b-b.nist.gov iburst
+server time-a-wwv.nist.gov iburst
+server time-b-wwv.nist.gov iburst

@@ -1,0 +1,77 @@
+#!/bin/sh
+# Package maintainer script. dpkg runs this; it is not something you invoke.
+set -e
+
+SERVICE_USER=calendar-display
+CRED_DIR=/etc/magicmirror-secondbrain
+STATE_DIR=/var/lib/magicmirror-secondbrain
+MM_ROOT=/opt/MagicMirror
+MODULES="MMM-SecondBrain NowPlaying FreezeWatch MMM-SolarTheme MMM-CalendarLiveHeader"
+
+case "$1" in
+    configure)
+        # A real home and a real shell, unlike most service accounts: LightDM
+        # autologs this user into an X session, and Openbox needs somewhere to
+        # read its autostart from.
+        if ! getent passwd "$SERVICE_USER" >/dev/null; then
+            adduser --system --group \
+                    --home "/home/$SERVICE_USER" \
+                    --shell /bin/bash "$SERVICE_USER"
+        fi
+        install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0755 "/home/$SERVICE_USER"
+
+        # Credentials. The package creates the directory and never writes into
+        # it -- gmail/, proton/, transmission.json and samo.json are put here by
+        # hand, shaped like the *.example.json in
+        # /usr/share/doc/secondbrain/examples/. Nothing reads credentials out of
+        # the source tree.
+        install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$CRED_DIR"
+
+        # State the module writes for itself. 0700 and owned by the service
+        # user is why package tracking persists at all; it used to be root-owned
+        # and every write failed silently.
+        install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$STATE_DIR"
+
+        # Openbox session for the kiosk user.
+        install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0755 \
+            "/home/$SERVICE_USER/.config" "/home/$SERVICE_USER/.config/openbox"
+        install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0755 \
+            /usr/share/secondbrain/openbox/autostart \
+            "/home/$SERVICE_USER/.config/openbox/autostart"
+
+        # MagicMirror and the two pinned third-party modules are bundled into
+        # /opt/MagicMirror by the package, so there is nothing to link and
+        # nothing to find. dpkg owns every file it shipped there and leaves
+        # anything else in modules/ alone, which is how a module installed by
+        # hand survives an upgrade.
+
+        # config.js is deliberately not ours. The mirror's copy is the only one
+        # carrying the private Nextcloud and Jane calendar urls, and a package
+        # that installed the repo's redacted copy over it would repeat the
+        # week-long outage where both calendars 404'd and nothing logged it.
+        # The example goes to /usr/share/doc and the live file is never touched.
+
+        deb-systemd-helper unmask magicmirror.service >/dev/null 2>&1 || true
+        if deb-systemd-helper --quiet was-enabled magicmirror.service; then
+            deb-systemd-helper enable magicmirror.service >/dev/null 2>&1 || true
+        else
+            deb-systemd-helper update-state magicmirror.service >/dev/null 2>&1 || true
+            systemctl --system enable magicmirror.service >/dev/null 2>&1 || true
+        fi
+        systemctl --system daemon-reload >/dev/null 2>&1 || true
+        # restart, not start: on an upgrade the old process is still running and
+        # `start` does nothing to a running unit.
+        systemctl --system restart magicmirror.service >/dev/null 2>&1 || true
+
+        # Restarting the server is not enough. The stock calendar module
+        # registers its fetchers when the *page* loads and never again, so a
+        # server that comes back without a browser reload has no calendar
+        # fetchers at all: no fetches, no errors, and a month grid frozen at
+        # whatever it last drew. It stayed that way for six days once.
+        # calendar-kiosk supervises chromium in a loop, so killing it is the
+        # reload.
+        pkill -u "$SERVICE_USER" -f magicmirror-kiosk >/dev/null 2>&1 || true
+        ;;
+esac
+
+exit 0

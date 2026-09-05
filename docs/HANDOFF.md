@@ -62,3 +62,21 @@ mirror at `/etc/magicmirror-secondbrain/` and are never committed —
 
 Automated redaction is not a guarantee. Check before sharing anything from here
 publicly.
+
+It has already damaged three files, and none of it was caught for months because
+nothing in the repo installed them — `system/` was a snapshot nobody read back:
+
+- `system/systemd/magicmirror.service` lost a `Wants=`/`After=` unit name. A
+  systemd template unit (`name@instance.service`) looks like an email address to
+  a naive regex, so it was replaced with `<REDACTED_EMAIL>` — an invalid unit
+  name — before the file was ever committed. Here the redaction was right about
+  the content and wrong about the result: the name is host-specific and should
+  stay out of the repo, but it left an uninstallable unit behind. It is a
+  drop-in on the box now, not a committed line.
+- `system/bin/calendar-kiosk` had a comment block replaced by the raw sed
+  pattern meant to strip it (`[[:space:]]*#`), which bash then tried to run as a
+  command on every pass of its supervising loop.
+
+Both classes are invisible to `git status` and to review, and neither shows up
+until something actually installs the file. The package is what closes that:
+these paths now have an owner.

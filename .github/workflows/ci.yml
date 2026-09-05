@@ -1,0 +1,20 @@
+# The five check scripts have existed for months and nothing has ever run them.
+# They stand up their own fakes, so they need no mirror, no account and no
+# credentials -- there is no reason for them not to run on every push.
+
+name: CI
+
+on:
+    push:
+        branches: [master]
+    pull_request:
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22.21.1'
+            - run: make check-all

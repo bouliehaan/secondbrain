@@ -11,6 +11,11 @@ config/secondbrain/**/*.json
 # Runtime state written by the module on the mirror
 package_state.json
 
+# Build output. packaging/build-deb.sh stages into build/ and writes the
+# package to dist/; neither belongs in the repo.
+build/
+dist/
+
 # Logs and captures
 *.log
 logs/
@@ -36,4 +41,17 @@ Thumbs.db
 # Maintainer tooling: deploy.sh ships a worktree to my dev boxes, commit.sh is
 # the gate before anything goes public. They live on my machine, not in the
 # repo — nobody cloning this can use them.
-*.sh
+#
+# Named individually rather than as *.sh. The blanket rule also swallowed every
+# legitimate shell script in the repo: a new one would be untracked from the
+# moment it was written, `git status` would stay clean, and nobody would notice
+# until it went missing. Packaging needs real scripts, so the rule names its six
+# targets instead.
+/commit.sh
+/deploy.sh
+/scripts/bootstrap.sh
+/scripts/check-calendars.sh
+/scripts/deploy.sh
+/scripts/enable-nowplaying.sh
+/scripts/pull-from-pi.sh
+/scripts/restore-calendar-urls.sh

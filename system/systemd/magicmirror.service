@@ -1,12 +1,23 @@
 [Unit]
 Description=MagicMirror wall dashboard
-Wants=network-online.target
-Wants=<REDACTED_EMAIL>
-Wants=cloudflared.service
+Documentation=https://github.com/bouliehaan/secondbrain
 
+Wants=network-online.target
 After=network-online.target
-After=<REDACTED_EMAIL>
-After=cloudflared.service
+
+# This box orders the dashboard after two local units -- a tunnel and a VPN.
+# Both names are specific to this machine, and neither is committed: the repo
+# was sanitised once and naming them here undoes that. Add them on the box as a
+# drop-in, which survives package upgrades:
+#
+#   /etc/systemd/system/magicmirror.service.d/10-local-ordering.conf
+#     [Unit]
+#     Wants=<your unit>
+#     After=<your unit>
+#
+# Soft ordering either way. The dashboard is useful on the LAN with both down,
+# so nothing here should become a Requires= -- that would let a failed tunnel
+# take the wall with it.
 
 [Service]
 Type=simple
@@ -14,14 +25,23 @@ Type=simple
 User=calendar-display
 Group=calendar-display
 
-WorkingDirectory=/opt/MagicMirror
+# Creates and owns /var/lib/magicmirror-secondbrain, where the module keeps the
+# state that makes package tracking remember what it has already shown.
+StateDirectory=magicmirror-secondbrain
+StateDirectoryMode=0700
 
 Environment=HOME=/home/calendar-display
-Environment=PATH=/opt/node-v22.23.1-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=NODE_ENV=production
+
+# The server's timezone. The box itself is Etc/UTC; the kiosk's own timezone is
+# separate and set in calendar-kiosk.
 Environment=TZ=America/Denver
 
-ExecStart=/opt/node-v22.23.1-linux-x64/bin/node --run server
+# Which node, and which MagicMirror tree. Both are settings rather than
+# constants -- see the comment in secondbrain-server. The leading '-' means a
+# box without the file still starts.
+EnvironmentFile=-/etc/default/secondbrain
+ExecStart=/usr/bin/secondbrain-server
 
 Restart=on-failure
 RestartSec=5s
