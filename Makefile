@@ -1,6 +1,7 @@
 PKG := secondbrain
+MM_MODULE := modules/MMM-SecondBrain
 
-.PHONY: check check-all syntax deb lint clean help
+.PHONY: check check-all syntax deps deb lint clean help
 
 ## help: list the targets
 help:
@@ -20,8 +21,20 @@ syntax:
 	@python3 -m py_compile clock/magicmirror-python-clock.py
 	@echo "  all shipped scripts parse"
 
+## deps: install what the checks import (mailparser, imapflow)
+deps: $(MM_MODULE)/node_modules
+
+# The checks import the module's own lib/, which imports mailparser and
+# imapflow. node_modules is gitignored, so a fresh clone -- CI, or a new laptop
+# -- has none and check-packages dies on MODULE_NOT_FOUND. This passed locally
+# only because an install happened to be sitting there already; a gate that
+# depends on that is not a gate.
+$(MM_MODULE)/node_modules: $(MM_MODULE)/package-lock.json
+	@cd $(MM_MODULE) && npm ci --omit=dev --no-audit --no-fund
+	@touch $@
+
 ## check: everything CI runs. Needs no mirror, no account and no credentials.
-check: syntax
+check: deps syntax
 	@node scripts/check-packages.js     >/dev/null && echo "  packages     ok"
 	@node scripts/check-nowplaying.js   >/dev/null && echo "  nowplaying   ok"
 	@node scripts/check-freeze-watch.js >/dev/null && echo "  freeze-watch ok"
