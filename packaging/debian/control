@@ -1,6 +1,7 @@
 Package: secondbrain
 Version: @VERSION@
 Architecture: @ARCH@
+Installed-Size: @INSTALLED_SIZE@
 Maintainer: bouliehaan <debus.jacob@gmail.com>
 Depends: nodejs (>= 22.21.1), lightdm, openbox, chrony, curl, picom, unclutter,
  x11-xserver-utils, python3, python3-gi, gir1.2-gtk-3.0

@@ -154,7 +154,13 @@ echo "    removed"
 
 say "Control files"
 install -d -m 0755 "$ROOT/DEBIAN"
+# Installed-Size is what apt reports as the disk cost before you agree to the
+# install. dpkg-deb does not work it out for a hand-built tree, and without the
+# field apt shows nothing at all. In KiB, excluding DEBIAN/ itself.
+INSTALLED_SIZE="$(du -sk --exclude=DEBIAN "$ROOT" 2>/dev/null | cut -f1 \
+    || du -sk "$ROOT" | cut -f1)"
 sed -e "s/@VERSION@/${VERSION}/" -e "s/@ARCH@/${ARCH}/" \
+    -e "s/@INSTALLED_SIZE@/${INSTALLED_SIZE}/" \
     packaging/debian/control > "$ROOT/DEBIAN/control"
 for script in postinst prerm postrm; do
     install -m 0755 "packaging/debian/$script" "$ROOT/DEBIAN/$script"
