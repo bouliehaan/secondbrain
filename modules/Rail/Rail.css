@@ -1,0 +1,73 @@
+/******************************************************************************
+ * RAIL
+ *
+ * Three things, all of them layout:
+ *
+ *   .rail-cut        an item the rail has no room for. Whole rows, cards,
+ *                    days and events, never part of one.
+ *   .rail-measuring  on the rail's container for the length of a measuring
+ *                    pass: the cuts come off and the schedule takes its
+ *                    natural height, so every item has its real size. It is
+ *                    removed in the same task, before a paint.
+ *   .rail-more       the "+ N more" line at the end of a day that is not all
+ *                    there. Set like the CLEAR of an empty day: small, tracked,
+ *                    faint ink, no edge -- it is a count, not an event.
+ *
+ * Tokens are the --sb-* family from custom.css, with the dark values as
+ * fallbacks. There are no light rules here.
+ ******************************************************************************/
+
+.region.top.right > .container:not(.rail-measuring) .rail-cut.rail-cut {
+  display: none !important;
+}
+
+/*
+ * The schedule is flex 1 1 0 with its overflow hidden, and its inner boxes
+ * are 100% of that. To measure it, all of that becomes auto, and the rail
+ * simply runs off the bottom of a region that clips it.
+ */
+.region.top.right > .container.rail-measuring > .module.side-agenda,
+.region.top.right > .container.rail-measuring > .module.MMM-CalendarExt3Agenda,
+.region.top.right > .container.rail-measuring > .module.side-agenda > .module-content,
+.region.top.right > .container.rail-measuring > .module.MMM-CalendarExt3Agenda > .module-content,
+.region.top.right > .container.rail-measuring .CX3A.bodice,
+.region.top.right > .container.rail-measuring .CX3A .agenda {
+  flex: 0 0 auto !important;
+
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+
+  overflow: visible !important;
+}
+
+/*
+ * The forecast drops its hairline under the last row (weather.css), but the
+ * last row in the DOM is now a cut one. The row before the first cut row is
+ * the last one drawn, and it gives up the hairline instead. A pixel shorter
+ * than measured, which is the safe way round.
+ */
+.region.top.right > .container:not(.rail-measuring) .fc-row:has(+ .fc-row.rail-cut) {
+  border-bottom: 0;
+}
+
+/* Last pass's lines are not part of what a day measures; the probe is. */
+.region.top.right > .container.rail-measuring .rail-more:not(.rail-probe) {
+  display: none !important;
+}
+
+.CX3A .rail-more {
+  display: block;
+
+  margin: 0;
+  padding: 5px 0 1px;
+
+  color: var(--sb-t3, #575859);
+
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}

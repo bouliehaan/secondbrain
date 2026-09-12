@@ -1,4 +1,4 @@
-/* global Module */
+/* global Module, config */
 
 /*
  * Now Playing -- what is coming out of samo-radio, on the wall.
@@ -35,7 +35,19 @@ Module.register("NowPlaying", {
     showAlbum: true,
 
     /* Cover art on the left of the card. */
-    showArtwork: true
+    showArtwork: true,
+
+    /*
+     * The rows under the card: when what is playing gives way, and to what.
+     * A channel's next booked block, the end of the block it is in, the next
+     * item of a cast queue, the station the radio goes back to when the
+     * queue runs out, a station's next programme where one is published --
+     * and, for a channel, a row of small covers for the episodes it owes,
+     * in the order it means to play them. The rail treats all of it as the
+     * cheapest thing to drop, so it never costs a card or an event; off here
+     * skips the requests that build it.
+     */
+    showUpNext: true
   },
 
   start () {
@@ -69,7 +81,8 @@ Module.register("NowPlaying", {
   configureBackend () {
     this.sendSocketNotification("NOW_PLAYING_CONFIG", {
       pollIntervalMs: this.config.pollIntervalMs,
-      configDir: this.config.configDir
+      configDir: this.config.configDir,
+      upNext: this.config.showUpNext !== false
     });
   },
 
@@ -86,6 +99,16 @@ Module.register("NowPlaying", {
     }
 
     this.nowPlaying = payload?.nowPlaying || null;
+
+    /*
+     * The status line under the calendar shows whether samo is answering. It
+     * cannot see this module's socket, so the helper's verdict is re-broadcast
+     * as a module notification. "off" means no samo.json; that is not a fault
+     * and the status line leaves it out.
+     */
+    if (payload?.samo) {
+      this.sendNotification("NOWPLAYING_STATUS", { samo: payload.samo });
+    }
 
     if (this.nowPlaying) {
       this.updateDom(0);
@@ -113,6 +136,18 @@ Module.register("NowPlaying", {
 
     wrapper.appendChild(this.renderCard(this.nowPlaying));
 
+    const next = this.renderNext(this.nowPlaying);
+
+    if (next) {
+      wrapper.appendChild(next);
+    }
+
+    const due = this.renderDue(this.nowPlaying);
+
+    if (due) {
+      wrapper.appendChild(due);
+    }
+
     return wrapper;
   },
 
@@ -136,6 +171,174 @@ Module.register("NowPlaying", {
     card.appendChild(this.renderBody(now));
 
     return card;
+  },
+
+  /*
+   * The rows under the card, each `LABEL  time  what`: NEXT 4:00 PM All
+   * Things Considered; UNTIL 9:00 AM; ENDS 2:40 PM. Time before title, as
+   * the schedule below writes its own rows. Rows are whole things to the
+   * rail, which hides them from the last up when the day is full.
+   */
+  renderNext (now) {
+    const rows = this.config.showUpNext !== false && Array.isArray(now.next)
+      ? now.next.filter((row) => row && (row.title || row.at))
+      : [];
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const list = document.createElement("div");
+    list.className = "nowplaying-next";
+
+    for (const entry of rows) {
+      const row = document.createElement("div");
+      row.className = `nowplaying-next-row nowplaying-next-${String(entry.label).toLowerCase()}`;
+
+      const label = document.createElement("span");
+      label.className = "nowplaying-next-label";
+      label.textContent = entry.label;
+      row.appendChild(label);
+
+      if (entry.at) {
+        const time = document.createElement("span");
+        time.className = "nowplaying-next-time";
+        time.textContent = this.formatMoment(entry.at);
+        row.appendChild(time);
+      }
+
+      if (entry.title) {
+        const title = document.createElement("span");
+        title.className = "nowplaying-next-title";
+        title.textContent = entry.title;
+
+        if (entry.detail) {
+          const detail = document.createElement("span");
+          detail.className = "nowplaying-next-detail";
+          detail.textContent = ` // ${entry.detail}`;
+          title.appendChild(detail);
+        }
+
+        row.appendChild(title);
+      }
+
+      list.appendChild(row);
+    }
+
+    return list;
+  },
+
+  /*
+   * The episodes the channel owes, as a row of small covers in the order the
+   * station means to play them: `DUE  [▪][▪][▪][▪]  +3`. Covers are in colour,
+   * like the one in the card; a show with no picture is its initials on a
+   * panel. One whole row to the rail -- it is there or it is not.
+   */
+  renderDue (now) {
+    const tiles = this.config.showUpNext !== false && Array.isArray(now.due?.tiles)
+      ? now.due.tiles.filter((tile) => tile && (tile.show || tile.title))
+      : [];
+
+    if (tiles.length === 0) {
+      return null;
+    }
+
+    const section = document.createElement("div");
+    section.className = "nowplaying-due";
+
+    const row = document.createElement("div");
+    row.className = "nowplaying-due-row";
+
+    const label = document.createElement("span");
+    label.className = "nowplaying-next-label";
+    label.textContent = "DUE";
+    row.appendChild(label);
+
+    const strip = document.createElement("div");
+    strip.className = "nowplaying-due-tiles";
+
+    for (const tile of tiles) {
+      const cell = document.createElement("div");
+      cell.className = "nowplaying-due-tile";
+
+      if (tile.tier) {
+        cell.classList.add(`nowplaying-due-tier-${String(tile.tier).toLowerCase()}`);
+      }
+
+      /*
+       * Owed, but a rule of the station's is holding it back for now -- it
+       * aired at lunch and is owed a second hearing, say. Drawn faint, after
+       * the free ones; the rule's own words are in the tooltip.
+       */
+      if (tile.held) {
+        cell.classList.add("nowplaying-due-held");
+      }
+
+      /* Not decorative: the picture is the only thing that names the show. */
+      cell.title = [tile.show, tile.title].filter(Boolean).join(" — ") +
+        (tile.held && tile.held.reason ? ` (held: ${tile.held.reason})` : "");
+
+      if (tile.artwork) {
+        const image = document.createElement("img");
+        image.src = tile.artwork;
+        image.alt = tile.show || tile.title;
+        cell.appendChild(image);
+      } else {
+        const initials = document.createElement("span");
+        initials.className = "nowplaying-due-initials";
+        initials.textContent = tile.initials || "";
+        cell.appendChild(initials);
+      }
+
+      strip.appendChild(cell);
+    }
+
+    row.appendChild(strip);
+
+    const rest = Math.max(0, Number(now.due.pending) - tiles.length);
+
+    if (rest > 0) {
+      const more = document.createElement("span");
+      more.className = "nowplaying-due-more";
+      more.textContent = `+ ${rest}`;
+      row.appendChild(more);
+    }
+
+    section.appendChild(row);
+
+    return section;
+  },
+
+  /*
+   * A moment as the wall writes one: the clock's own format, and the weekday
+   * in front of it only when it is not today's -- "Mon 12:00 AM" at eleven
+   * on a Sunday night, "4:00 PM" the rest of the time.
+   */
+  formatMoment (at) {
+    const moment = new Date(at);
+
+    if (!Number.isFinite(moment.getTime())) {
+      return "";
+    }
+
+    const locale = (typeof config !== "undefined" && config.locale) || "en-US";
+    const hour12 = !(typeof config !== "undefined" && Number(config.timeFormat) === 24);
+
+    const time = moment.toLocaleTimeString(locale, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12
+    });
+
+    const today = new Date();
+    const sameDay =
+      moment.getFullYear() === today.getFullYear() &&
+      moment.getMonth() === today.getMonth() &&
+      moment.getDate() === today.getDate();
+
+    return sameDay
+      ? time
+      : `${moment.toLocaleDateString(locale, { weekday: "short" })} ${time}`;
   },
 
   renderArtwork (now) {
@@ -230,7 +433,7 @@ Module.register("NowPlaying", {
     /*
      * The album earns its place only by saying something the other lines do
      * not. A podcast's show name arrives as both the artist and the parent
-     * title, which without this reads "Comedy Bang Bang · Comedy Bang Bang".
+     * title, which without this reads "Comedy Bang Bang // Comedy Bang Bang".
      * The backend already drops those, so this is the belt to that braces.
      */
     const duplicate = [now.title, now.artist, now.station]
@@ -250,6 +453,6 @@ Module.register("NowPlaying", {
       parts.push(now.sourceLabel);
     }
 
-    return parts.join(" · ");
+    return parts.join(" // ");
   }
 });

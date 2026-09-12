@@ -43,6 +43,19 @@ Environment=TZ=America/Denver
 EnvironmentFile=-/etc/default/secondbrain
 ExecStart=/usr/bin/secondbrain-server
 
+# A restarted server is not a working wall. The stock calendar module registers
+# its fetchers when the page loads and never again, so a server that comes back
+# under a browser that did not reload has no calendar fetchers at all: no
+# fetches, no errors, and a month grid frozen at whatever it last drew. Now
+# Playing used to fail the same way. needrestart does exactly this after
+# `apt upgrade`, and did on 2026-09-10 -- twelve hours of a stale wall.
+#
+# calendar-kiosk runs chromium in a supervising loop that waits for this server
+# to answer before relaunching, so killing the browser here is how the wall
+# reloads. Same user, so no privilege is needed; the leading '-' keeps a boot
+# with no browser yet from failing the unit.
+ExecStartPost=-/usr/bin/pkill -u calendar-display -f magicmirror-kiosk
+
 Restart=on-failure
 RestartSec=5s
 

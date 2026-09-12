@@ -19,7 +19,7 @@ PKG=secondbrain
 ROOT="build/deb"
 OUT="dist"
 
-MODULES=(MMM-SecondBrain NowPlaying FreezeWatch MMM-SolarTheme MMM-CalendarLiveHeader)
+MODULES=(MMM-SecondBrain NowPlaying FreezeWatch StatusLine Rail WeatherTheme MMM-SolarTheme MMM-CalendarLiveHeader)
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
@@ -88,11 +88,35 @@ node -e '
 ' | while IFS=$'\t' read -r name repo ref; do
     echo "    ${name} @ ${ref}"
     dir="$CACHE/tp/$name"
+    # A cached clone is only worth keeping if git has its submodules checked
+    # out (a status line starting with anything but a space says it has not).
+    # Builds before this script knew about submodules left CX3_Shared as an
+    # empty directory -- or, after a repair by hand, as files git did not put
+    # there -- and git refuses to clone a submodule into a directory that
+    # already has anything in it. Starting over is simpler than repairing.
+    if [ -d "$dir" ] && git -C "$dir" submodule status | grep -q '^[-+U]'; then
+        echo "    (cached clone has no submodules; discarding it)"
+        rm -rf "$dir"
+    fi
     if [ ! -d "$dir" ]; then
         mkdir -p "$CACHE/tp"
         git -c advice.detachedHead=false clone --quiet --depth 1 \
             --branch "$ref" "$repo" "$dir"
     fi
+    # Both modules import CX3_Shared/CX3_shared.mjs at runtime, and a plain
+    # clone leaves that submodule as an empty directory: the package installs,
+    # the module loads, and the month grid never draws. Run this every build,
+    # not only after a fresh clone, so a cache from before this step is fixed
+    # too. Shallow, the same as the parent, and GitHub serves the pinned SHA.
+    git -C "$dir" submodule update --quiet --init --depth 1
+    if [ ! -f "$dir/CX3_Shared/CX3_shared.mjs" ]; then
+        echo "error: ${name}: CX3_Shared/CX3_shared.mjs is missing after checkout." >&2
+        echo "       The module imports it at runtime; without it the calendar" >&2
+        echo "       never renders, so this package must not be built." >&2
+        exit 1
+    fi
+    # --exclude '.git' also drops the submodule's .git pointer file, which
+    # would otherwise ship pointing at a directory that does not exist.
     rsync -a --exclude '.git' "$dir/" "$MM_DEST/modules/$name/"
     for lic in LICENSE LICENSE.md LICENSE.txt; do
         [ -f "$dir/$lic" ] && place 0644 "$dir/$lic" \
@@ -114,6 +138,15 @@ say "Placing files"
 place 0755 packaging/bin/secondbrain-server "$ROOT/usr/bin/secondbrain-server"
 place 0755 system/bin/calendar-kiosk "$ROOT/usr/bin/calendar-kiosk"
 place 0755 clock/magicmirror-python-clock.py "$ROOT/usr/bin/magicmirror-python-clock.py"
+
+# The wall's typeface, installed system-wide so the kiosk browser and the
+# native clock draw with the same file. Rajdhani is OFL and not in the
+# archive, so it is vendored; postinst runs fc-cache. custom.css also names
+# these files relatively, for a page served from somewhere without them.
+for f in config/fonts/rajdhani/*.ttf; do
+    place 0644 "$f" "$ROOT/usr/share/fonts/truetype/rajdhani/$(basename "$f")"
+done
+place 0644 config/fonts/rajdhani/OFL.txt "$ROOT/usr/share/doc/$PKG/licenses/Rajdhani-OFL.txt"
 
 
 place 0755 system/openbox/autostart "$ROOT/usr/share/$PKG/openbox/autostart"

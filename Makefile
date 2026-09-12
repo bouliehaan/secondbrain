@@ -38,6 +38,8 @@ check: deps syntax
 	@node scripts/check-packages.js     >/dev/null && echo "  packages     ok"
 	@node scripts/check-nowplaying.js   >/dev/null && echo "  nowplaying   ok"
 	@node scripts/check-freeze-watch.js >/dev/null && echo "  freeze-watch ok"
+	@node scripts/check-status-line.js  >/dev/null && echo "  status-line  ok"
+	@node scripts/check-rail.js         >/dev/null && echo "  rail         ok"
 
 ## check-all: check, plus the slow one (~30s; it waits out a real deadline)
 check-all: check

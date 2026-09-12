@@ -1,0 +1,31 @@
+{#
+  Five days, one row each: weekday, icon, condition, high, low, and the
+  chance of precipitation as a five-segment bar (each segment is 20%).
+
+  The first row is today and gets the live edge. Weekday names throughout
+  rather than TODAY/TOMORROW: the month grid and the schedule already say
+  which day it is, and a column of three-letter days lines up.
+#}
+{% if forecast %}
+  {% set numSteps = forecast | calcNumSteps %}
+  {% set rows = forecast.slice(0, numSteps) %}
+  <div class="fc">
+    {% for f in rows %}
+      {% set segments = (((f.precipitationProbability or 0) / 20) | round) %}
+      <div class="fc-row{% if loop.first %} fc-today{% endif %}">
+        <span class="fc-day">{{ f.date.format("ddd") }}</span>
+        <span class="fc-icon"><span class="wi weathericon wi-{{ f.weatherType }}"></span></span>
+        <span class="fc-cond">{{ f.weatherType | replace("sunny-overcast", "mostly cloudy") | replace("day-cloudy", "partly cloudy") | replace("night-alt-cloudy", "partly cloudy") | replace("night-alt-", "") | replace("day-", "") | replace("night-", "") | replace("sprinkle", "drizzle") | replace("rain-mix", "wintry mix") | replace("-", " ") }}</span>
+        <span class="fc-hi">{{ f.maxTemperature | roundValue | unit("temperature") | decimalSymbol }}</span>
+        <span class="fc-lo">{{ f.minTemperature | roundValue | unit("temperature") | decimalSymbol }}</span>
+        {% if config.showPrecipitationProbability %}
+          <span class="fc-pp" title="{{ f.precipitationProbability }}%">
+            {% for i in range(1, 6) %}<i class="{% if i <= segments %}on{% endif %}"></i>{% endfor %}
+          </span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="wx-loading">{{ "LOADING" | translate }}</div>
+{% endif %}

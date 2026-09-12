@@ -1,45 +1,46 @@
 /******************************************************************************
  * NOW PLAYING
  *
- * One bubble in the right-hand rail, matching the notification cards next door:
- * same panel colour, same radius, same accent bar, same uppercase micro-label.
+ * One chamfered card in the rail, the same shape as the message cards next
+ * door: panel fill, 2px left edge, a reversed tag for the label, the station
+ * after it in secondary ink, the track as the headline.
  *
- * Colours are all --calm-* tokens. custom.css defines the whole family twice --
- * once under :root/html.solar-dark and once under html.solar-light -- so this
- * file needs no light-mode rules of its own; the solar theme swaps the tokens
- * underneath it. The literals here are fallbacks for the case where custom.css
- * has not loaded, and are the dark values on purpose: the wall boots dark.
+ * The cover art is the one thing on the whole wall drawn in colour. That is
+ * deliberate and it is the point: a monochrome display makes a 54px square of
+ * colour the loudest thing in the room, which is exactly the weight the radio
+ * should have. Do not grayscale it.
+ *
+ * Tokens are the --sb-* family from custom.css, with the dark values as
+ * fallbacks so the card renders sensibly if that file has not loaded.
+ * MMM-SolarTheme swaps the tokens underneath; there are no light rules here.
  ******************************************************************************/
 
 .nowplaying-shell {
-  display: flex;
-  align-items: center;
-
   box-sizing: border-box;
 
   width: 100%;
   min-width: 0;
 
-  padding: 9px 10px;
-
-  gap: 10px;
+  padding: 7px 12px 8px;
 
   overflow: hidden;
 
-  border: 1px solid var(--calm-line-soft, rgba(255, 255, 255, 0.08));
-  border-radius: 16px;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
 
-  background: var(--calm-panel, #202425) !important;
+  border: 0;
+  border-left: 2px solid var(--sb-t, #eeeff0);
+  border-radius: 0;
 
-  box-shadow: 0 5px 16px var(--calm-shadow, rgba(0, 0, 0, 0.22));
+  background: var(--sb-p, #0e0e0f) !important;
+  box-shadow: none;
 
-  color: var(--calm-text, #f0f1ed) !important;
+  color: var(--sb-t, #eeeff0) !important;
 }
 
 /*
  * The module hides itself through MagicMirror when there is nothing playing.
  * This is the belt to that braces: a shell that somehow renders empty must not
- * leave an empty bubble sitting in the rail.
+ * leave an empty card sitting in the rail.
  */
 .nowplaying-empty {
   display: none !important;
@@ -54,25 +55,25 @@
   width: 100%;
   min-width: 0;
 
-  gap: 10px;
+  gap: 12px;
 }
 
 /******************************************************************************
- * COVER ART
+ * COVER ART -- in colour, see above
  ******************************************************************************/
 
 .nowplaying-art {
   flex: 0 0 auto;
 
-  width: 48px;
-  height: 48px;
+  width: 54px;
+  height: 54px;
 
   overflow: hidden;
 
-  border: 1px solid var(--calm-line-soft, rgba(255, 255, 255, 0.07));
-  border-radius: 8px;
+  border: 1px solid var(--sb-l, #28282a);
+  border-radius: 0;
 
-  background: var(--calm-surface, #272c2d);
+  background: var(--sb-h, #242426);
 }
 
 .nowplaying-art img {
@@ -89,6 +90,26 @@
   object-fit: cover;
 }
 
+/*
+ * By daylight the page is a grey sheet, and a station logo on a plain white
+ * field -- KRCC's, for one -- sits on it as a bright white square. Printing
+ * the image onto the sheet fixes that without inspecting it: multiply makes
+ * white take the colour of what is behind it, so a white field disappears
+ * into the card, while ink, colour and a real cover come through a shade
+ * deeper, as they would on grey paper. The frame's own fill goes with it, so
+ * the backdrop the image prints onto is the card.
+ *
+ * At night nothing changes: a white square on black is a white square, and
+ * it looks like the cover it is.
+ */
+html.solar-light .nowplaying-art {
+  background: transparent;
+}
+
+html.solar-light .nowplaying-art img {
+  mix-blend-mode: multiply;
+}
+
 /******************************************************************************
  * TEXT
  ******************************************************************************/
@@ -97,7 +118,7 @@
   /*
    * min-width: 0 is what actually makes the ellipsis work. Without it a flex
    * child refuses to shrink below its content, so a long title pushes the
-   * bubble wider than the rail instead of truncating.
+   * card wider than the rail instead of truncating.
    */
   min-width: 0;
   flex: 1 1 auto;
@@ -108,8 +129,9 @@
 .nowplaying-label-row {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
 
-  gap: 6px;
+  gap: 10px;
 
   min-width: 0;
 }
@@ -117,58 +139,62 @@
 .nowplaying-label {
   flex: 0 0 auto;
 
-  color: var(--calm-accent, #8ba9a2) !important;
+  padding: 1px 10px 0 6px;
 
-  font-size: 9px !important;
-  font-weight: 700;
-  line-height: 1.15;
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
 
-  letter-spacing: 0.045em;
+  background: var(--sb-t, #eeeff0);
+  color: var(--sb-g, #060607) !important;
+
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.3;
+
+  letter-spacing: 0.14em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 /*
- * The station. Dimmer than the label and allowed to truncate, because it is the
- * least important thing in the card -- you chose the station, you know what it
- * is; the point of the card is what is on it.
+ * The station. Secondary ink and allowed to truncate, because it is the least
+ * important thing in the card -- you chose the station, you know what it is;
+ * the point of the card is what is on it.
  */
 .nowplaying-context {
   min-width: 0;
 
   overflow: hidden;
 
-  color: var(--calm-faint, #78807e) !important;
+  color: var(--sb-t2, #9d9ea0) !important;
 
-  font-size: 9px !important;
-  font-weight: 700;
-  line-height: 1.15;
+  font-size: 12px !important;
+  font-weight: 600;
+  line-height: 1.2;
 
-  letter-spacing: 0.045em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.nowplaying-context::before {
-  content: "· ";
-}
-
 /*
- * The one line the whole module exists to show. Bigger than a notification
- * title (13px) because this is a single card rather than one of a stack, and
- * because a song title read from the far side of a room is the whole point.
+ * The one line the whole module exists to show. Bigger than a message title
+ * because this is a single card rather than one of a stack, and because a song
+ * title read from the far side of a room is the whole point. Sentence case:
+ * a title is prose, not a label.
  */
 .nowplaying-title {
-  margin-top: 2px;
+  margin-top: 3px;
 
   overflow: hidden;
 
-  color: var(--calm-text, #f0f1ed) !important;
+  color: var(--sb-t, #eeeff0) !important;
 
-  font-size: 15px !important;
-  font-weight: 650;
+  font-size: 17px !important;
+  font-weight: 600;
   line-height: 1.2;
+  letter-spacing: 0.03em;
 
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -179,13 +205,211 @@
 
   overflow: hidden;
 
-  color: var(--calm-muted, #aab1af) !important;
+  color: var(--sb-t2, #9d9ea0) !important;
 
-  font-size: 10px !important;
+  font-size: 14px !important;
+  font-weight: 500;
   line-height: 1.22;
 
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/******************************************************************************
+ * UP NEXT
+ *
+ * One or two rows under the card, on a hairline: what the radio does when
+ * this is over. Written the way the schedule below writes a row -- the time
+ * in secondary ink, then the thing in ink -- with a small tracked label in
+ * front saying which kind of moment it is: NEXT, UNTIL, ENDS.
+ *
+ * Each row is a whole thing to the rail, which cuts them from the last up
+ * when the day is full (Rail.js measures .nowplaying-next-row). The
+ * container carries the hairline and the space above it, and is cut with
+ * the last row, so a card with no rows left is exactly the card.
+ ******************************************************************************/
+
+.nowplaying-next {
+  margin-top: 7px;
+  padding-top: 1px;
+
+  border-top: 1px solid var(--sb-l, #28282a);
+}
+
+.nowplaying-next-row {
+  display: flex;
+  align-items: baseline;
+
+  gap: 10px;
+
+  min-width: 0;
+  height: 22px;
+
+  white-space: nowrap;
+}
+
+.nowplaying-next-label {
+  flex: 0 0 auto;
+
+  min-width: 40px;
+
+  color: var(--sb-t3, #575859) !important;
+
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.nowplaying-next-time {
+  flex: 0 0 auto;
+
+  color: var(--sb-t2, #9d9ea0) !important;
+
+  font-size: 14px !important;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sentence case: a programme or a track is prose, not a label. */
+.nowplaying-next-title {
+  min-width: 0;
+  flex: 1 1 auto;
+
+  overflow: hidden;
+
+  color: var(--sb-t, #eeeff0) !important;
+
+  font-size: 14px !important;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+
+  text-overflow: ellipsis;
+}
+
+.nowplaying-next-detail {
+  color: var(--sb-t2, #9d9ea0) !important;
+
+  font-weight: 500;
+}
+
+/******************************************************************************
+ * DUE
+ *
+ * The episodes the channel owes, as a row of small covers in the order the
+ * station means to play them. Small on purpose -- Jake: "quite small so as
+ * to not take up a lot more room" -- 30px squares, which at wall distance is
+ * a colour and a shape, and that is what a cover you know is recognised by.
+ * In colour, like the cover in the card, and for the same reason. A show
+ * with no picture is its initials on a panel.
+ *
+ * The row is one whole thing to the rail (Rail.js measures .nowplaying-due
+ * as a list of one), cut before the card and after the text rows above it.
+ ******************************************************************************/
+
+.nowplaying-due {
+  margin-top: 7px;
+  padding-top: 5px;
+
+  border-top: 1px solid var(--sb-l, #28282a);
+}
+
+.nowplaying-due-row {
+  display: flex;
+  align-items: center;
+
+  gap: 10px;
+
+  min-width: 0;
+  height: 30px;
+}
+
+.nowplaying-due-tiles {
+  display: flex;
+  flex: 1 1 auto;
+
+  gap: 4px;
+
+  min-width: 0;
+
+  overflow: hidden;
+}
+
+.nowplaying-due-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex: 0 0 auto;
+
+  box-sizing: border-box;
+
+  width: 30px;
+  height: 30px;
+
+  overflow: hidden;
+
+  border: 1px solid var(--sb-l, #28282a);
+
+  background: var(--sb-h, #242426);
+}
+
+.nowplaying-due-tile img {
+  display: block;
+
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover;
+}
+
+/* By day the small covers print onto the sheet as the big one does. */
+html.solar-light .nowplaying-due-tile {
+  background: transparent;
+}
+
+html.solar-light .nowplaying-due-tile:has(> img) {
+  border-color: transparent;
+}
+
+html.solar-light .nowplaying-due-tile img {
+  mix-blend-mode: multiply;
+}
+
+/*
+ * Owed but held back by one of the station's rules for now. Faint rather
+ * than absent: it is still owed, and it goes back to full weight the moment
+ * the rule lets go. Half weight, not a ghost -- at 0.35 a 30px cover was a
+ * smudge; at wall distance it should still read as a colour and a shape.
+ */
+.nowplaying-due-held {
+  opacity: 0.5;
+}
+
+.nowplaying-due-initials {
+  color: var(--sb-t2, #9d9ea0) !important;
+
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+/* The count of what did not fit the row: a number, in the register of "+ N more". */
+.nowplaying-due-more {
+  flex: 0 0 auto;
+
+  color: var(--sb-t3, #575859) !important;
+
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  white-space: nowrap;
 }
 
 /******************************************************************************
@@ -195,17 +419,20 @@
 /*
  * Paused is rare on a device whose job is to be on air, so it earns a visible
  * difference rather than a subtle one: if the wall says paused, somebody wants
- * to know why the room is quiet.
+ * to know why the room is quiet. The label tag stays reversed -- it now reads
+ * PAUSED -- and everything else drops back.
  */
 .nowplaying-paused .nowplaying-title,
-.nowplaying-paused .nowplaying-meta {
-  opacity: 0.55;
-}
-
-.nowplaying-paused .nowplaying-label {
-  color: var(--calm-faint, #78807e) !important;
+.nowplaying-paused .nowplaying-meta,
+.nowplaying-paused ~ .nowplaying-next,
+.nowplaying-paused ~ .nowplaying-due {
+  opacity: 0.5;
 }
 
 .nowplaying-paused .nowplaying-art {
-  opacity: 0.5;
+  opacity: 0.45;
+}
+
+.nowplaying-paused {
+  border-left-color: var(--sb-t2, #9d9ea0);
 }

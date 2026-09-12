@@ -227,11 +227,12 @@ Module.register("FreezeWatch", {
     row.className = "freezewatch-label-row";
 
     /*
-     * The dot is the whole of the escalation that moves: it breathes on a
-     * warning and sits still on a watch. Confining the motion to six pixels is
+     * The mark is the whole of the escalation that moves: it breathes on a
+     * warning and sits still on a watch. Confining the motion to nine pixels is
      * deliberate -- something has to distinguish "it is cold now" from "it will
      * be", and a card that pulses as a whole would be unbearable in a room you
-     * live in for the fortnight it is cold.
+     * live in for the fortnight it is cold. The stylesheet draws it as a square
+     * beside the headline; this element is kept so the DOM order is stable.
      */
     const dot = document.createElement("span");
     dot.className = "freezewatch-dot";

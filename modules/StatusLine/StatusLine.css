@@ -1,0 +1,86 @@
+/******************************************************************************
+ * STATUS LINE
+ *
+ * A hatched band, then one line of tracked uppercase in secondary ink: the
+ * feeds on the left, the clock and the box on the right. A segment that is
+ * wrong is drawn in full ink over hatching, so it is the one thing on the
+ * line that reads from across the room.
+ *
+ * custom.css pins the region this sits in to the strip under the calendar.
+ * Tokens are the --sb-* family from custom.css, with the dark values as
+ * fallbacks. MMM-SolarTheme swaps them underneath; there are no light rules.
+ ******************************************************************************/
+
+.statusline {
+  box-sizing: border-box;
+
+  width: 100%;
+
+  overflow: hidden;
+
+  color: var(--sb-t2, #9d9ea0);
+}
+
+.statusline-band {
+  height: 6px;
+
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 5px,
+    var(--sb-h, #242426) 5px 7px
+  );
+}
+
+.statusline-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+
+  gap: 16px;
+
+  padding-top: 8px;
+
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.statusline-left,
+.statusline-right {
+  display: flex;
+  align-items: baseline;
+
+  min-width: 0;
+
+  overflow: hidden;
+}
+
+.statusline-right {
+  flex: 0 0 auto;
+}
+
+.statusline-item {
+  color: var(--sb-t2, #9d9ea0);
+}
+
+.statusline-sep {
+  margin: 0 9px;
+
+  color: var(--sb-t3, #575859);
+}
+
+/* Wrong: full ink over hazard stripes. */
+.statusline-bad {
+  padding: 0 6px;
+
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 3px,
+    var(--sb-h, #242426) 3px 4px
+  );
+
+  color: var(--sb-t, #eeeff0);
+}

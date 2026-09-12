@@ -21,11 +21,28 @@
     "            first enabled one. Set it if you have more than one box and",
     "            only care about the room the wall is in. GET /api/v1/samo-radio",
     "            /devices lists the ids.",
-    "timeoutMs -- per-request deadline. 6s is generous for loopback."
+    "timeoutMs -- per-request deadline. 6s is generous for loopback.",
+    "schedules -- optional. Which internet radio stations publish a",
+    "            schedule, so the card can say what is on next. Keyed by the",
+    "            station's name in samo (or its id). The BBC needs no entry:",
+    "            every BBC stream URL carries the service id and the wall",
+    "            recognises it. An NPR member station on Composer needs its",
+    "            24-character ucs id, which is in the station's own playlist",
+    "            or schedule widget (view the page source and look for",
+    "            ucs=...); either paste that widget link into the station's",
+    "            homepage field in samo, or put the id here. A station with",
+    "            no schedule anywhere simply gets no line, which is right.",
+    "            The two entries below are examples: rename the keys to your",
+    "            stations' names, or delete them."
   ],
 
   "baseUrl": "http://127.0.0.1:6969",
   "token": "REPLACE_WITH_SAMO_API_TOKEN",
   "deviceId": "",
-  "timeoutMs": 6000
+  "timeoutMs": 6000,
+
+  "schedules": {
+    "Example Public Radio": { "provider": "npr-composer", "ucs": "REPLACE_WITH_THE_STATIONS_24_HEX_UCS" },
+    "Example BBC Station": { "provider": "bbc", "service": "bbc_radio_fourfm" }
+  }
 }

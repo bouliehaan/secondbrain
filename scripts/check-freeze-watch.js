@@ -100,7 +100,7 @@ function run () {
 
   check(
     "a warning outranks a watch rather than showing both",
-    warning && warning.detail === "9° outside · 4° tonight",
+    warning && warning.detail === "9° outside // 4° tonight",
     `got ${warning && warning.detail}`
   );
 
@@ -316,7 +316,7 @@ function run () {
 
   check(
     "and says how old it is rather than pretending to be current",
-    stale && stale.stale === true && stale.detail === "9° outside · 3h ago",
+    stale && stale.stale === true && stale.detail === "9° outside // 3h ago",
     `got ${stale && stale.detail}`
   );
 

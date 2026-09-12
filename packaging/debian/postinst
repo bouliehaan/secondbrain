@@ -51,6 +51,11 @@ case "$1" in
         # week-long outage where both calendars 404'd and nothing logged it.
         # The example goes to /usr/share/doc and the live file is never touched.
 
+        # The vendored typeface. Without a cache refresh the kiosk browser and
+        # the clock fall back to whatever sans-serif is around until the next
+        # reboot, which looks like the restyle did not ship.
+        fc-cache -f /usr/share/fonts/truetype/rajdhani >/dev/null 2>&1 || true
+
         deb-systemd-helper unmask magicmirror.service >/dev/null 2>&1 || true
         if deb-systemd-helper --quiet was-enabled magicmirror.service; then
             deb-systemd-helper enable magicmirror.service >/dev/null 2>&1 || true

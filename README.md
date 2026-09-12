@@ -10,8 +10,13 @@ check.
   interrupted for, without marking anything read.
 - **Deliveries** — package tracking parsed out of shipping mail, plus
   Transmission downloads.
-- **Now playing**, if you run [samo-radio](https://github.com/bouliehaan/samo-radio).
+- **Now playing**, if you run [samo-radio](https://github.com/bouliehaan/samo-radio) —
+  and what comes next: your channel's next booked show, the end of the one
+  on air, the covers of the episodes it owes you in the order it means to
+  play them, the next item in a cast queue, a BBC station's next programme.
 - **Freeze warnings**, so you know when to drip the faucets.
+- **A status line** under the calendar: whether each feed and account
+  answered, when the last poll ran, whether the clock is locked to NTP.
 
 It comes back on its own after a power cut, and it will not draw the clock until
 the machine's time is actually synchronised.
@@ -76,6 +81,10 @@ sudo install -m 600 -o calendar-display -g calendar-display /dev/stdin \
 JSON
 ```
 
+BBC stations get their schedule with nothing more; an NPR member station on
+Composer needs its `ucs` id under `schedules` — see
+[samo.example.json](config/secondbrain/samo.example.json).
+
 **Downloads** (`transmission.json`) and **contacts**
 (`nextcloud-contacts.json`) follow the same shape as their templates.
 
@@ -108,17 +117,27 @@ private calendar URLs — a Nextcloud share link, a booking-system feed — live
 inside it in plain text. Back it up somewhere. If you lose it, those feeds are
 gone with it.
 
-After editing it, reload the browser as well as the service:
+After editing it, restart the service:
 
 ```bash
 sudo systemctl restart magicmirror
-sudo pkill -u calendar-display -f magicmirror-kiosk
 ```
 
-Both, every time. The calendar registers its feeds when the page loads and never
-again, so a service restart on its own leaves you with a month grid frozen at
-whatever it last drew — no errors, no empty screen, just a wall quietly showing
-last week.
+The service reloads the kiosk browser whenever it starts, and that is not a
+nicety. The calendar registers its feeds when the page loads and never again, so
+a server that comes back under a browser that did not reload has a month grid
+frozen at whatever it last drew — no errors, no empty screen, just a wall
+quietly showing last week. That is what `apt upgrade` does when `needrestart`
+bounces the service, and why the reload lives in the unit rather than in a
+command you have to remember. If you are running a unit of your own, add it as
+a drop-in:
+
+```bash
+sudo mkdir -p /etc/systemd/system/magicmirror.service.d
+printf '[Service]\nExecStartPost=-/usr/bin/pkill -u calendar-display -f magicmirror-kiosk\n' |
+  sudo tee /etc/systemd/system/magicmirror.service.d/20-reload-kiosk.conf
+sudo systemctl daemon-reload
+```
 
 ## Settings
 
@@ -148,7 +167,10 @@ what is happening.
 or newer and refuses the 23.x line; the journal names the version it found. Set
 `SECONDBRAIN_NODE` to a suitable one.
 
-**Calendars are stale.** Reload the browser as well as the service — see above.
+**Calendars are stale, or Now Playing is stuck on one song.** The server
+restarted and the browser did not reload — see above. Reload it now with
+`sudo pkill -u calendar-display -f magicmirror-kiosk`, then make sure the unit
+carries the `ExecStartPost` line so it does not happen again.
 
 **A panel is missing.** Its credential file is absent or unreadable. Check the
 journal, and that the file is owned by `calendar-display` and mode `600`.

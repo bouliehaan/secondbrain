@@ -395,7 +395,7 @@ const FreezeWatchLogic = {
       level: this.LEVEL_WARNING,
       label: "Freeze warning",
       headline: "Drip the faucets now",
-      detail: detail.join(" · "),
+      detail: detail.join(" // "),
       temperature,
       stale
     };
@@ -415,7 +415,7 @@ const FreezeWatchLogic = {
       level: this.LEVEL_WATCH,
       label: "Freeze watch",
       headline: `Drip the faucets ${when}`,
-      detail: detail.join(" · "),
+      detail: detail.join(" // "),
       temperature,
       stale
     };

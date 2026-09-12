@@ -1,7 +1,7 @@
 "use strict";
 
 const NodeHelper = require("node_helper");
-const { pollAll, cachedItems } = require("./lib/sources");
+const { pollAll, cachedItems, getLastPollStatus } = require("./lib/sources");
 
 /*
  * Every poll opens a fresh IMAP session per account. Polling faster than this
@@ -348,6 +348,15 @@ module.exports = NodeHelper.create({
         "SECOND_BRAIN_UPDATE",
         {
           items: finalItems,
+
+          /*
+           * Per-source health for the status line under the calendar: which
+           * of Gmail, Proton and Transmission answered, and how long the poll
+           * took. The frontend re-broadcasts it; the items diff there ignores
+           * it, so an unchanged wall still gets a fresh poll time.
+           */
+          status: getLastPollStatus(),
+
           generatedAt: Date.now()
         }
       );

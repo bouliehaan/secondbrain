@@ -15,3 +15,10 @@ License: GPL-3.0-only
  .
  On Debian systems the full text of the GNU General Public License version 3 can
  be found in /usr/share/common-licenses/GPL-3.
+
+Files: config/fonts/rajdhani/*
+Copyright: 2014 Indian Type Foundry (info@indiantypefoundry.com)
+License: OFL-1.1
+ This Font Software is licensed under the SIL Open Font License, Version 1.1.
+ The full text is installed as /usr/share/doc/secondbrain/licenses/Rajdhani-OFL.txt
+ and kept alongside the font files in the source tree.

@@ -1,6 +1,10 @@
 Module.register("MMM-CalendarLiveHeader", {
   defaults: {
-    name: "Jake",
+    /*
+     * How far ahead the header will announce the next event. Beyond this it
+     * says nothing rather than something stale: a dentist at four is worth a
+     * line at eight in the morning, not at midnight.
+     */
     lookAheadHours: 12
   },
 
@@ -100,13 +104,27 @@ Module.register("MMM-CalendarLiveHeader", {
 
         /*
          * CalendarExt3 periodically rebuilds its own DOM. Only act when
-         * that rebuild actually removed our status element.
+         * that rebuild actually removed our status element, or the week
+         * numbers in the grid.
          */
+        const weeksMissing =
+          document.querySelector(
+            ".region.bottom.bar " +
+            ".module.MMM-CalendarExt3 " +
+            ".CX3 > .week .cell.weekday_1"
+          ) &&
+          !document.querySelector(
+            ".region.bottom.bar " +
+            ".module.MMM-CalendarExt3 " +
+            ".calendar-live-week"
+          );
+
         if (
-          realHeader &&
-          !realHeader.querySelector(
-            ".calendar-live-status"
-          )
+          (realHeader &&
+            !realHeader.querySelector(
+              ".calendar-live-status"
+            )) ||
+          weeksMissing
         ) {
           this.scheduleRender(40);
         }
@@ -150,15 +168,20 @@ Module.register("MMM-CalendarLiveHeader", {
     }
 
     const now = Date.now();
-    const nextText = this.buildStatus(now);
+    const next = this.buildStatus(now);
+    const key = JSON.stringify(next);
 
     /*
-     * The DOM is changed only when the visible sentence changed.
+     * The DOM is changed only when the visible status changed.
      * This removes the once-per-second flashing.
      */
-    if (status.textContent !== nextText) {
-      status.textContent = nextText;
+    if (status.dataset.key !== key) {
+      status.dataset.key = key;
+      this.renderStatus(status, next);
     }
+
+    this.renderMeta(now);
+    this.renderWeekNumbers();
 
     this.scheduleNextMeaningfulUpdate(now);
   },
@@ -237,6 +260,26 @@ Module.register("MMM-CalendarLiveHeader", {
       "calendar-live-header-host"
     );
 
+    /*
+     * The title CalendarExt3 draws is a bare text node ("September 2026").
+     * Two spans go after it: the week and day-of-year meta, then the status
+     * at the far end. Both survive CalendarExt3's own redraws only because
+     * the observer above re-runs this when they vanish.
+     */
+    let meta = header.querySelector(
+      ".calendar-live-meta"
+    );
+
+    if (!meta) {
+      meta =
+        document.createElement("span");
+
+      meta.className =
+        "calendar-live-meta";
+
+      header.appendChild(meta);
+    }
+
     let status = header.querySelector(
       ".calendar-live-status"
     );
@@ -259,25 +302,169 @@ Module.register("MMM-CalendarLiveHeader", {
     return status;
   },
 
-  buildStatus(now) {
-    const greeting =
-      `${this.greeting(now)}, ${this.config.name}`;
+  /*
+   * ISO week and day of the year, after the month name. Real numbers the wall
+   * can stand behind, in the place the old greeting used to be.
+   */
+  renderMeta(now) {
+    const header =
+      document.querySelector(
+        ".region.bottom.bar " +
+        ".module.MMM-CalendarExt3 " +
+        ".CX3 > .headerTitle"
+      );
 
+    const meta =
+      header &&
+      header.querySelector(
+        ".calendar-live-meta"
+      );
+
+    if (!meta) {
+      return;
+    }
+
+    const text =
+      `Week ${String(this.isoWeek(now)).padStart(2, "0")}` +
+      " // " +
+      `Day ${String(this.dayOfYear(now)).padStart(3, "0")}`;
+
+    if (meta.textContent !== text) {
+      meta.textContent = text;
+    }
+  },
+
+  /*
+   * The ISO week, once per row of the month grid, in the Monday cell.
+   *
+   * CalendarExt3 can number weeks itself, but it counts from the configured
+   * first day of the week -- Sunday here -- and so disagrees with the ISO
+   * number in the title for six days out of seven. This writes the real one,
+   * from the cell's own date, and CalendarExt3's is left switched off.
+   */
+  renderWeekNumbers() {
+    const mondays =
+      document.querySelectorAll(
+        ".region.bottom.bar " +
+        ".module.MMM-CalendarExt3 " +
+        ".CX3 > .week .cell.weekday_1"
+      );
+
+    for (const cell of mondays) {
+      const date = Number(cell.dataset.date);
+
+      if (!Number.isFinite(date)) {
+        continue;
+      }
+
+      const header =
+        cell.querySelector(".cellHeader") || cell;
+
+      let span = cell.querySelector(
+        ".calendar-live-week"
+      );
+
+      if (!span) {
+        span =
+          document.createElement("span");
+
+        span.className =
+          "calendar-live-week";
+
+        header.appendChild(span);
+      }
+
+      const text =
+        `W${String(this.isoWeek(date)).padStart(2, "0")}`;
+
+      if (span.textContent !== text) {
+        span.textContent = text;
+      }
+    }
+  },
+
+  renderStatus(status, next) {
+    status.textContent = "";
+
+    if (!next) {
+      return;
+    }
+
+    const tag =
+      document.createElement("span");
+
+    tag.className = "sb-tag";
+    tag.textContent = next.tag;
+    status.appendChild(tag);
+
+    const title =
+      document.createElement("span");
+
+    title.className =
+      "calendar-live-title";
+
+    title.textContent = next.title;
+    status.appendChild(title);
+
+    if (next.when) {
+      const sep =
+        document.createElement("span");
+
+      sep.className = "sb-sep";
+      sep.textContent = "//";
+      status.appendChild(sep);
+
+      const when =
+        document.createElement("span");
+
+      when.className =
+        "calendar-live-when";
+
+      when.textContent = next.when;
+      status.appendChild(when);
+    }
+  },
+
+  /*
+   * What the header says at the far right of the month title:
+   *
+   *   NOW   DENTIST // UNTIL 4:00 PM      an event is in progress
+   *   NEXT  DENTIST // IN 25 MIN          the next one starts within 90 min
+   *   NEXT  DENTIST // 3:00 PM            later today, within lookAheadHours
+   *   NEXT  UFC FIGHT NIGHT // SAT 16     not today, but the next timed thing
+   *
+   * Nothing at all when there is nothing timed ahead. There is no greeting:
+   * the wall is an appliance, and the person reading it knows their name.
+   */
+  buildStatus(now) {
     const {
       currentEvent,
       nextEvent
     } = this.eventContext(now);
 
     if (currentEvent) {
-      return (
-        `${greeting} · ` +
-        `Now: ${currentEvent.title} ` +
-        `until ${this.formatTime(currentEvent.end)}`
-      );
+      return {
+        tag: "Now",
+        title: currentEvent.title,
+        when: `Until ${this.formatTime(currentEvent.end)}`
+      };
     }
 
     if (!nextEvent) {
-      return greeting;
+      return null;
+    }
+
+    if (
+      !this.sameDay(
+        now,
+        nextEvent.start
+      )
+    ) {
+      return {
+        tag: "Next",
+        title: nextEvent.title,
+        when: this.formatDay(nextEvent.start)
+      };
     }
 
     const lookAheadMilliseconds =
@@ -292,16 +479,7 @@ Module.register("MMM-CalendarLiveHeader", {
       nextEvent.start - now >
       lookAheadMilliseconds
     ) {
-      return greeting;
-    }
-
-    if (
-      !this.sameDay(
-        now,
-        nextEvent.start
-      )
-    ) {
-      return greeting;
+      return null;
     }
 
     const minutes = Math.max(
@@ -313,23 +491,23 @@ Module.register("MMM-CalendarLiveHeader", {
     );
 
     if (minutes <= 90) {
-      return (
-        `${greeting} · ` +
-        `In ${minutes} min: ${nextEvent.title}`
-      );
+      return {
+        tag: "Next",
+        title: nextEvent.title,
+        when: `In ${minutes} min`
+      };
     }
 
-    return (
-      `${greeting} · ` +
-      `Free until ` +
-      `${this.formatTime(nextEvent.start)}: ` +
-      nextEvent.title
-    );
+    return {
+      tag: "Next",
+      title: nextEvent.title,
+      when: this.formatTime(nextEvent.start)
+    };
   },
 
   nextMeaningfulUpdate(now) {
     const candidates = [
-      this.nextGreetingBoundary(now)
+      this.nextDayBoundary(now)
     ];
 
     const {
@@ -373,7 +551,7 @@ Module.register("MMM-CalendarLiveHeader", {
         90 * 60 * 1000
       ) {
         /*
-         * The sentence changes from "Free until" to a minute countdown.
+         * The status changes from a clock time to a minute countdown.
          */
         candidates.push(
           nextEvent.start -
@@ -414,28 +592,11 @@ Module.register("MMM-CalendarLiveHeader", {
     return Math.min(...valid);
   },
 
-  nextGreetingBoundary(now) {
-    const current =
-      new Date(now);
-
-    const noon =
-      new Date(now);
-
-    noon.setHours(12, 0, 0, 100);
-
-    if (noon.getTime() > now) {
-      return noon.getTime();
-    }
-
-    const evening =
-      new Date(now);
-
-    evening.setHours(17, 0, 0, 100);
-
-    if (evening.getTime() > now) {
-      return evening.getTime();
-    }
-
+  /*
+   * Midnight. The week and day-of-year meta roll over then, and an event that
+   * was "SAT 16" becomes today's business.
+   */
+  nextDayBoundary(now) {
     const tomorrow =
       new Date(now);
 
@@ -558,19 +719,54 @@ Module.register("MMM-CalendarLiveHeader", {
       : null;
   },
 
-  greeting(timestamp) {
-    const hour =
-      new Date(timestamp).getHours();
+  isoWeek(timestamp) {
+    const date = new Date(timestamp);
 
-    if (hour < 12) {
-      return "Good morning";
-    }
+    /*
+     * ISO 8601: weeks start on Monday and week 1 is the week with the year's
+     * first Thursday. Shift to the Thursday of this week, then count from
+     * the first Thursday of that Thursday's year.
+     */
+    const thursday = new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate() + 3 - ((date.getDay() + 6) % 7)
+    );
 
-    if (hour < 17) {
-      return "Good afternoon";
-    }
+    const firstThursday = new Date(
+      thursday.getFullYear(),
+      0,
+      4
+    );
 
-    return "Good evening";
+    firstThursday.setDate(
+      firstThursday.getDate() + 3 -
+      ((firstThursday.getDay() + 6) % 7)
+    );
+
+    return 1 + Math.round(
+      (thursday - firstThursday) /
+      (7 * 24 * 60 * 60 * 1000)
+    );
+  },
+
+  dayOfYear(timestamp) {
+    const date = new Date(timestamp);
+
+    const start = new Date(
+      date.getFullYear(),
+      0,
+      1
+    );
+
+    return 1 + Math.round(
+      (new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate()
+      ) - start) /
+      (24 * 60 * 60 * 1000)
+    );
   },
 
   sameDay(first, second) {
@@ -584,15 +780,29 @@ Module.register("MMM-CalendarLiveHeader", {
     );
   },
 
+  /* 12-hour with AM/PM, to match the clock. */
   formatTime(timestamp) {
     return new Intl.DateTimeFormat(
-      undefined,
+      "en-US",
       {
         hour: "numeric",
-        minute: "2-digit"
+        minute: "2-digit",
+        hour12: true
       }
     ).format(
       new Date(timestamp)
     );
+  },
+
+  /* "Sat 16" -- the day an event that is not today falls on. */
+  formatDay(timestamp) {
+    const date = new Date(timestamp);
+
+    const weekday = new Intl.DateTimeFormat(
+      "en-US",
+      { weekday: "short" }
+    ).format(date);
+
+    return `${weekday} ${date.getDate()}`;
   }
 });

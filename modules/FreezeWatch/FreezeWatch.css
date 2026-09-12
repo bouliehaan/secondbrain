@@ -1,54 +1,26 @@
 /******************************************************************************
  * FREEZE WATCH
  *
- * One bubble in the right-hand rail, the same shape as the notification cards
- * and the radio card next door: same panel colour, same radius, same uppercase
- * micro-label. It belongs to the dashboard rather than interrupting it.
+ * One chamfered card in the rail, the same shape as the message cards and the
+ * radio card next door: panel fill, 2px left edge, a reversed tag for the
+ * label. It belongs to the dashboard rather than interrupting it.
  *
- * The escalation from watch to warning is deliberately not "add red". Red is
- * the wrong colour twice over -- it fights the sage accent this dashboard is
- * built on, and it reads as *fault* rather than as *weather*, so the first
- * glance is "something is broken" instead of "it is cold". Cold blue says the
- * true thing, sits inside the existing palette, and can be turned up without
- * turning the room into a warning light.
+ * The escalation from watch to warning is not a colour. There are no colours.
+ * A warning is a hazard, and hazard on this wall is hatched: the card takes
+ * the 45° stripes, a 4px edge instead of 2px, a larger headline, and a square
+ * that breathes on a four-and-a-half second cycle. Nothing full-bleed, and the
+ * only moving thing on the card is the square. This card may be up for a
+ * fortnight; it has to be liveable.
  *
  * What actually escalates, in order of how much it costs the eye:
  *
- *   watch      hairline accent edge, panel background, 14px headline
- *   warning    thicker brighter edge, faint ice wash, 16px headline,
- *              and a 6px dot that breathes
+ *   watch      2px edge, panel fill, 17px headline, square still
+ *   warning    4px edge, hatched fill, 19px headline, square breathing
  *
- * Nothing full-bleed, nothing saturated, and the only moving thing on the card
- * is the dot. This card may be up for a fortnight; it has to be liveable.
- *
- * Colours are tokens. custom.css defines the --calm-* family twice -- once
- * under :root/html.solar-dark and once under html.solar-light -- and the
- * --freeze-* family below follows the same pattern, so MMM-SolarTheme swaps
- * both underneath this file and it needs no light-mode rules of its own. The
- * literals are fallbacks for the case where custom.css has not loaded, and are
- * the dark values on purpose: the wall boots dark.
+ * Tokens are the --sb-* family from custom.css, with the dark values as
+ * fallbacks so the card renders sensibly if that file has not loaded.
+ * MMM-SolarTheme swaps the tokens underneath; there are no light rules here.
  ******************************************************************************/
-
-:root,
-html.solar-dark {
-  --freeze-ice: #7fb0cc;
-  --freeze-ice-strong: #a9d6ef;
-
-  --freeze-edge: rgba(127, 176, 204, 0.30);
-  --freeze-edge-strong: rgba(169, 214, 239, 0.46);
-
-  --freeze-wash: rgba(127, 176, 204, 0.085);
-}
-
-html.solar-light {
-  --freeze-ice: #3f7291;
-  --freeze-ice-strong: #22566f;
-
-  --freeze-edge: rgba(63, 114, 145, 0.30);
-  --freeze-edge-strong: rgba(34, 86, 111, 0.44);
-
-  --freeze-wash: rgba(63, 114, 145, 0.075);
-}
 
 .freezewatch-shell {
   box-sizing: border-box;
@@ -56,31 +28,32 @@ html.solar-light {
   width: 100%;
   min-width: 0;
 
-  padding: 10px 12px;
+  padding: 7px 12px 8px;
 
   overflow: hidden;
 
-  border: 1px solid var(--calm-line-soft, rgba(255, 255, 255, 0.08));
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+
+  border: 0;
 
   /*
-   * The accent lives on the left edge rather than as a separate element: it is
-   * the one piece of the card that has to read from across the room, and a
-   * border cannot be knocked out of alignment by a long headline wrapping.
+   * The edge lives on the card rather than as a separate element: it is the
+   * one piece that has to read from across the room, and a border cannot be
+   * knocked out of alignment by a long headline wrapping.
    */
-  border-left: 3px solid var(--freeze-edge);
-  border-radius: 16px;
+  border-left: 2px solid var(--sb-t, #eeeff0);
+  border-radius: 0;
 
-  background: var(--calm-panel, #202425) !important;
+  background: var(--sb-p, #0e0e0f) !important;
+  box-shadow: none;
 
-  box-shadow: 0 5px 16px var(--calm-shadow, rgba(0, 0, 0, 0.22));
-
-  color: var(--calm-text, #f0f1ed) !important;
+  color: var(--sb-t, #eeeff0) !important;
 }
 
 /*
  * The module hides itself through MagicMirror when there is nothing to say.
  * This is the belt to that braces: a shell that somehow renders empty must not
- * leave an empty bubble sitting in the rail.
+ * leave an empty card sitting in the rail.
  */
 .freezewatch-empty {
   display: none !important;
@@ -92,62 +65,62 @@ html.solar-light {
 
 .freezewatch-label-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
 
-  gap: 6px;
+  gap: 10px;
 
   min-width: 0;
 }
 
+/*
+ * The square sits in the headline, not the label row: it marks the line that
+ * matters. Rendered here only so the DOM order can stay what it is.
+ */
 .freezewatch-dot {
-  flex: 0 0 auto;
-
-  width: 6px;
-  height: 6px;
-
-  border-radius: 50%;
-
-  background: var(--freeze-ice);
+  display: none;
 }
 
 .freezewatch-label {
   flex: 0 0 auto;
 
-  color: var(--freeze-ice) !important;
+  padding: 1px 10px 0 6px;
 
-  font-size: 9px !important;
-  font-weight: 700;
-  line-height: 1.15;
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
 
-  letter-spacing: 0.045em;
+  background: var(--sb-t, #eeeff0);
+  color: var(--sb-g, #060607) !important;
+
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.3;
+
+  letter-spacing: 0.14em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 /*
  * "stale" -- the reading is old enough that the card is a recollection rather
- * than an observation. Dimmed to the faintest text on the wall, because it
- * qualifies the card without being the thing you are meant to read.
+ * than an observation. Secondary ink, at the right, because it qualifies the
+ * card without being the thing you are meant to read.
  */
 .freezewatch-stale {
   min-width: 0;
+  margin-left: auto;
 
   overflow: hidden;
 
-  color: var(--calm-faint, #78807e) !important;
+  color: var(--sb-t2, #9d9ea0) !important;
 
-  font-size: 9px !important;
-  font-weight: 700;
-  line-height: 1.15;
+  font-size: 12px !important;
+  font-weight: 600;
+  line-height: 1.2;
 
-  letter-spacing: 0.045em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.freezewatch-stale::before {
-  content: "· ";
 }
 
 /******************************************************************************
@@ -155,13 +128,34 @@ html.solar-light {
  ******************************************************************************/
 
 .freezewatch-headline {
-  margin-top: 3px;
+  position: relative;
 
-  color: var(--calm-text, #f0f1ed) !important;
+  margin-top: 5px;
+  padding-left: 19px;
 
-  font-size: 14px !important;
-  font-weight: 650;
-  line-height: 1.22;
+  color: var(--sb-t, #eeeff0) !important;
+
+  font-size: 17px !important;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The square. Still on a watch; it breathes on a warning. */
+.freezewatch-headline::before {
+  content: "";
+
+  position: absolute;
+  top: 50%;
+  left: 0;
+
+  width: 9px;
+  height: 9px;
+
+  margin-top: -4px;
+
+  background: var(--sb-t, #eeeff0);
 }
 
 .freezewatch-detail {
@@ -169,10 +163,13 @@ html.solar-light {
 
   overflow: hidden;
 
-  color: var(--calm-muted, #aab1af) !important;
+  color: var(--sb-t2, #9d9ea0) !important;
 
-  font-size: 10px !important;
+  font-size: 12px !important;
+  font-weight: 600;
   line-height: 1.22;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -187,38 +184,27 @@ html.solar-light {
 
 .freezewatch-warning {
   border-left-width: 4px;
-  border-left-color: var(--freeze-edge-strong);
-
-  border-top-color: var(--freeze-edge);
-  border-right-color: var(--freeze-edge);
-  border-bottom-color: var(--freeze-edge);
 
   /*
-   * A wash rather than a fill. Layering a low-alpha ice tint over the panel
-   * token keeps the card the same family as its neighbours in both themes,
-   * where a flat colour would have to be picked twice and would still sit on
-   * top of the dashboard rather than in it.
+   * Hatching over the panel fill rather than a different fill: the card stays
+   * the same family as its neighbours in both themes, and the stripes are the
+   * wall's word for hazard.
    */
   background:
-    linear-gradient(var(--freeze-wash), var(--freeze-wash)),
-    var(--calm-panel, #202425) !important;
-}
-
-.freezewatch-warning .freezewatch-label {
-  color: var(--freeze-ice-strong) !important;
-}
-
-.freezewatch-warning .freezewatch-dot {
-  background: var(--freeze-ice-strong);
+    repeating-linear-gradient(
+      -45deg,
+      transparent 0 5px,
+      var(--sb-h, #242426) 5px 6px
+    ),
+    var(--sb-p, #0e0e0f) !important;
 }
 
 .freezewatch-warning .freezewatch-headline {
-  font-size: 16px !important;
-  font-weight: 700;
+  font-size: 19px !important;
 }
 
 .freezewatch-warning .freezewatch-detail {
-  color: var(--calm-text, #f0f1ed) !important;
+  color: var(--sb-t, #eeeff0) !important;
 }
 
 /*
@@ -234,17 +220,17 @@ html.solar-light {
   }
 
   50% {
-    opacity: 0.4;
-    transform: scale(0.78);
+    opacity: 0.35;
+    transform: scale(0.7);
   }
 }
 
-.freezewatch-warning .freezewatch-dot {
+.freezewatch-warning .freezewatch-headline::before {
   animation: freezewatch-breathe 4.5s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .freezewatch-warning .freezewatch-dot {
+  .freezewatch-warning .freezewatch-headline::before {
     animation: none;
   }
 }

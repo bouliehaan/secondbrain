@@ -358,8 +358,94 @@ function describeQueueItem (item, deviceName) {
     artist: parts[0] || "",
     album: parts.slice(1).join(" · "),
     context: firstNonEmpty(deviceName, "samo-radio"),
-    station: ""
+    station: "",
+    artwork: text(item.artworkUrl)
   };
+}
+
+/*
+ * What a queue item is really playing, when it is a station or a channel rather
+ * than a catalog item: `{ kind: "station" | "channel", id }`, or null.
+ *
+ * The ref says so directly ("station:<id>", "channel:<id>"). An item that
+ * arrived with no ref carries its stream URL as the ref instead -- the daemon's
+ * sanitizeItems does that -- and samo's stream paths name the source just as
+ * plainly, so the URL is read when the ref is one.
+ */
+function castSource (item) {
+  const ref = text(item?.ref);
+  const tagged = ref.match(/^(station|channel):(.+)$/);
+
+  if (tagged) {
+    return { kind: tagged[1], id: text(tagged[2]) };
+  }
+
+  const url = /^https?:\/\//i.test(ref) ? ref : text(item?.streamUrl);
+  const path = url.match(/\/(internet-radio|channels)\/([^/?#]+)\/stream(?:[?#]|$)/);
+
+  if (path) {
+    return {
+      kind: path[1] === "channels" ? KIND_CHANNEL : KIND_STATION,
+      id: decodeURIComponent(path[2])
+    };
+  }
+
+  return null;
+}
+
+/*
+ * A station or channel cast to the device as a queue item, described as what
+ * it is.
+ *
+ * "Play Elvis Radio on Crosley" from a phone does not tune the device; it sends
+ * a one-item queue whose only facts are a name and a stream URL. The daemon
+ * refreshes live metadata only for a TUNED station, and samo builds the cast
+ * item with no picture, so the device state for a cast station or channel is a
+ * bare name for as long as it plays. But samo-server knows the source whichever
+ * way the device is playing it -- a channel's now-playing endpoint says what it
+ * is airing, picture included, and a station's record carries the probe's last
+ * line and the station's cover -- so the caller looks it up and passes what it
+ * found as `cast`, and the card is built exactly as it would be had the source
+ * been tuned.
+ */
+function describeCastItem (item, cast) {
+  if (cast.kind === KIND_CHANNEL) {
+    const current = cast.now?.current && typeof cast.now.current === "object"
+      ? cast.now.current
+      : {};
+
+    return describeChannel({
+      name: firstNonEmpty(item.title, "Channel"),
+      title: text(current.title),
+      artist: text(current.artist),
+      artworkUrl: firstNonEmpty(item.artworkUrl, current.artworkUrl),
+      sourceLabel: text(current.sourceLabel)
+    });
+  }
+
+  const station = cast.station && typeof cast.station === "object"
+    ? cast.station
+    : {};
+  const nowPlaying = station.nowPlaying && typeof station.nowPlaying === "object"
+    ? station.nowPlaying
+    : {};
+
+  return describeInternetStation({
+    name: firstNonEmpty(station.name, item.title),
+    title: firstNonEmpty(nowPlaying.title, nowPlaying.raw),
+    artist: text(nowPlaying.artist),
+    /*
+     * Samo's own order for a station's picture: the per-track URL, then the
+     * cover uploaded into samo, then the logo the directory supplied. The item's
+     * own artwork would come first if samo ever set one on a cast station.
+     */
+    artworkUrl: firstNonEmpty(
+      item.artworkUrl,
+      station.metadataArtworkUrl,
+      station.coverUrl,
+      station.imageUrl
+    )
+  });
 }
 
 /**
@@ -374,6 +460,10 @@ function describeQueueItem (item, deviceName) {
  *   GET /api/v1/samo-radio/devices/{id}/state
  * @param {object} [options]
  * @param {string} [options.deviceName]  falls back to state.deviceName
+ * @param {object} [options.cast]  what samo-server said about the station or
+ *   channel a queue item is playing (see castSource): `{ kind: "station",
+ *   station }` or `{ kind: "channel", now }`. Without it a cast station or
+ *   channel is described as the bare queue item it arrived as.
  * @returns {object|null}
  */
 function resolveNowPlaying (state, options = {}) {
@@ -398,6 +488,9 @@ function resolveNowPlaying (state, options = {}) {
 
   let described = null;
   let source = "";
+  /* The channel or station being played, for the lookups that need its id. */
+  let sourceId = "";
+  let listenerCount = Number(channel?.listenerCount) || 0;
 
   if (mode === MODE_CHANNEL && channel) {
     const kind = text(channel.kind).toLowerCase() || KIND_CHANNEL;
@@ -407,9 +500,22 @@ function resolveNowPlaying (state, options = {}) {
       : describeChannel(channel);
 
     source = kind === KIND_STATION ? KIND_STATION : KIND_CHANNEL;
+    sourceId = text(channel.id);
   } else if (mode === MODE_QUEUE && item) {
-    described = describeQueueItem(item, deviceName);
-    source = MODE_QUEUE;
+    const cast = castSource(item);
+    const known = options.cast && typeof options.cast === "object"
+      ? options.cast
+      : null;
+
+    if (cast && known && known.kind === cast.kind) {
+      described = describeCastItem(item, known);
+      source = cast.kind;
+      sourceId = cast.id;
+      listenerCount = Number(known.now?.listenerCount) || 0;
+    } else {
+      described = describeQueueItem(item, deviceName);
+      source = MODE_QUEUE;
+    }
   } else if (item) {
     /*
      * Mode and payload disagree -- a state we should never see, but the device
@@ -438,20 +544,22 @@ function resolveNowPlaying (state, options = {}) {
     artist: described.artist || "",
     album: described.album || "",
     /*
-     * An artwork URL the server already resolved, when there is one. The
-     * backend still fetches the bytes -- see samo-client's artworkFor -- but it
-     * no longer has to deduce WHICH picture from an item ref, which is what it
-     * could not do for a relayed stream.
+     * The artwork URL the server already resolved, when there is one. This is
+     * a URL, not a picture: the backend fetches the bytes -- see samo-client's
+     * artworkFor -- and replaces it with a data URI before the card reaches
+     * the browser. What it no longer has to do is deduce WHICH picture from an
+     * item ref, which it could not do for a relayed stream.
      */
     artwork: described.artwork || "",
     context: described.context || "",
     station: described.station || "",
     sourceLabel: described.sourceLabel || "",
     source,
+    sourceId,
     live,
     paused: status === STATUS_PAUSED,
     buffering: status === STATUS_BUFFERING,
-    listenerCount: Number(channel?.listenerCount) || 0,
+    listenerCount,
     positionSeconds: live ? 0 : position,
     durationSeconds: live ? 0 : duration,
     deviceName,
@@ -515,6 +623,7 @@ function selectDevice (devices, configuredId) {
 module.exports = {
   resolveNowPlaying,
   selectDevice,
+  castSource,
   isRedundantStationLabel,
   splitArtistTitle,
   stripStationPrefix,

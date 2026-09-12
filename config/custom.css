@@ -1,16 +1,58 @@
 /******************************************************************************
- * MAGICMIRROR CALENDAR DISPLAY
+ * SECONDBRAIN WALL
  *
- * Large month calendar on the left.
- * Clock, weather, forecast and upcoming events on the right.
+ * Month calendar on the left, a status line under it, and a 420px rail on the
+ * right: clock, freeze card, weather, forecast, radio, messages, schedule.
+ *
+ * The look is one register throughout: black and white, Rajdhani, chamfered
+ * cards, labels reversed out in slanted tags, hairlines instead of shadows,
+ * 45° hatching for hazard and out-of-month, and real telemetry as the only
+ * decoration. The chrome has no accent colour. Emphasis is inversion: today,
+ * the event happening now, and a warning are the things drawn ink-on-ground
+ * the other way round. Colour is content, not chrome: the calendar events
+ * carry their calendar's colour (config.js), and the cover art in the radio
+ * card is drawn as it comes. Against a monochrome ground those are the pops
+ * that make the grey work; a wall of black bars is not.
+ *
+ * Daylight is the same token set inverted (html.solar-light, set by
+ * MMM-SolarTheme from sun position). Nothing below is written twice.
+ *
+ * Every colour is a --sb-* token. The module stylesheets (FreezeWatch,
+ * NowPlaying, MMM-SecondBrain, StatusLine, WeatherTheme) consume the same
+ * tokens with the dark values as fallbacks, so they render sensibly even if
+ * this file has not loaded, and they carry no light-mode rules of their own.
+ *
+ * Layout geometry -- the fixed regions, the month grid height maths, the
+ * agenda flex -- is carried over unchanged from the previous stylesheet. It
+ * took a long time to get right and none of it is about colour. What the
+ * rail's modules may draw into their boxes is decided by modules/Rail, which
+ * hides whole items rather than letting any box clip one.
  ******************************************************************************/
 
-:root {
+/******************************************************************************
+ * TOKENS
+ ******************************************************************************/
+
+:root,
+html.solar-dark {
+  --sb-g: #060607;   /* ground */
+  --sb-p: #0e0e0f;   /* panel: card fill */
+  --sb-h: #242426;   /* hatch stroke */
+  --sb-l: #28282a;   /* hairline */
+  --sb-t: #eeeff0;   /* ink */
+  --sb-t2: #9d9ea0;  /* ink, secondary */
+  --sb-t3: #575859;  /* ink, faint */
+  --sb-h-soft: #131315;  /* hatch stroke for out-of-month cells: a whisper */
+  --sb-on-color: #060607; /* ink on a calendar colour, in both themes */
+
+  /* Layout. The sidebar width is what everything else is measured from. */
   --dashboard-edge: 12px;
   --dashboard-gap: 20px;
   --dashboard-sidebar: 420px;
-  --dashboard-module-gap: 14px;
+  --dashboard-module-gap: 10px;
+  --sb-status-height: 30px;
 
+  /* MagicMirror's own region gaps, all zeroed: the regions are placed below. */
   --gap-body-top: 0px;
   --gap-body-right: 0px;
   --gap-body-bottom: 0px;
@@ -18,11 +60,91 @@
   --gap-modules: 0px;
 }
 
+html.solar-light {
+  --sb-g: #e6e6e3;
+  --sb-p: #d9d9d6;
+  --sb-h: #c4c4c1;
+  --sb-l: #c3c3c0;
+  --sb-t: #0c0c0d;
+  --sb-t2: #5a5a5c;
+  --sb-t3: #9c9c9a;
+  --sb-h-soft: #dedddb;
+}
+
+/******************************************************************************
+ * TYPE
+ *
+ * Rajdhani, one family, three weights. local() first so the wall uses the
+ * system-installed copy that the native clock also draws with; the url() is
+ * the fallback for a page served from a machine without it. The files sit
+ * next to this stylesheet in config/fonts/.
+ ******************************************************************************/
+
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("Rajdhani"),
+    local("Rajdhani Regular"),
+    local("Rajdhani-Regular"),
+    url("fonts/rajdhani/Rajdhani-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    local("Rajdhani Medium"),
+    local("Rajdhani-Medium"),
+    url("fonts/rajdhani/Rajdhani-Medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src:
+    local("Rajdhani SemiBold"),
+    local("Rajdhani-SemiBold"),
+    url("fonts/rajdhani/Rajdhani-SemiBold.ttf") format("truetype");
+}
+
+html,
+body,
+.module,
+.CX3,
+.CX3A {
+  font-family:
+    "Rajdhani",
+    "Bahnschrift",
+    "DIN Alternate",
+    "Arial Narrow",
+    sans-serif !important;
+}
+
+/******************************************************************************
+ * PAGE
+ ******************************************************************************/
+
 html {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #000;
+}
+
+html,
+body,
+html.solar-light,
+html.solar-light body,
+html.solar-dark,
+html.solar-dark body {
+  background: var(--sb-g) !important;
+  color: var(--sb-t) !important;
 }
 
 body {
@@ -34,7 +156,57 @@ body {
   margin: 0 !important;
 
   overflow: hidden !important;
-  background: #000;
+
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+html.solar-dark {
+  color-scheme: dark;
+}
+
+html.solar-light {
+  color-scheme: light;
+}
+
+/*
+ * The theme swap is a crossfade rather than a cut. 1400ms is slow enough not
+ * to read as a flicker across the room and fast enough that nobody is watching
+ * it happen.
+ */
+html.solar-theme-enabled,
+html.solar-theme-enabled body,
+html.solar-theme-enabled .module,
+html.solar-theme-enabled header,
+html.solar-theme-enabled .CX3,
+html.solar-theme-enabled .CX3 .cell,
+html.solar-theme-enabled .CX3A,
+html.solar-theme-enabled .CX3A .cell {
+  transition:
+    color var(--solar-theme-transition, 1400ms) ease,
+    background-color var(--solar-theme-transition, 1400ms) ease,
+    border-color var(--solar-theme-transition, 1400ms) ease;
+}
+
+/* MagicMirror's default text treatment, neutralised. */
+.module,
+.bright,
+.normal,
+.dimmed,
+.light {
+  text-shadow: none !important;
+}
+
+.module .bright {
+  color: var(--sb-t) !important;
+}
+
+.module .normal {
+  color: var(--sb-t) !important;
+}
+
+.module .dimmed {
+  color: var(--sb-t2) !important;
 }
 
 /*
@@ -46,10 +218,55 @@ body {
 }
 
 /******************************************************************************
+ * SHARED TYPE ROLES
+ *
+ * Three roles carry the whole register:
+ *   .sb-tag   a label reversed out in a block with a slanted right end
+ *   .sb-meta  small tracked uppercase, secondary ink
+ *   .sb-sep   the "//" between things
+ * Module stylesheets define their own copies of these so they stand alone;
+ * the values here are the reference.
+ ******************************************************************************/
+
+.sb-tag {
+  display: inline-block;
+
+  padding: 2px 13px 1px 8px;
+
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
+
+  background: var(--sb-t);
+  color: var(--sb-g);
+
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sb-meta {
+  color: var(--sb-t2);
+
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sb-sep {
+  color: var(--sb-t3);
+}
+
+/******************************************************************************
  * PAGE LAYOUT
  *
  * MagicMirror nests top_right inside top_bar. Fixed positioning removes the
  * sidebar from that nested region geometry and anchors it to the viewport.
+ * The status line is its own region (bottom_left), pinned into a strip under
+ * the calendar.
  ******************************************************************************/
 
 .region.bottom.bar {
@@ -61,11 +278,36 @@ body {
     var(--dashboard-sidebar) +
     var(--dashboard-gap)
   ) !important;
-  bottom: var(--dashboard-edge) !important;
+  bottom: calc(
+    var(--dashboard-edge) +
+    var(--sb-status-height)
+  ) !important;
   left: var(--dashboard-edge) !important;
 
   width: auto !important;
   height: auto !important;
+
+  text-align: left !important;
+  transform: none !important;
+  overflow: hidden !important;
+
+  z-index: 1;
+}
+
+.region.bottom.left {
+  position: fixed !important;
+
+  top: auto !important;
+  right: calc(
+    var(--dashboard-edge) +
+    var(--dashboard-sidebar) +
+    var(--dashboard-gap)
+  ) !important;
+  bottom: var(--dashboard-edge) !important;
+  left: var(--dashboard-edge) !important;
+
+  width: auto !important;
+  height: var(--sb-status-height) !important;
 
   text-align: left !important;
   transform: none !important;
@@ -93,6 +335,7 @@ body {
 }
 
 .region.bottom.bar > .container,
+.region.bottom.left > .container,
 .region.top.right > .container {
   box-sizing: border-box;
 
@@ -103,8 +346,13 @@ body {
   min-height: 0;
 }
 
-.region.bottom.bar > .container {
+.region.bottom.bar > .container,
+.region.bottom.left > .container {
   display: block !important;
+}
+
+.region.bottom.left .module {
+  margin: 0 !important;
 }
 
 .region.top.right > .container {
@@ -126,8 +374,16 @@ body {
   text-align: left;
 }
 
+.region.top.right > .container > .module.clock,
+.region.top.right > .container > .module.weather,
+.region.top.right > .container > .module.FreezeWatch,
+.region.top.right > .container > .module.NowPlaying,
+.region.top.right > .container > .module.MMM-SecondBrain {
+  flex: 0 0 auto;
+}
+
 /******************************************************************************
- * MONTH CALENDAR
+ * MONTH CALENDAR -- GEOMETRY
  *
  * The actual .week nodes divide the available height equally. This works for
  * four-, five- and six-row months without assigning height to every weekGrid.
@@ -146,22 +402,13 @@ body {
   min-height: 0;
 
   margin: 0 !important;
+  padding: 0 !important;
 }
 
-.region.bottom.bar .module.MMM-CalendarExt3 > header {
-  flex: 0 0 auto;
-
-  margin: 0 5px 8px;
-  padding: 0 0 6px;
-
-  border-bottom: 1px solid #555;
-
-  font-size: 28px;
-  line-height: 32px;
-
-  color: #fff;
-  text-align: left;
-  text-transform: none;
+/* The outer MagicMirror header is unused; the real one is .CX3 > .headerTitle. */
+.region.bottom.bar .module.MMM-CalendarExt3 > header,
+.region.bottom.bar .module.MMM-CalendarExt3 > header:empty {
+  display: none !important;
 }
 
 .region.bottom.bar .module.MMM-CalendarExt3 > .module-content {
@@ -188,23 +435,18 @@ body {
 
   overflow: hidden;
 
-  --cellheaderheight: 31px;
+  --cellheaderheight: 38px;
   --cellfooterheight: 0px;
-  --celllinecolor: #3b3b3b;
-  --cellbgcolor: rgba(255, 255, 255, 0.025);
+  --celllinecolor: var(--sb-l);
+  --cellbgcolor: transparent;
+  --defaultcolor: var(--sb-t);
+  --defaultColor: var(--sb-t);
+
+  color: var(--sb-t) !important;
 }
 
-/* Used only when CalendarExt3 customHeader is enabled. */
 .CX3 > .headerTitle {
   flex: 0 0 auto;
-
-  margin: 0 5px 8px;
-
-  font-size: 28px;
-  line-height: 32px;
-
-  color: #fff;
-  text-align: left;
 }
 
 /*
@@ -218,21 +460,9 @@ body {
   min-height: 34px !important;
 
   margin: 0 !important;
-  padding: 0 5px !important;
+  padding: 0 !important;
 
-  align-items: center;
-}
-
-.CX3 > .headerContainer .weekday {
-  align-self: center;
-
-  font-size: 17px;
-  line-height: 34px;
-
-  text-align: center;
-  text-transform: uppercase;
-
-  color: #bdbdbd;
+  align-items: stretch;
 }
 
 /*
@@ -245,7 +475,7 @@ body {
   height: auto !important;
   min-height: 0 !important;
 
-  padding: 0 5px !important;
+  padding: 0 !important;
   overflow: hidden !important;
 }
 
@@ -285,9 +515,6 @@ body {
 
 .CX3 .cellHeader {
   height: var(--cellheaderheight) !important;
-
-  padding: 3px 6px !important;
-  line-height: 24px;
 }
 
 .CX3 .cellFooter {
@@ -295,22 +522,350 @@ body {
   padding: 0 !important;
 }
 
+/******************************************************************************
+ * MONTH CALENDAR -- LOOK
+ ******************************************************************************/
+
+/* Month title, with the live status at the right end (MMM-CalendarLiveHeader). */
+.CX3 > .headerTitle {
+  position: relative !important;
+
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: flex-start !important;
+
+  box-sizing: border-box;
+
+  width: 100% !important;
+
+  margin: 0 !important;
+  padding: 2px 0 9px !important;
+
+  border-bottom: 2px solid var(--sb-t) !important;
+
+  color: var(--sb-t) !important;
+
+  font-size: 34px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  letter-spacing: 0.06em !important;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+/* The title is spans (month, a space, year); as flex items the space collapses. */
+.CX3 > .headerTitle .headerTimeParts.literal {
+  white-space: pre;
+}
+
+/* Week and day-of-year, set into the title by MMM-CalendarLiveHeader. */
+.calendar-live-meta {
+  margin-left: 16px;
+
+  color: var(--sb-t2);
+
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.calendar-live-status {
+  display: flex;
+  align-items: center;
+
+  gap: 12px;
+
+  max-width: 50%;
+  margin: 0 0 2px auto;
+  padding: 0;
+
+  overflow: hidden;
+
+  color: var(--sb-t) !important;
+
+  font-size: 17px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.calendar-live-status:empty {
+  display: none;
+}
+
+.calendar-live-status .sb-tag {
+  font-size: 14px;
+}
+
+.calendar-live-status .calendar-live-title {
+  min-width: 0;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-live-status .calendar-live-when {
+  color: var(--sb-t2);
+
+  font-size: 15px;
+}
+
+/* Weekday ruler: tick at every column, names in secondary ink. */
+.CX3 > .headerContainer .weekday {
+  position: relative;
+
+  align-self: stretch;
+
+  padding: 11px 0 0 10px;
+
+  border-bottom: 1px solid var(--sb-l);
+
+  color: var(--sb-t2) !important;
+
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  letter-spacing: 0.16em;
+  text-align: left;
+  text-transform: uppercase !important;
+}
+
+.CX3 > .headerContainer .weekday::before {
+  content: "";
+
+  position: absolute;
+  left: 0;
+  bottom: 0;
+
+  width: 1px;
+  height: 9px;
+
+  background: var(--sb-t2);
+}
+
+/* Cells: a hairline grid, nothing filled. */
+.CX3 .cell,
+.CX3 .cell.thisMonth,
+.CX3 .thisMonth {
+  position: relative;
+
+  border: 0 !important;
+  border-right: 1px solid var(--sb-l) !important;
+  border-bottom: 1px solid var(--sb-l) !important;
+  border-radius: 0 !important;
+
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.CX3 .cellContainer .cell:last-child {
+  border-right: 0 !important;
+}
+
+/* Out of month: a whisper of hatch, numeral faint. Events still draw over it. */
+.CX3 .cell:not(.thisMonth) {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 7px,
+    var(--sb-h-soft) 7px 8px
+  ) !important;
+
+  color: var(--sb-t3) !important;
+}
+
+.CX3 .cell:not(.thisMonth) .cellDate {
+  color: var(--sb-t3) !important;
+}
+
+.CX3 .cell.weekend .cellDate {
+  color: var(--sb-t2) !important;
+}
+
+/*
+ * Today.
+ *
+ * The one loud thing in the grid: the cell's header row becomes a solid bar
+ * of ink with the numeral and the word TODAY reversed out of it, and the
+ * cell is framed in a 2px ink outline. It is a target lock, not a highlight.
+ *
+ * That is the whole of how today is marked. The days before it are drawn
+ * exactly like the days after it -- nothing dims, nothing hatches -- because
+ * a month that fades as it goes by looks, by the 25th, like a display that
+ * has failed. A paper calendar does not grey out yesterday; neither does
+ * this one.
+ */
+.CX3 .cell.today {
+  box-shadow: inset 0 0 0 2px var(--sb-t) !important;
+}
+
+.CX3 .cell.today .cellHeader {
+  background: var(--sb-t);
+}
+
+.CX3 .cell.today .cellHeader::after {
+  content: "Today";
+
+  margin-left: auto;
+  padding-top: 4px;
+
+  color: var(--sb-g);
+
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.CX3 .cell.today .calendar-live-week {
+  margin-right: 10px;
+
+  color: var(--sb-g);
+  opacity: 0.6;
+}
+
+.CX3 .cellHeader {
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+
+  padding: 8px 10px 0 !important;
+
+  font-size: 100% !important;
+  line-height: 1 !important;
+  text-align: left !important;
+}
+
+.CX3 .cellDate {
+  display: inline-block;
+
+  padding: 3px 7px;
+  margin: -3px 0 0 -7px;
+
+  color: var(--sb-t) !important;
+
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* The date is the day number only; the month part is what the hatch is for. */
+.CX3 .cellDate :not(.day),
+.CX3 .today .cellDate :not(.day),
+.CX3 .date_1 .cellDate :not(.day),
+.CX3 .week:nth-child(2) .cell:first-child .cellDate * {
+  display: none !important;
+}
+
+.CX3 .cellDate .day {
+  display: inline !important;
+}
+
+.CX3 .today .cellDate {
+  background: transparent !important;
+  color: var(--sb-g) !important;
+
+  border-radius: 0 !important;
+  font-weight: 600 !important;
+}
+
+/* ISO week number, once per row, written into the Monday cell by MMM-CalendarLiveHeader. */
+.CX3 .cw {
+  display: none !important;
+}
+
+.calendar-live-week {
+  margin: 1px 0 0;
+
+  color: var(--sb-t3);
+
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.12em;
+}
+
+.CX3 .cw::before {
+  content: "W" !important;
+  margin: 0 !important;
+}
+
+/* "+N more" -- a small reversed square rather than a white pill. */
+.CX3 .cell.hasMore::after {
+  bottom: 6px !important;
+  right: 6px !important;
+
+  width: auto !important;
+  height: 16px !important;
+
+  padding: 0 5px !important;
+
+  border-radius: 0 !important;
+
+  background: var(--sb-t) !important;
+  color: var(--sb-g) !important;
+
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 16px !important;
+}
+
+/*
+ * Events carry their calendar's colour -- CalendarExt3 sets --calendarColor
+ * on each one from config.js -- as one thing only: a 4px edge at the left of
+ * the row. No tint, no coloured type; the words are ink. A multi-day event
+ * is the exception, drawn as a bar in the colour so the span reads across
+ * the cells it covers.
+ *
+ * The busiest calendar is deliberately the neutral one (config.js): six
+ * routine events a day in any colour is a wall of that colour. Colour is
+ * for the things that are not routine, so a coloured edge means something
+ * when it appears.
+ */
 .CX3 .event {
+  align-self: start;
+
+  height: 21px;
   min-height: 0;
 
-  margin: 1px 2px;
-  padding: 0 3px;
+  margin: 0 7px 3px !important;
+  padding: 0 5px 0 7px !important;
 
   align-items: center;
+
+  border-left: 4px solid var(--calendarColor, var(--sb-t2));
+  border-radius: 0 !important;
+  box-shadow: none !important;
+
+  background: transparent !important;
+  mix-blend-mode: normal !important;
+  filter: none !important;
+
+  color: var(--sb-t) !important;
+
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 21px;
 }
 
 .CX3 .event .headline {
   min-width: 0;
+  gap: 5px;
 }
 
 .CX3 .event .headline .title {
   min-width: 0;
-  font-size: 76%;
+
+  padding: 0 !important;
+
+  color: var(--sb-t) !important;
+
+  font-size: 13px !important;
+  font-weight: 600 !important;
 }
 
 .CX3 .event .headline .time,
@@ -318,1287 +873,243 @@ body {
   flex: 0 0 auto;
 }
 
-.CX3 .today .cellDate {
-  border-radius: 7px;
-  padding: 2px 8px;
-}
+.CX3 .event .headline .time {
+  padding: 0 !important;
 
-/******************************************************************************
- * RIGHT SIDEBAR
- ******************************************************************************/
+  color: var(--sb-t2) !important;
 
-.region.top.right > .container > .module.clock,
-.region.top.right > .container > .module.weather {
-  flex: 0 0 auto;
-}
-
-/******************************************************************************
- * CLOCK
- ******************************************************************************/
-
-.region.top.right .clock {
-  text-align: right !important;
-}
-
-.region.top.right .clock .time {
-  font-size: 62px;
-  line-height: 0.95;
-
-  letter-spacing: -2px;
-  color: #fff;
-}
-
-.region.top.right .clock .date {
-  margin-top: 5px;
-
-  font-size: 20px;
-  line-height: 1.15;
-
-  color: #aaa;
-}
-
-/******************************************************************************
- * WEATHER
- ******************************************************************************/
-
-.region.top.right .weather {
-  text-align: right !important;
-}
-
-.region.top.right .weather table {
-  width: 100%;
-}
-
-.region.top.right .module.weather > header,
-.region.top.right .module.MMM-CalendarExt3Agenda > header {
-  margin: 0 0 5px;
-  padding-bottom: 4px;
-
-  font-size: 14px;
-  line-height: 18px;
-}
-
-/******************************************************************************
- * UPCOMING EVENT AGENDA
- *
- * The agenda receives every remaining pixel beneath the clock and weather.
- ******************************************************************************/
-
-.region.top.right .module.MMM-CalendarExt3Agenda,
-.region.top.right .module.side-agenda {
-  display: flex !important;
-  flex: 1 1 0 !important;
-  flex-direction: column !important;
-
-  min-height: 0 !important;
-  overflow: hidden !important;
-}
-
-.region.top.right .module.MMM-CalendarExt3Agenda > .module-content,
-.region.top.right .module.side-agenda > .module-content {
-  flex: 1 1 auto !important;
-
-  min-height: 0 !important;
-  overflow: hidden !important;
-}
-
-.CX3A.bodice {
-  display: flex !important;
-  flex-direction: column !important;
-
-  box-sizing: border-box;
-
-  width: 100% !important;
-  height: 100% !important;
-
-  min-width: 0 !important;
-  max-width: none !important;
-  min-height: 0 !important;
-
-  gap: 0 !important;
-  overflow: hidden !important;
-
-  font-size: 16px;
-}
-
-/*
- * The main display already contains a full monthly calendar.
- */
-.CX3A .miniMonth {
-  display: none !important;
-}
-
-.CX3A .agenda {
-  display: block !important;
-  flex: 1 1 auto !important;
-
-  min-height: 0 !important;
-  max-height: none !important;
-
-  overflow: hidden !important;
-
-  mask-image: none !important;
-  -webkit-mask-image: none !important;
-}
-
-.CX3A .agenda .cell {
-  margin: 0 !important;
-  padding: 7px 0 8px !important;
-
-  border-bottom: 1px solid #343434 !important;
-}
-
-.CX3A .cellHeader {
-  margin-bottom: 4px;
-}
-
-.CX3A .cellHeaderMain {
-  gap: 5px;
-
-  font-size: 15px;
-  line-height: 18px;
-}
-
-.CX3A .cellBody {
-  line-height: 1.15;
-}
-
-.CX3A .event {
-  margin: 3px 0;
-}
-
-.CX3A .event .headline {
-  align-items: baseline;
-  gap: 6px;
-
-  min-width: 0;
-}
-
-.CX3A .event .time {
-  flex: 0 0 auto;
-
-  min-width: 64px;
-
-  font-size: 12px;
-  color: #aaa;
-}
-
-.CX3A .event .title {
-  min-width: 0;
-
-  overflow: hidden;
+  font-size: 12px !important;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   white-space: nowrap;
-  text-overflow: ellipsis;
-
-  color: #fff;
 }
 
-.CX3A .event .description,
-.CX3A .event .location {
-  display: none !important;
+/* No dot before single-day events; the edge is the mark. */
+.CX3 .event.singleday .headline:not(.useSymbol)::before,
+.CX3 .event.singleday .headline.useSymbol .symbol.noSymbol::before {
+  content: none !important;
 }
 
-/* BEGIN AUTOMATIC SOLAR THEME */
+/* Multi-day: a bar in the colour, dark ink on it, so the span shows. */
+.CX3 .event.multiday {
+  padding-left: 6px !important;
 
-/******************************************************************************
- * AUTOMATIC DAY/NIGHT PALETTE
- *
- * The existing custom.css remains the dark theme.
- * MMM-SolarTheme adds html.solar-light during daytime.
- ******************************************************************************/
+  border-left: 0;
 
-html.solar-theme-enabled,
-html.solar-theme-enabled body,
-html.solar-theme-enabled .module,
-html.solar-theme-enabled header,
-html.solar-theme-enabled .CX3,
-html.solar-theme-enabled .CX3 .cell,
-html.solar-theme-enabled .CX3A,
-html.solar-theme-enabled .CX3A .cell {
-  transition:
-    color var(--solar-theme-transition, 1400ms) ease,
-    background-color var(--solar-theme-transition, 1400ms) ease,
-    border-color var(--solar-theme-transition, 1400ms) ease;
+  background: var(--calendarColor, var(--sb-t2)) !important;
+  color: var(--sb-on-color) !important;
 }
 
-html.solar-dark {
-  color-scheme: dark;
+.CX3 .event.multiday .headline .title {
+  color: var(--sb-on-color) !important;
 }
 
-html.solar-light {
-  color-scheme: light;
-  background: #f4f3ee !important;
+.CX3 .event.multiday .headline .time,
+.CX3 .event.multiday .headline .startTime {
+  color: var(--sb-on-color) !important;
+  opacity: 0.7;
 }
 
-html.solar-light body {
-  background: #f4f3ee !important;
-  color: #34322f !important;
-  text-shadow: none !important;
+/* Daylight: the edge a shade deeper on the grey sheet. */
+html.solar-light .CX3 .event {
+  filter: brightness(0.86) !important;
+}
+
+/* Past events draw like future ones. See the note on today, above. */
+.CX3 .event.passed {
+  opacity: 1;
 }
 
 /******************************************************************************
- * GENERAL MAGICMIRROR TEXT
+ * RIGHT RAIL
  ******************************************************************************/
-
-html.solar-light .module {
-  color: #4b4842 !important;
-  text-shadow: none !important;
-}
-
-html.solar-light .bright {
-  color: #1f1e1b !important;
-}
-
-html.solar-light .normal {
-  color: #4b4842 !important;
-}
-
-html.solar-light .dimmed {
-  color: #77726a !important;
-}
-
-html.solar-light header,
-html.solar-light .module header {
-  color: #514d47 !important;
-  border-color: #c8c3b9 !important;
-}
-
-/******************************************************************************
- * CLOCK
- ******************************************************************************/
-
-html.solar-light .region.top.right .clock .time {
-  color: #191917 !important;
-}
-
-html.solar-light .region.top.right .clock .date {
-  color: #65615a !important;
-}
-
-/******************************************************************************
- * WEATHER
- ******************************************************************************/
-
-html.solar-light .region.top.right .weather {
-  color: #35332f !important;
-}
-
-html.solar-light .region.top.right .weather .bright,
-html.solar-light .region.top.right .weather .normal,
-html.solar-light .region.top.right .weather .dimmed,
-html.solar-light .region.top.right .weather .wi,
-html.solar-light .region.top.right .weather .weathericon,
-html.solar-light .region.top.right .weather .temperature,
-html.solar-light .region.top.right .weather .temp,
-html.solar-light .region.top.right .weather .feelslike,
-html.solar-light .region.top.right .weather .wind-speed,
-html.solar-light .region.top.right .weather .wind-direction,
-html.solar-light .region.top.right .weather .sun {
-  color: #35332f !important;
-}
-
-/******************************************************************************
- * MONTH CALENDAR
- ******************************************************************************/
-
-html.solar-light .region.bottom.bar
-.module.MMM-CalendarExt3 > header,
-html.solar-light .CX3 > .headerTitle {
-  color: #211f1c !important;
-  border-color: #c9c4ba !important;
-}
-
-html.solar-light .CX3.bodice {
-  --celllinecolor: #cac5bb;
-  --cellbgcolor: rgba(255, 255, 255, 0.28);
-  --defaultcolor: #292722;
-  --defaultColor: #292722;
-
-  color: #292722 !important;
-}
-
-html.solar-light .CX3 > .headerContainer .weekday {
-  color: #68635b !important;
-}
-
-html.solar-light .CX3 .cell {
-  border-color: #cac5bb !important;
-  background-color: rgba(255, 255, 255, 0.28) !important;
-}
-
-html.solar-light .CX3 .cell.thisMonth,
-html.solar-light .CX3 .thisMonth {
-  background-color: rgba(255, 255, 255, 0.68) !important;
-}
-
-html.solar-light .CX3 .cell:not(.thisMonth) {
-  background-color: rgba(40, 38, 34, 0.025) !important;
-  color: #8b867e !important;
-}
-
-html.solar-light .CX3 .cell.today {
-  border-color: #282621 !important;
-}
-
-html.solar-light .CX3 .today .cellDate {
-  background-color: #282621 !important;
-  color: #ffffff !important;
-}
-
-html.solar-light .CX3 .event.singleday,
-html.solar-light .CX3 .event.singleday .title,
-html.solar-light .CX3 .event.singleday .time {
-  color: #292722 !important;
-}
-
-html.solar-light .CX3 .cellHeader .cellWeather,
-html.solar-light .CX3 .cellHeader .cellWeather .maxTemp {
-  color: #302e29 !important;
-}
-
-html.solar-light .CX3 .cellHeader .cellWeather .minTemp {
-  color: #77726a !important;
-}
-
-/******************************************************************************
- * UPCOMING EVENTS
- ******************************************************************************/
-
-html.solar-light .CX3A {
-  color: #4c4943 !important;
-
-  --todayColor: #9a6500;
-}
-
-html.solar-light .CX3A .relativeDay {
-  color: #26241f !important;
-}
-
-html.solar-light .CX3A .agenda .cell {
-  border-color: #cbc6bc !important;
-}
-
-html.solar-light
-.CX3A
-.event:not(.fullday):not(.multiday)
-.title {
-  color: #292722 !important;
-}
-
-html.solar-light
-.CX3A
-.event:not(.fullday):not(.multiday)
-.time {
-  color: #6c675f !important;
-}
-
-html.solar-light .CX3A .event .description {
-  color: #666159 !important;
-}
-
-html.solar-light .CX3A .event .location {
-  color: #827c73 !important;
-}
-
-html.solar-light
-.CX3A
-.cellBody
-.fullday
-.event
-.title,
-html.solar-light
-.CX3A
-.cellBody
-.multiday
-.event
-.title,
-html.solar-light
-.CX3A
-.cellBody
-.multiday
-.event
-.time,
-html.solar-light
-.CX3A
-.cellBody
-.multiday
-.event
-.symbol {
-  color: var(--oppositeColor) !important;
-}
-
-/* END AUTOMATIC SOLAR THEME */
-
-/* BEGIN FAMILY CALENDAR REFINEMENT */
-
-/******************************************************************************
- * CALM FAMILY DASHBOARD V2
- *
- * Graphite, warm gray and muted sage.
- * Clear hierarchy without decorative or juvenile styling.
- ******************************************************************************/
-
-:root,
-html.solar-dark {
-  --calm-page: #16191a;
-  --calm-panel: #202425;
-  --calm-surface: #272c2d;
-  --calm-surface-alt: #2d3233;
-
-  --calm-text: #f0f1ed;
-  --calm-muted: #aab1af;
-  --calm-faint: #78807e;
-
-  --calm-line: rgba(235, 240, 237, 0.11);
-  --calm-line-soft: rgba(235, 240, 237, 0.065);
-
-  --calm-accent: #8ba9a2;
-  --calm-accent-strong: #a4c0ba;
-  --calm-today: rgba(139, 169, 162, 0.15);
-  --calm-weekend: rgba(139, 169, 162, 0.035);
-
-  --calm-shadow: rgba(0, 0, 0, 0.25);
-}
-
-html.solar-light {
-  --calm-page: #e7e8e4;
-  --calm-panel: #f7f7f3;
-  --calm-surface: #eeefea;
-  --calm-surface-alt: #e8eae5;
-
-  --calm-text: #222728;
-  --calm-muted: #626b69;
-  --calm-faint: #8a9290;
-
-  --calm-line: rgba(39, 50, 49, 0.14);
-  --calm-line-soft: rgba(39, 50, 49, 0.075);
-
-  --calm-accent: #4d716b;
-  --calm-accent-strong: #385d57;
-  --calm-today: rgba(77, 113, 107, 0.12);
-  --calm-weekend: rgba(77, 113, 107, 0.035);
-
-  --calm-shadow: rgba(45, 54, 52, 0.10);
-}
-
-html,
-body,
-html.solar-light,
-html.solar-light body,
-html.solar-dark,
-html.solar-dark body {
-  background: var(--calm-page) !important;
-  color: var(--calm-text) !important;
-}
-
-html,
-body,
-.module,
-.CX3,
-.CX3A {
-  font-family:
-    Ubuntu,
-    "Noto Sans",
-    "Segoe UI",
-    sans-serif !important;
-}
-
-/******************************************************************************
- * SIDEBAR
- ******************************************************************************/
-
-.region.top.right > .container {
-  gap: 10px !important;
-}
 
 .region.top.right > .container > .module {
   box-sizing: border-box;
   margin: 0 !important;
 }
 
-/******************************************************************************
- * CLOCK
- ******************************************************************************/
+/*
+ * Module headers, where MagicMirror renders one: WEATHER, FORECAST,
+ * SCHEDULE. The header text is a bare node, so the tag is the header element
+ * itself: fit to the word, reversed out, slanted; and the hairline it sits on
+ * is the top edge of the content beneath it.
+ */
+.region.top.right .module > header,
+html.solar-light .region.top.right .module > header {
+  /*
+   * Not !important: MagicMirror creates a <header> for every module and
+   * inline-hides the ones with no header text. Forcing display here would
+   * show them, reading "undefined".
+   */
+  display: block;
 
-.region.top.right .module.clock {
-  padding: 13px 16px !important;
+  width: fit-content;
+  min-width: 0;
 
-  border: 1px solid var(--calm-line-soft);
-  border-radius: 16px;
+  margin: 0 !important;
+  padding: 2px 13px 1px 8px !important;
 
-  background: var(--calm-panel) !important;
-  box-shadow: 0 5px 16px var(--calm-shadow);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
+
+  border: 0 !important;
+
+  background: var(--sb-t) !important;
+  color: var(--sb-g) !important;
+
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  text-shadow: none !important;
+  white-space: nowrap;
 }
 
 /*
- * Explicitly override both MagicMirror's bright/light classes and the earlier
- * solar-theme rules. This prevents white text on the daytime background.
+ * Only when the header is actually shown. MagicMirror puts a hidden <header>
+ * in every module, and a sibling selector cannot tell; the inline style can.
  */
+.region.top.right .module > header:not([style*="display: none"]) + .module-content {
+  padding-top: 7px;
 
-.region.top.right .module.clock .time,
-.region.top.right .module.clock .time.light,
-.region.top.right .module.clock .time.bright,
-.region.top.right .module.clock .time * {
-  color: var(--calm-text) !important;
-  -webkit-text-fill-color: var(--calm-text) !important;
-
-  text-shadow: none !important;
+  border-top: 1px solid var(--sb-l);
 }
 
-html.solar-light .region.top.right .module.clock .time,
-html.solar-light .region.top.right .module.clock .time.light,
-html.solar-light .region.top.right .module.clock .time.bright,
-html.solar-light .region.top.right .module.clock .time *,
-html.solar-light .region.top.right .clock .time {
-  color: #222728 !important;
-  -webkit-text-fill-color: #222728 !important;
-
-  text-shadow: none !important;
-}
-
-.region.top.right .clock .time {
-  font-size: 54px !important;
-  font-weight: 500 !important;
-  line-height: 0.95 !important;
-  letter-spacing: -2px !important;
-}
-
-.region.top.right .clock .date,
-html.solar-light .region.top.right .clock .date {
-  margin-top: 6px !important;
-
-  color: var(--calm-muted) !important;
-  -webkit-text-fill-color: var(--calm-muted) !important;
-
-  font-size: 18px !important;
-  font-weight: 500 !important;
-  line-height: 1.15 !important;
-
-  text-shadow: none !important;
-}
-
-/******************************************************************************
- * WEATHER MODULE CARDS
- ******************************************************************************/
-
-.region.top.right
-.module.weather:has(.family-current-weather),
-.region.top.right
-.module.clock + .module.weather {
-  padding: 11px 14px !important;
-
-  border: 1px solid var(--calm-line-soft);
-  border-radius: 16px;
-
-  background: var(--calm-panel) !important;
-  box-shadow: 0 5px 16px var(--calm-shadow);
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-> header,
-.region.top.right
-.module.clock
-+ .module.weather
-> header {
-  margin: 0 0 8px !important;
-  padding: 0 0 6px !important;
-
-  border-color: var(--calm-line) !important;
-
-  color: var(--calm-muted) !important;
-
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.035em;
-}
-
-/******************************************************************************
- * CURRENT CONDITIONS
- *
- * Large current temperature on the left.
- * Compact factual grid on the right.
- ******************************************************************************/
-
-.family-current-weather {
-  display: grid !important;
-  grid-template-columns: 128px minmax(0, 1fr);
-  align-items: center;
-
-  gap: 13px;
-
-  width: 100%;
-  min-width: 0;
-
-  color: var(--calm-text);
-}
-
-.family-weather-primary {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  gap: 8px;
-
-  min-width: 0;
-}
-
-.family-weather-icon {
-  color: var(--calm-accent) !important;
-
-  font-size: 34px !important;
-  line-height: 1 !important;
-}
-
-.family-current-temperature {
-  color: var(--calm-text) !important;
-
-  font-size: 40px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -1.5px;
-
-  white-space: nowrap;
-}
-
-.family-weather-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-
-  gap: 7px 10px;
-
-  min-width: 0;
-}
-
-.family-weather-metric {
-  display: flex;
-  flex-direction: column;
-
-  min-width: 0;
-
-  padding-left: 9px;
-
-  border-left: 1px solid var(--calm-line);
-}
-
-.family-weather-label {
-  color: var(--calm-muted) !important;
-
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-}
-
-.family-weather-value {
-  margin-top: 2px;
-
-  overflow: hidden;
-
-  color: var(--calm-text) !important;
-
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.15;
-
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/******************************************************************************
- * FORECAST
- *
- * Restore the normal vertical forecast. Today's row receives a quiet highlight
- * so its high and low remain immediately visible.
- ******************************************************************************/
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather {
-  padding: 10px 12px !important;
-
-  border: 1px solid var(--calm-line-soft);
-  border-radius: 16px;
-
-  background: var(--calm-panel) !important;
-  box-shadow: 0 5px 16px var(--calm-shadow);
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-> header,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-> header {
-  margin: 0 0 5px !important;
-  padding: 0 0 5px !important;
-
-  border-color: var(--calm-line) !important;
-
-  color: var(--calm-muted) !important;
-
-  font-size: 12px !important;
-  font-weight: 700 !important;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-.module-content,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-.module-content {
-  mask-image: none !important;
-  -webkit-mask-image: none !important;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-table,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-table {
-  display: table !important;
-
-  width: 100% !important;
-
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-tbody,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-tbody {
-  display: table-row-group !important;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-tr,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-tr {
-  display: table-row !important;
-
-  opacity: 1 !important;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-td,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-td {
-  display: table-cell !important;
-
-  width: auto !important;
-  padding: 4px 3px !important;
-
-  color: var(--calm-text) !important;
-
-  font-size: 13px !important;
-  line-height: 1.15 !important;
-  text-align: right !important;
-  vertical-align: middle;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-td:first-child,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-td:first-child {
-  color: var(--calm-muted) !important;
-  text-align: left !important;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-tr:not(:last-child)
-td,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-tr:not(:last-child)
-td {
-  border-bottom: 1px solid var(--calm-line-soft);
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-tr:first-child
-td,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-tr:first-child
-td {
-  background: var(--calm-surface) !important;
-
-  color: var(--calm-text) !important;
-  font-weight: 700 !important;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-tr:first-child
-td:first-child,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-tr:first-child
-td:first-child {
-  border-radius: 9px 0 0 9px;
-}
-
-.region.top.right
-.module.weather:has(.family-current-weather)
-+ .module.weather
-tr:first-child
-td:last-child,
-.region.top.right
-.module.clock
-+ .module.weather
-+ .module.weather
-tr:first-child
-td:last-child {
-  border-radius: 0 9px 9px 0;
-}
-
-.region.top.right .weather .weathericon,
-.region.top.right .weather .wi {
-  color: var(--calm-accent) !important;
-}
-
-/******************************************************************************
- * MONTH CALENDAR
- ******************************************************************************/
-
-.region.bottom.bar .module.MMM-CalendarExt3 {
-  box-sizing: border-box;
-
-  padding: 13px 14px 14px !important;
-
-  border: 1px solid var(--calm-line-soft);
-  border-radius: 18px;
-
-  background: var(--calm-panel) !important;
-  box-shadow: 0 6px 19px var(--calm-shadow);
-}
-
-.region.bottom.bar
-.module.MMM-CalendarExt3
-> header,
-.CX3 > .headerTitle,
-html.solar-light
-.region.bottom.bar
-.module.MMM-CalendarExt3
-> header,
-html.solar-light
-.CX3
-> .headerTitle {
-  margin: 0 5px 9px !important;
-  padding: 1px 2px 8px !important;
-
-  border-color: var(--calm-line) !important;
-
-  color: var(--calm-text) !important;
-
-  font-size: 29px !important;
-  font-weight: 600 !important;
-  line-height: 32px !important;
-  letter-spacing: -0.5px;
-}
-
-.CX3.bodice,
-html.solar-light .CX3.bodice {
-  --celllinecolor: transparent;
-  --cellbgcolor: var(--calm-surface);
-  --defaultcolor: var(--calm-text);
-  --defaultColor: var(--calm-text);
-
-  color: var(--calm-text) !important;
-}
-
-.CX3 > .headerContainer .weekday,
-html.solar-light
-.CX3
-> .headerContainer
-.weekday {
-  color: var(--calm-muted) !important;
-
-  font-size: 14px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.02em;
-  text-transform: none !important;
-}
-
-.CX3 > .week {
-  padding-top: 3px !important;
-}
-
-.CX3 .cell,
-html.solar-light .CX3 .cell,
-html.solar-light .CX3 .cell.thisMonth,
-html.solar-light .CX3 .thisMonth {
-  border-color: transparent !important;
-  border-radius: 9px;
-
-  background: var(--calm-surface) !important;
-
-  box-shadow:
-    inset 0 0 0 1px var(--calm-line-soft);
-}
-
-.CX3 .cell.weekend,
-.CX3 .weekend.cell,
-html.solar-light .CX3 .cell.weekend {
-  background: var(--calm-weekend) !important;
-}
-
-.CX3 .cell:not(.thisMonth),
-html.solar-light
-.CX3
-.cell:not(.thisMonth) {
-  background: transparent !important;
-  color: var(--calm-faint) !important;
-}
-
-.CX3 .cell.today,
-html.solar-light .CX3 .cell.today {
-  background: var(--calm-today) !important;
-
-  box-shadow:
-    inset 0 0 0 2px var(--calm-accent),
-    0 3px 9px var(--calm-shadow);
-}
-
-.CX3 .cellHeader {
-  padding: 4px 7px 3px !important;
-}
-
-.CX3 .cellDate {
-  color: var(--calm-text) !important;
-
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.CX3 .today .cellDate,
-html.solar-light
-.CX3
-.today
-.cellDate {
-  background: var(--calm-accent-strong) !important;
-  color: #ffffff !important;
-
-  font-weight: 800;
-}
-
-.CX3 .event {
-  border-radius: 5px !important;
-
-  box-shadow:
-    0 1px 3px var(--calm-shadow);
-}
-
-.CX3 .event .headline .title {
-  font-weight: 600;
-}
-
-/******************************************************************************
- * AGENDA
- ******************************************************************************/
-
-.region.top.right
-.module.MMM-CalendarExt3Agenda,
-.region.top.right
-.module.side-agenda {
-  padding: 10px 10px 7px !important;
-
-  border: 1px solid var(--calm-line-soft);
-  border-radius: 16px;
-
-  background: var(--calm-panel) !important;
-  box-shadow: 0 5px 16px var(--calm-shadow);
-}
-
-.region.top.right
-.module.MMM-CalendarExt3Agenda
-> header,
-.region.top.right
-.module.side-agenda
-> header,
-html.solar-light
-.region.top.right
-.module.MMM-CalendarExt3Agenda
-> header {
-  margin: 0 3px 7px !important;
-  padding: 0 1px 6px !important;
-
-  border-color: var(--calm-line) !important;
-
-  color: var(--calm-muted) !important;
-
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.035em;
-}
-
-.CX3A.bodice,
-html.solar-light .CX3A {
-  color: var(--calm-text) !important;
-
-  font-size: 14px !important;
-}
-
-.CX3A .agenda .cell,
-html.solar-light
-.CX3A
-.agenda
-.cell {
-  margin: 0 0 5px !important;
-  padding: 6px 8px 7px !important;
-
-  border: 0 !important;
-  border-radius: 10px;
-
-  background: var(--calm-surface) !important;
-
-  box-shadow:
-    inset 0 0 0 1px var(--calm-line-soft);
-}
-
-.CX3A .agenda .cell:last-child {
-  margin-bottom: 0 !important;
-}
-
-.CX3A .relativeDay,
-html.solar-light .CX3A .relativeDay {
-  color: var(--calm-accent-strong) !important;
-
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  text-transform: none !important;
-}
-
-.CX3A .cellDate {
-  color: var(--calm-muted) !important;
-
-  font-size: 11px !important;
-}
-
-.CX3A .event .time,
-html.solar-light
-.CX3A
-.event:not(.fullday):not(.multiday)
-.time {
-  min-width: 57px !important;
-
-  color: var(--calm-muted) !important;
-
-  font-size: 11px !important;
-  font-weight: 600;
-}
-
-.CX3A .event .title,
-html.solar-light
-.CX3A
-.event:not(.fullday):not(.multiday)
-.title {
-  color: var(--calm-text) !important;
-
-  font-size: 13px !important;
-  font-weight: 600;
-}
-
-/******************************************************************************
- * EMPTY AGENDA DAYS
- *
- * A day without appointments remains visible and explicitly reads "Free".
- ******************************************************************************/
-
-.CX3A .agenda .cell.noEvents {
-  padding-top: 5px !important;
-  padding-bottom: 5px !important;
-
-  background: transparent !important;
-
-  box-shadow:
-    inset 0 0 0 1px var(--calm-line-soft);
-}
-
-.CX3A .agenda .cell.noEvents .cellHeader {
-  margin-bottom: 0 !important;
-}
-
-.CX3A .agenda .cell.noEvents .cellBody {
-  min-height: 17px;
-}
-
-.CX3A
-.agenda
-.cell.noEvents
-.cellBody::after {
-  content: "Free";
-
-  display: block;
-
-  margin-top: 2px;
-
-  color: var(--calm-faint);
-
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 15px;
-  letter-spacing: 0.015em;
-}
-
-/* END FAMILY CALENDAR REFINEMENT */
-
-/* BEGIN CALENDAR LIVE HEADER PATCH */
-
-/******************************************************************************
- * REMOVE THE UNUSED OUTER CALENDAREXT3 HEADER
- *
- * The real month heading is .CX3 > .headerTitle.
- ******************************************************************************/
-
-.region.bottom.bar
-.module.MMM-CalendarExt3
-> header:empty {
+/*
+ * A module with nothing to say costs nothing: not its box, not the rail's
+ * gap after it. The freeze card, the radio card and the message sections all
+ * render an empty shell when they are off, and MagicMirror's own hide() is
+ * asynchronous and has been seen to leave the wrapper in the flow.
+ */
+.region.top.right .module:has(> .module-content > .freezewatch-empty),
+.region.top.right .module:has(> .module-content > .nowplaying-empty),
+.region.top.right .module:has(> .module-content > .secondbrain-empty),
+.region.top.right .module.hidden {
   display: none !important;
 }
 
 /******************************************************************************
- * DYNAMIC TEXT INSIDE THE REAL MONTH HEADER
+ * CLOCK
  *
- * Absolute positioning means the status occupies the existing header row and
- * does not increase its height or move the calendar downward.
+ * The visible clock is the native GTK overlay (clock/magicmirror-python-clock.py);
+ * this module is kept for its layout space and hidden at the end of this file.
+ * It reserves exactly the overlay's ink: the numerals' caps are 54px tall at
+ * 84px Rajdhani (cap height 0.643 em), then a 10px gap, then an 11px date
+ * line -- 75px from the top edge of the rail to the bottom of the date, with
+ * the rule 9px under that. The overlay places its text by the same numbers,
+ * so its ink lands in this box and nowhere else.
  ******************************************************************************/
 
-.region.bottom.bar
-.module.MMM-CalendarExt3
-.CX3
-> .headerTitle.calendar-live-header-host {
-  position: relative !important;
+.region.top.right .module.clock {
+  padding: 0 0 9px !important;
 
-  display: block !important;
-
-  box-sizing: border-box;
-
-  width: 100% !important;
-
-  padding-right: 46% !important;
-}
-
-.calendar-live-status {
-  position: absolute;
-
-  top: 50%;
-  right: 6px;
-
-  display: block;
-
-  width: 44%;
-  max-width: 44%;
-
-  margin: 0;
-  padding: 0;
-
-  overflow: hidden;
-
-  transform: translateY(-50%);
-
-  border: 0 !important;
-  border-radius: 0 !important;
+  border-bottom: 2px solid var(--sb-t);
+  border-radius: 0;
 
   background: transparent !important;
-  box-shadow: none !important;
+  box-shadow: none;
 
-  color:
-    var(
-      --calm-muted,
-      #626b69
-    ) !important;
+  text-align: right !important;
+}
 
-  font-size: 15px !important;
-  font-weight: 500 !important;
-  line-height: 1.2 !important;
-  letter-spacing: 0 !important;
+.region.top.right .module.clock .time,
+.region.top.right .module.clock .time.light,
+.region.top.right .module.clock .time.bright,
+.region.top.right .module.clock .time *,
+html.solar-light .region.top.right .module.clock .time,
+html.solar-light .region.top.right .module.clock .time * {
+  color: var(--sb-t) !important;
+  -webkit-text-fill-color: var(--sb-t) !important;
 
-  text-align: right;
+  text-shadow: none !important;
+}
 
+/*
+ * MagicMirror wraps the digital clock in an inline-flex grid with a gap and
+ * draws the date above the time. Both are flattened here so the box is
+ * exactly the rows described above: date under time, no gaps but the 10px.
+ */
+.region.top.right .module.clock .clock-grid {
+  display: flex !important;
+
+  gap: 0 !important;
+}
+
+.region.top.right .module.clock .digital {
+  display: flex !important;
+  flex-direction: column-reverse !important;
+
+  width: 100%;
+
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/*
+ * A flex row with a fixed height, so the seconds' <sup> and the AM/PM span
+ * cannot grow the line box past the cap height: the box is the ink, not
+ * the font's line.
+ */
+.region.top.right .clock .time {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: flex-end !important;
+
+  height: 54px !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  font-size: 84px !important;
+  font-weight: 600 !important;
+  line-height: 54px !important;
+  letter-spacing: 0.01em !important;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
-html.solar-dark
-.calendar-live-status {
-  color:
-    var(
-      --calm-muted,
-      #aab1af
-    ) !important;
+.region.top.right .clock .date,
+html.solar-light .region.top.right .clock .date {
+  height: 11px !important;
+
+  margin: 10px 0 0 !important;
+  padding: 0 !important;
+
+  color: var(--sb-t2) !important;
+  -webkit-text-fill-color: var(--sb-t2) !important;
+
+  font-size: 17px !important;
+  font-weight: 600 !important;
+  line-height: 11px !important;   /* the cap height of the date line */
+  letter-spacing: 0.18em !important;
+  text-transform: uppercase;
+
+  text-shadow: none !important;
 }
 
-/******************************************************************************
- * CLOCK SECONDS
- *
- * Seconds now inherit every visual property from the main time.
- ******************************************************************************/
+/*
+ * AM / PM, small and tracked after the seconds, as the overlay draws it.
+ * MagicMirror gives the period span no class; it is the span after the
+ * seconds' <sup>.
+ */
+.region.top.right .clock .time > sup + span {
+  margin-left: 10px;
 
-.region.top.right
-.clock
-.time
-.seconds,
+  font-size: 26px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1em !important;
+  vertical-align: baseline;
+}
 
-.region.top.right
-.clock
-.time
-.clock-second-digital,
-
-.region.top.right
-.clock
-.seconds,
-
-.region.top.right
-.clock
-.clock-second-digital {
+/*
+ * Seconds inherit every visual property from the main time, and MagicMirror
+ * renders them in a separate span, so the colon between minutes and seconds
+ * is restored here.
+ */
+.region.top.right .clock .time .seconds,
+.region.top.right .clock .time .clock-second-digital,
+.region.top.right .clock .seconds,
+.region.top.right .clock .clock-second-digital {
   display: inline !important;
 
   margin: 0 !important;
@@ -1619,73 +1130,10 @@ html.solar-dark
   vertical-align: baseline !important;
 }
 
-/******************************************************************************
- * ACTIVE DOWNLOAD BOTTOM SPACING
- ******************************************************************************/
-
-.secondbrain-shell {
-  max-height: 300px !important;
-  overflow: visible !important;
-}
-
-.region.top.right
-.module.MMM-SecondBrain {
-  max-height: 300px !important;
-  overflow: visible !important;
-}
-
-.secondbrain-section-downloads {
-  flex: 0 0 auto !important;
-
-  height: auto !important;
-  min-height: 118px !important;
-  max-height: none !important;
-
-  padding-bottom: 16px !important;
-
-  overflow: visible !important;
-}
-
-.secondbrain-section-downloads
-.secondbrain-list {
-  padding-bottom: 3px !important;
-  overflow: visible !important;
-}
-
-.secondbrain-section-downloads
-.secondbrain-card {
-  margin-bottom: 3px !important;
-  padding-bottom: 13px !important;
-}
-
-/* END CALENDAR LIVE HEADER PATCH */
-
-/* BEGIN SECONDBRAIN MICRO SPACING FIX */
-
-/******************************************************************************
- * CLOCK SEPARATOR
- *
- * MagicMirror renders seconds in a separate span, so explicitly restore the
- * colon between minutes and seconds.
- ******************************************************************************/
-
-.region.top.right
-.clock
-.time
-.seconds::before,
-
-.region.top.right
-.clock
-.time
-.clock-second-digital::before,
-
-.region.top.right
-.clock
-.seconds::before,
-
-.region.top.right
-.clock
-.clock-second-digital::before {
+.region.top.right .clock .time .seconds::before,
+.region.top.right .clock .time .clock-second-digital::before,
+.region.top.right .clock .seconds::before,
+.region.top.right .clock .clock-second-digital::before {
   content: ":";
 
   display: inline;
@@ -1701,127 +1149,391 @@ html.solar-dark
 }
 
 /******************************************************************************
- * NOTIFICATIONS BOTTOM BREATHING ROOM
+ * WEATHER
+ *
+ * The DOM comes from modules/WeatherTheme (current.njk, forecast.njk), which
+ * also carries the card's own styles. This block only places the two modules
+ * in the rail and colours MagicMirror's weather icons.
  ******************************************************************************/
 
-.secondbrain-section-notifications {
-  padding-bottom: 14px !important;
+.region.top.right .weather {
+  padding: 0 !important;
+
+  border: 0;
+  border-radius: 0;
+
+  background: transparent !important;
+  box-shadow: none;
+
+  text-align: left !important;
 }
 
-.secondbrain-section-notifications
-.secondbrain-list {
-  padding-bottom: 2px !important;
+.region.top.right .weather .module-content {
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
 }
 
-.secondbrain-section-notifications
-.secondbrain-card:last-child {
-  margin-bottom: 0 !important;
+.region.top.right .weather .weathericon,
+.region.top.right .weather .wi {
+  color: var(--sb-t2) !important;
 }
 
 /******************************************************************************
- * ACTIVE DOWNLOADS — REMOVE EXCESS BOTTOM SPACE
+ * SCHEDULE (MMM-CalendarExt3Agenda)
+ *
+ * The agenda receives every remaining pixel beneath everything else -- but
+ * what it and the cards above it are allowed to draw into that is decided by
+ * the Rail module, which measures the rail and hides whole rows, cards, days
+ * and events so that the rest of today is always listed and nothing ends
+ * mid-row. The flex here is only the box; the fit is modules/Rail.
  ******************************************************************************/
 
-.secondbrain-section-downloads {
-  min-height: 102px !important;
-  padding-bottom: 8px !important;
+.region.top.right .module.MMM-CalendarExt3Agenda,
+.region.top.right .module.side-agenda {
+  display: flex !important;
+  flex: 1 1 0 !important;
+  flex-direction: column !important;
+
+  min-height: 0 !important;
+  overflow: hidden !important;
+
+  padding: 0 !important;
+
+  border: 0;
+  border-radius: 0;
+
+  background: transparent !important;
+  box-shadow: none;
 }
 
-.secondbrain-section-downloads
-.secondbrain-list {
-  padding-bottom: 0 !important;
-}
+.region.top.right .module.MMM-CalendarExt3Agenda > .module-content,
+.region.top.right .module.side-agenda > .module-content {
+  flex: 1 1 auto !important;
 
-.secondbrain-section-downloads
-.secondbrain-card {
-  margin-bottom: 0 !important;
-  padding-bottom: 9px !important;
-}
-
-/* END SECONDBRAIN MICRO SPACING FIX */
-
-/* BEGIN NOTIFICATION PADDING AND HEADER STABILITY FIX */
-
-/*
- * The previous 154px cap was clipping the section's own padding.
- * This gives the final card a real visual gap before the outer border.
- */
-
-.secondbrain-section-notifications {
-  box-sizing: border-box !important;
-
-  max-height: 190px !important;
-
-  padding:
-    9px
-    9px
-    18px
-    9px !important;
-
+  min-height: 0 !important;
   overflow: hidden !important;
 }
 
-.secondbrain-section-notifications
-.secondbrain-list {
-  box-sizing: border-box !important;
+.CX3A.bodice,
+html.solar-light .CX3A {
+  display: flex !important;
+  flex-direction: column !important;
 
-  padding-bottom: 0 !important;
+  box-sizing: border-box;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+
+  gap: 0 !important;
+  overflow: hidden !important;
+
+  color: var(--sb-t) !important;
+
+  font-size: 15px !important;
+
+  --todayColor: var(--sb-t);
+  --weekend_1_color: var(--sb-t2);
+  --weekend_2_color: var(--sb-t2);
 }
 
-.secondbrain-section-notifications
-.secondbrain-card:last-child {
-  margin-bottom: 0 !important;
+/* The main display already contains a full monthly calendar. */
+.CX3A .miniMonth {
+  display: none !important;
+}
+
+.CX3A .agenda {
+  display: block !important;
+  flex: 1 1 auto !important;
+
+  min-height: 0 !important;
+  max-height: none !important;
+
+  overflow: hidden !important;
+
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+
+.CX3A .agenda .cell,
+html.solar-light .CX3A .agenda .cell {
+  margin: 0 !important;
+  padding: 0 0 4px !important;
+
+  border: 0 !important;
+  border-radius: 0;
+
+  background: transparent !important;
+  box-shadow: none;
+}
+
+.CX3A .cellHeader {
+  margin: 0;
+  padding: 8px 0 3px;
+
+  border-bottom: 1px solid var(--sb-l);
+}
+
+.CX3A .cellHeaderMain {
+  width: 100%;
+
+  gap: 0 !important;
+  justify-content: space-between;
+
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.CX3A .cellHeaderMain *,
+.CX3A .cell.weekend_1 .cellHeaderMain *,
+.CX3A .cell.weekend_2 .cellHeaderMain * {
+  color: var(--sb-t2) !important;
+}
+
+.CX3A .relativeDay,
+html.solar-light .CX3A .relativeDay {
+  margin: 0 !important;
+
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+}
+
+.CX3A .cell.today .cellHeaderMain .relativeDay {
+  color: var(--sb-t) !important;
 }
 
 /*
- * Accommodate the corrected notification height without altering the
- * Active Downloads section.
+ * Day headers read TODAY / TOMORROW at the left with the date at the right;
+ * every other day reads its weekday at the left instead. CalendarExt3Agenda
+ * names only today and tomorrow (relativeNamedDay) and counts the rest ("in
+ * 2 days"), so the count is hidden and the weekday is pulled out of the date.
  */
-
-.secondbrain-shell {
-  max-height: 312px !important;
+.CX3A .relativeDay:not(.relativeNamedDay) {
+  display: none !important;
 }
 
-.region.top.right
-.module.MMM-SecondBrain {
-  max-height: 312px !important;
+.CX3A .cellDate {
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+
+  color: var(--sb-t3) !important;
 }
 
-/* END NOTIFICATION PADDING AND HEADER STABILITY FIX */
+.CX3A .cellDate .dateParts.weekday {
+  margin-right: auto;
 
-/* BEGIN NOTIFICATION PADDING MATCH */
-.secondbrain-section-notifications {
-  padding-bottom: 8px !important;
-}
-/* END NOTIFICATION PADDING MATCH */
-
-/* BEGIN AUDITED CLOCK AND NOTIFICATION FIX */
-
-.region.top.right .module.MMM-SecondBrain,
-.region.top.right .module.MMM-SecondBrain .secondbrain-shell,
-.region.top.right .module.MMM-SecondBrain .secondbrain-section-notifications,
-.region.top.right .module.MMM-SecondBrain .secondbrain-section-notifications .secondbrain-list {
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  overflow: visible !important;
+  color: var(--sb-t2) !important;
 }
 
-.region.top.right .module.MMM-SecondBrain .secondbrain-section-notifications {
-  flex: 0 0 auto !important;
-  box-sizing: border-box !important;
-  padding-bottom: 8px !important;
+/*
+ * The literals (", " and " ") collapse to nothing as flex items, so they are
+ * dropped and the month carries its own gap.
+ */
+.CX3A .cellDate .dateParts.literal {
+  display: none;
 }
 
-.region.top.right .module.MMM-SecondBrain .secondbrain-section-notifications .secondbrain-card {
-  flex: 0 0 auto !important;
+.CX3A .cellDate .dateParts.month {
+  margin-right: 0.3em;
 }
 
-/* END AUDITED CLOCK AND NOTIFICATION FIX */
+.CX3A .cell:has(.relativeNamedDay) .cellDate .dateParts.weekday {
+  display: none;
+}
 
-/* BEGIN THREE-ITEM SECOND BRAIN HEIGHT FIX */
+.CX3A .cellBody {
+  line-height: 1.15;
+}
 
-/* Remove every fixed-height clip that can cut off the third notification. */
+.CX3A .cellBody .fullday,
+.CX3A .cellBody .multiday {
+  display: block !important;
+}
+
+.CX3A .event,
+.CX3A .cellBody .fullday .event,
+.CX3A .cellBody .multiday .event {
+  display: block !important;
+
+  width: auto !important;
+  max-width: none !important;
+
+  margin: 0 !important;
+  padding: 5px 0 1px !important;
+
+  border-radius: 0 !important;
+
+  background: transparent !important;
+  filter: none !important;
+
+  font-size: 15px !important;
+  line-height: 1.2 !important;
+}
+
+.CX3A .event .headline {
+  align-items: baseline !important;
+  gap: 12px !important;
+
+  min-width: 0;
+}
+
+.CX3A .cellBody .fullday .event .headline :not(.title) {
+  display: none;
+}
+
+/* No dot before an event; the agenda has no calendar patterns to key. */
+.CX3A .event .headline .symbol {
+  display: none !important;
+}
+
+.CX3A .event .time,
+.CX3A .cellBody .multiday .event .time,
+html.solar-light .CX3A .event:not(.fullday):not(.multiday) .time {
+  flex: 0 0 auto;
+
+  min-width: 68px !important;
+
+  color: var(--sb-t2) !important;
+
+  font-size: 15px !important;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: baseline !important;
+  white-space: nowrap;
+}
+
+/* Start time only; the end time is what the header says when it is now. */
+.CX3A .event .time.endTime,
+.CX3A .event .startTime::after {
+  display: none !important;
+  content: none !important;
+}
+
+.CX3A .event .title,
+.CX3A .cellBody .fullday .event .title,
+.CX3A .cellBody .multiday .event .title,
+html.solar-light .CX3A .event:not(.fullday):not(.multiday) .title {
+  display: block !important;
+
+  min-width: 0;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  color: var(--sb-t) !important;
+
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em;
+}
+
+/* The calendar's colour, as an edge on the row, as on the grid. */
+.CX3A .event,
+.CX3A .cellBody .fullday .event,
+.CX3A .cellBody .multiday .event {
+  padding-left: 9px !important;
+
+  border-left: 4px solid var(--calendarColor, var(--sb-t2));
+}
+
+html.solar-light .CX3A .event {
+  filter: brightness(0.86);
+}
+
+/* All-day events say so, in the time column. */
+.CX3A .cellBody .fullday .event .headline::before {
+  content: "All day";
+
+  flex: 0 0 auto;
+
+  min-width: 68px;
+
+  color: var(--sb-t2);
+
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.CX3A .event .description,
+.CX3A .event .location {
+  display: none !important;
+}
+
+.CX3A .event.passed {
+  opacity: 0.45;
+}
+
+/* The event happening now, in brackets. */
+.CX3A .event.current {
+  position: relative;
+
+  margin-top: 5px !important;
+  padding: 2px 14px 2px 17px !important;
+
+  font-weight: 600 !important;
+}
+
+.CX3A .event.current::before,
+.CX3A .event.current::after {
+  content: "";
+
+  position: absolute;
+  top: 0;
+  bottom: 0;
+
+  width: 8px;
+
+  border: 2px solid var(--sb-t);
+}
+
+.CX3A .event.current::before {
+  left: 0;
+  border-right: 0;
+}
+
+.CX3A .event.current::after {
+  right: 0;
+  border-left: 0;
+}
+
+/* A day without appointments stays visible and reads CLEAR. */
+.CX3A .agenda .cell.noEvents .cellBody {
+  min-height: 0;
+}
+
+.CX3A .agenda .cell.noEvents .cellBody::after {
+  content: "Clear";
+
+  display: block;
+
+  padding: 5px 0 1px;
+
+  color: var(--sb-t3);
+
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/******************************************************************************
+ * MMM-SECONDBRAIN RAIL CONSTRAINTS
+ *
+ * The module owns its cards' look (MMM-SecondBrain.css). These rules only stop
+ * the rail clipping its third card, which every fixed-height cap did.
+ ******************************************************************************/
+
 .region.top.right .module.MMM-SecondBrain,
 .region.top.right .module.MMM-SecondBrain > .module-content,
 .region.top.right .module.MMM-SecondBrain .secondbrain-shell,
@@ -1839,19 +1551,13 @@ html.solar-dark
   max-height: none !important;
 }
 
-.region.top.right .module.MMM-SecondBrain .secondbrain-section-notifications,
-.region.top.right .module.MMM-SecondBrain .secondbrain-section-downloads {
-  padding-bottom: 8px !important;
-}
+/******************************************************************************
+ * NATIVE CLOCK
+ *
+ * Retain the browser clock's exact layout space, but make its rendering
+ * invisible. The visible clock is the native X11 overlay.
+ ******************************************************************************/
 
-/* END THREE-ITEM SECOND BRAIN HEIGHT FIX */
-
-/* BEGIN MAGICMIRROR NATIVE CLOCK */
-/*
- * Retain the browser clock's exact layout space, but make its
- * rendering invisible. The visible clock is the native X11 overlay.
- */
 .module.clock.side-clock {
   visibility: hidden !important;
 }
-/* END MAGICMIRROR NATIVE CLOCK */

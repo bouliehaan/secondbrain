@@ -284,11 +284,11 @@ Real credentials are gitignored and never leave the mirror.
 ```
   samo-server ──► NowPlaying/lib/samo-client.js ──► node_helper.js ──socket──► NowPlaying.js
   (loopback)          (fetch, artwork,               (10s schedule,              (render)
-                       caching)                       change detection)
-                            │
-                            ▼
-                  lib/now-playing.js
-                  (pure: snapshot → card)
+  BBC / Composer ──►   caching)                       change detection)
+  (schedules)               │
+                            ├──► lib/now-playing.js   (pure: snapshot → card)
+                            └──► lib/up-next.js       (pure: card + programme → the rows under it,
+                                                       obligations → the covers of what is due)
 ```
 
 A separate module from `MMM-SecondBrain`, deliberately. The two share a wall and
@@ -303,6 +303,19 @@ nothing else:
   above under [Why each source has a deadline](#why-each-source-has-a-deadline).
 - **Different lifecycle.** A notification is an event with an expiry. Now Playing
   is a status: it has no age, no priority, and no place in the per-category caps.
+
+### Why the helper does not wait for the browser
+
+The helper starts polling the moment the server starts, on its defaults; the
+browser's `NOW_PLAYING_CONFIG` adjusts it rather than starting it. The browser
+sends that message once, when its page loads, and a helper that waited for it
+came back from any server restart idle — no poll, no error, and a wall holding
+the last card it was sent. `needrestart` bounces the service after
+`apt upgrade`; on 2026-09-10 that left the same song up for twelve hours.
+
+The same message is also answered even when the answer has not changed. The
+identical-payload check that keeps cover art off the socket between polls would
+otherwise leave a freshly loaded page showing nothing until the next track.
 
 ### Where the answer comes from
 
@@ -337,17 +350,120 @@ a split of the raw ICY line.
 
 ### Artwork, and why it is fetched server-side
 
-A channel's status carries no picture — only the catalog does. So the cover for
-a Samo channel costs three extra calls: the channel's `now` for an `itemRef`,
-the track or episode for its album and parent, then the cover itself at
-`?width=256`. They are cached by now-playing identity, because a three-minute
-track would otherwise pay for them eighteen times.
+The picture is samo's decision, not the wall's. Samo resolves it for every kind
+of item before it reaches the device — the song's cover, the show's, the cover
+of the track a relayed station is playing, or failing all of that the station's
+own logo — and the device state carries the URL as `channel.artworkUrl`. The
+wall's only job is to turn that URL into bytes, at `?width=256` for samo's own
+paths and untouched for anything hosted elsewhere. The one lookup that still
+walks the channel's `itemRef` into the catalog is for the album line, which
+exists nowhere else; it only supplies a picture when samo named none, which a
+current samo never does.
+
+Samo spells its own URLs two ways, and both are recognised by the `/api/v1/`
+prefix rather than by origin: a channel item carries a bare path, and a
+station's uploaded cover arrives absolute, built from whatever address the radio
+daemon paired through — the LAN address, typically, while the wall talks over
+loopback. Matching on origin would fetch samo's own cover without the token and
+get a 401 for it.
+
+The one item samo names no picture for is a station or channel cast to the
+device as a queue item rather than tuned: it arrives as a one-item queue
+carrying a name and a stream URL and nothing else, and the daemon refreshes
+live metadata only for a source it *tuned*. For that item the wall works out
+the source from the item's ref (or, for an item that arrived with none, from
+its stream URL) and asks samo-server about it on every poll: a channel's
+now-playing endpoint gives what it is airing, picture included; a station's
+record gives the probe's last line and the station's per-track picture,
+uploaded cover or directory logo, in that order. The card is then built
+exactly as it would be had the source been tuned. The device's own report
+stays "Elvis Radio" for the afternoon; samo's does not.
+
+Results are cached by now-playing identity, because a three-minute track would
+otherwise pay for the fetch eighteen times. A fetch that *failed* is cached
+only for a minute: a station with no track information keeps one key for as
+long as it stays tuned, and one slow answer from its CDN must not cost the logo
+for the afternoon. A picture samo named that does not arrive is logged, with
+the reason, once per retry.
 
 The bytes are fetched by the node helper and handed to the browser as a data
 URI. Signing an `<img src>` would mean putting a samo credential in a page
 served to the whole LAN — samo has a `stream_token` parameter for exactly that,
 and it is still the wrong trade when this process already holds the token and
 can hand over finished pixels.
+
+### What comes next, and why not the next track
+
+The rows under the card (`lib/up-next.js`, pure like the card) only ever name a
+boundary the station will keep. For a channel that is the plan: the next
+hard-anchored block and its start, the end of the anchored block on air, the
+end of a long item. The one thing a listener might expect and does not get is
+the next *track*, and that is samo's doing, not an omission: the streamer asks
+the scheduler for the next item only when the current one ends
+(`internal/channels/streamer.go`), and the scheduler's choice is a weighted
+draw among candidates within an epsilon of the top score, seeded by the second
+of the decision (`decisionSeed` in `scheduler.go`). `POST /channels/{id}/preview`
+answers "what would play *now*", which is a different question with a
+different seed, so a row built from it would change every poll and be wrong
+when the moment came. If samo ever committed to a next item ahead of time the
+row would be a one-line addition here.
+
+The block's end is worked out from the plan's clock — `exit.at` is a bare
+minute of the day in the channel's own zone — against the midnight that
+`schedule/status` implies (`now` less `minuteOfDay`), so the wall never has to
+know what "America/Denver" means; samo did the zone arithmetic. A clock that
+has already passed today means the block crossed midnight.
+
+The one "coming up" fact a channel *does* know is what it owes. A new episode
+is an obligation, not a candidate (`internal/channels/obligations.go`), and
+`GET /channels/{id}/obligations` returns the pending ones in the order the
+scheduler will offer them — the same urgency the scoring uses, which the code
+insists cannot disagree with the queue. That order is the `DUE` row of covers:
+tier first, newest first within a tier, the nearly-expired lifted — except
+that a decision filters through its hard rules before it scores, so an episode
+a rule holds back is not next however urgent. The wall does not re-state those
+rules; that was tried for an afternoon and stopped, because a second copy of
+the separation arithmetic on the wall would drift the first time a window was
+tuned in samo. Instead samo answers the question where the rules live:
+`Engine.JudgeOwed` runs the decision's own enumeration, constraint environment
+and `applyConstraints` over the owed set alone, fitted to the same library the
+decision would fit to, and `GET /channels/{id}/obligations` carries the result
+as `held: { rule, reason }` on each pending item. The wall orders free-then-held
+and draws held tiles faint. The same peek names a show whose source has no
+label, from the feed's own title, so the wall never looks that up either.
+
+The obligations are read once a minute; each cover is looked up through the
+channel's sources (an obligation names its source, the source names its
+podcast) and kept for a day, because a show's cover is one picture for every
+episode it owes. An owed episode from a show the remembered sources do not
+list means a show subscribed since they were read, and is the cue to read them
+again rather than show a coverless tile for a quarter of an hour.
+
+For a cast queue the device state says it all: `queue[queueIndex + 1]`, and
+when the queue runs out `defaultStation`, because that is what the daemon
+tunes back to (`fallbackLocked` in samo-radio's `player.go`). An audiobook's
+row is therefore the station returning, at the time the book ends, computed
+from the reported position and held still across polls (`steadyUpNext`) so
+the last minute of a book does not read 6:40, 6:41, 6:40.
+
+For an internet station the source is whoever publishes a schedule. Two
+providers, in `up-next.js`: the BBC's `rms.api.bbc.co.uk/v2/broadcasts/poll/{service}`,
+which answers anonymously with the broadcast on air and the ones after it and
+whose service id is in every BBC stream URL; and NPR Composer's
+`/v1/widget/{ucs}/now`, whose station id cannot be discovered from anything
+samo holds and so is configured, in `samo.json` or as a widget link in the
+station's samo record. A station's own website is never scraped: the one that
+matters here, KRCC's, is a server-rendered page behind a bot check, and the
+wall would be the bot. Both providers are asked without samo's token, from the
+helper, at most every few minutes and sooner only when the programme on air is
+about to end.
+
+Everything the rows are built from is remembered in a second detail cache
+keyed by what it is — the channel's now-playing by item identity, its status
+and obligations for a minute, its plan, sources and a station's record for
+fifteen, a schedule until its programme ends — and the show covers in a third,
+for a day. The ten-second poll therefore costs one request while nothing
+changes, which is the same promise the artwork cache makes.
 
 ### Publishing
 
@@ -456,10 +572,21 @@ a dead feed kept displaying confident stale information and nothing logged it.
 ## Other modules
 
 `MMM-SolarTheme` switches light/dark on sun position — it reads the same
-`WEATHER_UPDATED` broadcast as `FreezeWatch`, for `sunrise` and `sunset`.
-`MMM-CalendarLiveHeader` renders the greeting header. `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are
-upstream, pinned in `config/third-party-modules.json` and installed from there.
+`WEATHER_UPDATED` broadcast as `FreezeWatch`, for `sunrise` and `sunset` — and
+hands the native clock its ink colours and the next sun event through
+`/tmp/magicmirror-clock-state`, which the clock reads on every tick.
+`MMM-CalendarLiveHeader` writes the NOW / NEXT status, the ISO week and day of
+year into the month title, and the ISO week number into each row of the grid.
+`StatusLine` draws the line under the grid and probes the calendar feeds (see
+`docs/MODULES.md`). `Rail` fits the right-hand column: it measures the rail
+after every change and hides whole rows, cards, days and events so the rest
+of today is always listed and nothing is clipped mid-row; the decision is a
+pure function in `modules/Rail/lib/rail.js` (see `docs/MODULES.md`).
+`WeatherTheme` is the stock weather module's `themeDir`, in this repo. `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are upstream,
+pinned in `config/third-party-modules.json` and installed from there.
 
-`MMT-CalmCurrentWeather` is referenced by `config.js` as a weather `themeDir` but
-has no source here — it exists only on the mirror, and has to be copied back off
-it.
+The wall's look is one stylesheet, `config/custom.css`: a `--sb-*` token set
+(black and white chrome, inverted for daylight; colour only in the calendar
+events and the cover art), Rajdhani vendored in `config/fonts/`, and the
+layout geometry. Module stylesheets consume the tokens with the dark
+values as fallbacks and carry no light rules of their own.

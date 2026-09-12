@@ -13,6 +13,12 @@ let config = {
 
   language: "en",
   locale: "en-US",
+
+  /*
+   * 12-hour with AM/PM throughout: the native clock, the schedule, the header
+   * status, the status line. The reference clock reads 3:42:07 PM and
+   * everything else agrees with it.
+   */
   timeFormat: 12,
   units: "imperial",
 
@@ -39,31 +45,40 @@ let config = {
         fade: false,
         displaySymbol: false,
 
+        /*
+         * The one place the wall's chrome lets colour in: each event carries
+         * its calendar's colour as a 4px edge, and nothing else. The busiest
+         * calendar gets the neutral grey on purpose -- six routine events a
+         * day in any colour is a wall of that colour -- so a coloured edge
+         * marks the things that are not routine. The two colours are dusty
+         * and warm, mission control rather than school planner, picked
+         * against the dark ground; custom.css deepens them a shade by day.
+         */
         calendars: [
           {
             name: "personal",
-            color: "#4EA1FF",
+            color: "#9d9ea0",   /* neutral: the routine, in secondary ink */
             symbol: [],
             url: "https://cloud.example.com/REDACTED_PRIVATE_PATH"
           },
 
           {
             name: "holidays",
-            color: "#FF5D73",
+            color: "#C4AD86",   /* sand */
             symbol: [],
             url: "https://www.officeholidays.com/ics-fed/usa"
           },
 
           {
             name: "ufc",
-            color: "#FFB84D",
+            color: "#CF7A3E",   /* dusty orange */
             symbol: [],
             url: "https://raw.githubusercontent.com/clarencechaan/ufc-cal/ics/UFC.ics"
           },
 
           {
             name: "appointments",
-            color: "#A879FF",
+            color: "#D9B54A",   /* dusty yellow */
             symbol: [],
             url: "https://booking.example.com/REDACTED_PRIVATE_PATH"
           }
@@ -86,7 +101,14 @@ let config = {
 
         locale: "en-US",
         firstDayOfWeek: 0,
-        minimalDaysOfNewYear: 1,
+
+        /*
+         * The ISO week number in each row is written by MMM-CalendarLiveHeader
+         * from the Monday cell's date. CalendarExt3's own numbering counts
+         * from Sunday, the first day of the grid, and would be one behind the
+         * number in the title for six days out of seven.
+         */
+        minimalDaysOfNewYear: 4,
         showWeekNumber: false,
 
         customHeader: true,
@@ -104,14 +126,25 @@ let config = {
           day: "numeric"
         },
 
-        fontSize: "16px",
-        eventHeight: "21px",
+        eventTimeOptions: {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        },
 
+        fontSize: "18px",
+        eventHeight: "24px",
+
+        /*
+         * Rows share a week's height equally, so this is how many 24px lines
+         * fit under a 38px cell header in a four-, five- or six-row month at
+         * 1080p. This calendar runs to six events a day.
+         */
         maxEventLines: {
           0: 6,
-          4: 10,
-          5: 7,
-          6: 6
+          4: 8,
+          5: 6,
+          6: 5
         },
 
         dynamicWeekHeight: false,
@@ -143,6 +176,12 @@ let config = {
      * Right-hand information rail.
      * Modules appear in this same order from top to bottom.
      */
+    /*
+     * Kept for its layout space and hidden by custom.css. The visible clock
+     * is the native GTK overlay (clock/magicmirror-python-clock.py), which
+     * draws the same format at the same size, so what this reserves is what
+     * that fills.
+     */
     {
       module: "clock",
       position: "top_right",
@@ -151,7 +190,9 @@ let config = {
       config: {
         displaySeconds: true,
         showPeriod: true,
-        showDate: true
+        showPeriodUpper: true,
+        showDate: true,
+        dateFormat: "ddd MMM D"
       }
     },
 
@@ -219,18 +260,27 @@ let config = {
 
         units: "imperial",
         roundTemp: true,
-        degreeLabel: true,
+        degreeLabel: false,
 
         showHumidity: "below",
         showFeelsLike: true,
-        showWindDirectionAsArrow: true,
+        showWindDirection: true,
         showSun: true,
+        showPeriod: false,
 
         appendLocationNameToHeader: false,
 
         updateInterval: 900000,
         animationSpeed: 0,
-        themeDir: "../../../modules/MMT-CalmCurrentWeather"
+
+        /*
+         * The card's DOM and its stylesheet live in modules/WeatherTheme, in
+         * this repo. The stock weather module resolves this as a URL from its
+         * own directory, and the browser clamps ".." at the site root, so
+         * three levels up lands on /modules/ whether the module lives at
+         * defaultmodules/weather (2.37) or modules/default/weather (older).
+         */
+        themeDir: "../../../modules/WeatherTheme"
       }
     },
 
@@ -249,7 +299,7 @@ let config = {
 
         units: "imperial",
         roundTemp: true,
-        degreeLabel: true,
+        degreeLabel: false,
 
         maxNumberOfDays: 5,
         showPrecipitationProbability: true,
@@ -259,7 +309,9 @@ let config = {
 
         updateInterval: 900000,
         initialLoadDelay: 1000,
-        animationSpeed: 0
+        animationSpeed: 0,
+
+        themeDir: "../../../modules/WeatherTheme"
       }
     },
 
@@ -289,6 +341,21 @@ let config = {
 
         showAlbum: true,
         showArtwork: true,
+
+        /*
+         * The rows under the card: when this gives way and to what. The
+         * channel's next booked block ("NEXT 4:00 PM All Things Considered"),
+         * the end of the block it is in ("UNTIL 9:00 AM"), the next item of
+         * a cast queue, the station the radio returns to when a queue runs
+         * out, a station's next programme where one is published (the BBC's
+         * is, from the stream URL alone; NPR Composer stations by id, see
+         * samo.example.json), and a row of small covers for the episodes the
+         * channel owes, in the order it means to play them. Never the next
+         * track on a channel: the scheduler does not pick it until the
+         * current one ends. The rail drops all of this before anything else,
+         * so it never costs an event or a card.
+         */
+        showUpNext: true,
 
         configDir: "/etc/magicmirror-secondbrain"
       }
@@ -322,7 +389,7 @@ let config = {
     {
       module: "MMM-CalendarExt3Agenda",
       position: "top_right",
-      header: "UPCOMING",
+      header: "SCHEDULE",
       classes: "side-agenda",
 
       config: {
@@ -355,9 +422,21 @@ let config = {
         skipDuplicated: true,
         relativeNamedDayStyle: "short",
 
+        /*
+         * The weekday is in here so custom.css can show it at the left of
+         * days that are not today or tomorrow; the agenda itself would only
+         * count ("in 2 days").
+         */
+        cellDateOptions: {
+          weekday: "short",
+          month: "short",
+          day: "numeric"
+        },
+
         eventTimeOptions: {
           hour: "numeric",
-          minute: "2-digit"
+          minute: "2-digit",
+          hour12: true
         },
 
         calendarSet: [
@@ -372,6 +451,71 @@ let config = {
         animationSpeed: 0
       }
     },
+
+    /*
+     * The line under the month grid: each source's last result, the last
+     * poll and how long it took, NTP lock, uptime. It reads what the other
+     * modules already know and probes the calendar feeds itself, because a
+     * calendar that 404s is otherwise invisible -- the grid just stops
+     * changing. See docs/MODULES.md.
+     */
+    {
+      module: "StatusLine",
+      position: "bottom_left",
+
+      config: {
+        /* How often the calendar feeds are probed. Fifteen minutes, like the fetch. */
+        probeIntervalMs: 900000
+      }
+    },
+
+    /*
+     * The rail's layout. Reads the rail after every change to it and hides
+     * whole items -- forecast rows, cards, days, events -- so that the
+     * schedule always lists the rest of today, every card stack keeps a
+     * card, and nothing ends mid-row. The order things are added in, and
+     * the order they give way in when even that does not fit, are the
+     * defaults in modules/Rail/lib/rail.js; override any of the three here.
+     * See docs/MODULES.md.
+     */
+    {
+      module: "Rail",
+      config: {
+        /*
+         * Where the space left after the minimums goes, a rung at a time:
+         * what the radio does next, the covers of the episodes the channel
+         * owes, then tomorrow, then tomorrow's row of the forecast, then a
+         * second message, a second package, the radio's second row, the day
+         * after, and so on down. A rung that does not fit whole takes the
+         * items that do and is closed.
+         */
+        ladder: [
+          ["upnext", 1],
+          ["due", 1],
+          ["schedule", 2],
+          ["forecast", 2],
+          ["messages", 2],
+          ["inbound", 2],
+          ["upnext", "all"],
+          ["schedule", 3],
+          ["forecast", 3],
+          ["messages", 3],
+          ["inbound", 3],
+          ["forecast", 5],
+          ["transfers", "all"],
+          ["schedule", "all"]
+        ],
+
+        /*
+         * What goes, first to last, on a day so full that today's events and
+         * one card of each kind do not fit together. The schedule gives up
+         * today's rows from the end behind a "+ N more" line, and only after
+         * the packages and the forecast; a text is the last thing to go.
+         */
+        sacrifice: ["transfers", "inbound", "forecast", "schedule", "messages"]
+      }
+    },
+
     {
       module: "MMM-SolarTheme",
       config: {
@@ -384,7 +528,6 @@ let config = {
     {
       module: "MMM-CalendarLiveHeader",
       config: {
-        name: "Jake",
         lookAheadHours: 12
       }
     },

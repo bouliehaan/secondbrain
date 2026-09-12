@@ -1054,9 +1054,31 @@ async function collectPackages(client, mailbox, account, results, log, report = 
  * Mail sources
  * ------------------------------------------------------------------ */
 
+/*
+ * Per-source health for the status line under the calendar.
+ *
+ * Each poller counts the accounts it tried and the ones that failed; pollAll
+ * turns that into { name, state, ok, total } per source, where state is "ok",
+ * "down" (every account failed, or the deadline passed) or "off" (nothing
+ * configured -- not a fault, and the line leaves it out). The record is kept
+ * here rather than returned, so pollAll's signature and every caller of it
+ * stay as they are; node_helper reads it with getLastPollStatus().
+ */
+const health = new Map();
+let lastPollStatus = null;
+
+function noteHealth(name, { tried = 0, failed = 0 } = {}) {
+  health.set(name, { tried, failed });
+}
+
+function getLastPollStatus() {
+  return lastPollStatus;
+}
+
 async function pollGmail(configDir, log = console, report = null) {
   const accountsDir = path.join(configDir, "gmail", "accounts");
   const results = [];
+  const tally = { tried: 0, failed: 0 };
 
   for (const accountPath of listJsonFiles(accountsDir)) {
     let client;
@@ -1066,6 +1088,8 @@ async function pollGmail(configDir, log = console, report = null) {
       if (account.enabled === false || !account.password) {
         continue;
       }
+
+      tally.tried += 1;
 
       const accountName = account.displayName || account.email || account.alias || "Gmail";
       const alias = account.alias || account.email || "account";
@@ -1231,6 +1255,7 @@ async function pollGmail(configDir, log = console, report = null) {
         }
       }
     } catch (error) {
+      tally.failed += 1;
       log.error(
         `[MMM-SecondBrain] Gmail IMAP account ${path.basename(accountPath)} failed: ` +
         imapErrorDetail(error)
@@ -1246,12 +1271,15 @@ async function pollGmail(configDir, log = console, report = null) {
     }
   }
 
+  noteHealth("Gmail", tally);
+
   return results;
 }
 
 async function pollProton(configDir, log = console, report = null) {
   const accountsDir = path.join(configDir, "proton", "accounts");
   const results = [];
+  const tally = { tried: 0, failed: 0 };
 
   for (const accountPath of listJsonFiles(accountsDir)) {
     let client;
@@ -1261,6 +1289,8 @@ async function pollProton(configDir, log = console, report = null) {
       if (account.enabled === false) {
         continue;
       }
+
+      tally.tried += 1;
 
       client = survivesAsyncErrors(new ImapFlow({
         host: account.host || "127.0.0.1",
@@ -1333,6 +1363,7 @@ async function pollProton(configDir, log = console, report = null) {
 
       await collectPackages(client, mailbox, account, results, log, report);
     } catch (error) {
+      tally.failed += 1;
       log.error(
         `[MMM-SecondBrain] Proton account ${path.basename(accountPath)} failed: ` +
         imapErrorDetail(error)
@@ -1347,6 +1378,8 @@ async function pollProton(configDir, log = console, report = null) {
       }
     }
   }
+
+  noteHealth("Proton", tally);
 
   return results;
 }
@@ -1432,13 +1465,17 @@ function formatEta(seconds) {
 async function pollTransmission(configDir, log = console) {
   const configPath = path.join(configDir, "transmission.json");
   if (!fs.existsSync(configPath)) {
+    noteHealth("Transmission", { tried: 0, failed: 0 });
     return [];
   }
 
   const config = readJson(configPath);
   if (config.enabled === false) {
+    noteHealth("Transmission", { tried: 0, failed: 0 });
     return [];
   }
+
+  noteHealth("Transmission", { tried: 1, failed: 0 });
 
   try {
     const response = await transmissionRpc(
@@ -1532,6 +1569,7 @@ async function pollTransmission(configDir, log = console) {
 
     return results;
   } catch (error) {
+    noteHealth("Transmission", { tried: 1, failed: 1 });
     log.error(`[MMM-SecondBrain] Transmission failed: ${error.message}`);
     return [];
   }
@@ -1859,6 +1897,8 @@ function withDeadline(name, work, timeoutMs) {
 }
 
 async function pollAll(configDir, options = {}, log = console) {
+  const startedAt = Date.now();
+
   /*
    * Set by whichever accounts managed to read their package mailbox this poll.
    * It gates the forget-pass below, so a dead mail source cannot be mistaken for
@@ -1930,6 +1970,31 @@ async function pollAll(configDir, options = {}, log = console) {
     rememberSourceItems(outcome.name, outcome.items);
     items.push(...outcome.items);
   }
+
+  lastPollStatus = {
+    at: Date.now(),
+    ms: Date.now() - startedAt,
+    sources: outcomes.map((outcome) => {
+      const tally = health.get(outcome.name) || { tried: 0, failed: 0 };
+
+      let state = "ok";
+
+      if (outcome.timedOut || outcome.error) {
+        state = "down";
+      } else if (tally.tried === 0) {
+        state = "off";
+      } else if (tally.failed >= tally.tried) {
+        state = "down";
+      }
+
+      return {
+        name: outcome.name,
+        state,
+        ok: Math.max(0, tally.tried - tally.failed),
+        total: tally.tried
+      };
+    })
+  };
 
   return present(
     persistAndMergePackages(items, options.stateDir, log, packageScan.scanned),
@@ -2040,6 +2105,7 @@ function cachedItems(stateDir, options = {}, log = console) {
 
 module.exports = {
   pollAll,
+  getLastPollStatus,
   cachedItems,
   pollGmail,
   pollProton,

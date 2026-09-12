@@ -138,6 +138,19 @@ Module.register("MMM-SecondBrain", {
 
     this.loaded = true;
 
+    /*
+     * The status line (modules/StatusLine) draws each source's last result
+     * under the calendar. It cannot see this module's socket, so the poll
+     * status is re-broadcast as a module notification. Sent before the
+     * items diff below: an unchanged item list is still a fresh poll.
+     */
+    if (payload?.status) {
+      this.sendNotification(
+        "SECONDBRAIN_STATUS",
+        payload.status
+      );
+    }
+
     const newItems = Array.isArray(
       payload?.items
     )
@@ -192,21 +205,26 @@ Module.register("MMM-SecondBrain", {
     const notifications = this.items.filter((item) => !this.isTransmission(item) && !this.isPackage(item));
     const downloads = this.items.filter((item) => this.isTransmission(item));
 
+    /*
+     * Section names are the wall's vocabulary, not the backend's: a text and a
+     * flagged mail are both messages, a shipment is inbound, a torrent is a
+     * transfer. The CSS sets them in uppercase.
+     */
     if (notifications.length > 0) {
       wrapper.appendChild(
-        this.renderSection("Notifications", notifications, "notifications")
+        this.renderSection("Messages", notifications, "notifications")
       );
     }
 
     if (packages.length > 0) {
       wrapper.appendChild(
-        this.renderSection("Packages", packages, "packages")
+        this.renderSection("Inbound", packages, "packages")
       );
     }
 
     if (downloads.length > 0) {
       wrapper.appendChild(
-        this.renderSection("Active downloads", downloads, "downloads")
+        this.renderSection("Transfers", downloads, "downloads")
       );
     }
 
@@ -239,7 +257,31 @@ Module.register("MMM-SecondBrain", {
     heading.className =
       "secondbrain-heading";
 
-    heading.textContent = title;
+    const tag =
+      document.createElement("span");
+
+    tag.className =
+      "secondbrain-heading-tag";
+
+    tag.textContent = title;
+
+    heading.appendChild(tag);
+
+    /*
+     * How many cards are in the section. The backend already caps each kind,
+     * so this never exceeds what is drawn -- it is the number you would get by
+     * counting, put where the eye lands first.
+     */
+    const count =
+      document.createElement("span");
+
+    count.className =
+      "secondbrain-heading-count";
+
+    count.textContent =
+      String(items.length).padStart(2, "0");
+
+    heading.appendChild(count);
 
     section.appendChild(heading);
 
@@ -391,11 +433,11 @@ Module.register("MMM-SecondBrain", {
 
   defaultLabel(kind) {
     return {
-      voice: "Message",
-      email: "Important email",
-      download: "Transmission",
+      voice: "SMS",
+      email: "Mail",
+      download: "Transfer",
       warning: "Attention",
-      package: "Package"
-    }[kind] || "Notification";
+      package: "Inbound"
+    }[kind] || "Message";
   }
 });

@@ -51,7 +51,20 @@ The separate native clock fixed the time-accuracy problem but rendered badly:
 - seconds must match hour/minute size and weight
 - a colon belongs between minutes and seconds
 
-`clock/magicmirror-python-clock.py` is the current renderer.
+`clock/magicmirror-python-clock.py` is the current renderer. It draws
+Rajdhani, 12-hour with a small AM/PM, seconds at full size, and reads its ink
+colours and the next sun event from `/tmp/magicmirror-clock-state`, written by
+`MMM-SolarTheme`'s helper. Rajdhani's line box is a quarter taller than its
+Latin digits (it carries Devanagari), so the labels are placed by their ink
+from the font's own metrics: the numerals' caps flush with the top of the
+window at 12px, the date line 10px under the baseline. `config/custom.css`
+reserves that same 75px for the hidden browser clock. Verified under Xvfb on
+the mirror; the alignment against the live page can only be confirmed on the
+physical display.
+
+The file alone changes nothing on the wall: the clock that is drawing is a
+process the X session started at login. `scripts/deploy.sh` starts the new
+one beside it, waits for it to stay up, then kills the old one.
 
 ## Sanitisation note
 
