@@ -32,6 +32,12 @@ const {
 const {
   pollNowPlaying,
   createDetailCache,
+  channelNowFor,
+  gatherUpNext,
+  ttlUntil,
+  BOUNDARY_MIN_TTL_MS,
+  ITEM_TTL_MS,
+  PROGRAMME_TTL_MS,
   ARTWORK_RETRY_MS
 } = require("../modules/NowPlaying/lib/samo-client.js");
 
@@ -43,6 +49,7 @@ const {
   scheduleProviderFor,
   parseSchedule,
   describeProgramme,
+  channelItemEnd,
   HORIZON_MS,
   DUE_MAX
 } = require("../modules/NowPlaying/lib/up-next.js");
@@ -1612,6 +1619,265 @@ function runUpNextChecks () {
   }
 
   /* ---------------------------------------------------------------- *
+   * The end samo states.
+   *
+   * What the wall's journal showed for a week: every booked hour began
+   * with a card that had no rows at all, and a station the rotation picked
+   * never had an end. The rows were worked out from the plan and a measured
+   * length, and neither says when a relayed station's slot ends, when a
+   * live station's turn is up, or where an unmeasured episode is capped.
+   * samo now says so outright, as `endsAt` on the channel's now-playing.
+   * ---------------------------------------------------------------- */
+
+  /* A booked block whose exit the plan cannot put a clock on. */
+  const PLAN_OPEN = {
+    ...PLAN,
+    plan: {
+      ...PLAN.plan,
+      blocks: [
+        ...PLAN.plan.blocks,
+        { id: "slot-open", label: "KRCC", enter: { at: "08:00", days: "*", hard: true }, exit: { atNextAnchor: true } },
+        { id: "slot-night", label: "Overnight", enter: { at: "00:00", days: "*", hard: true }, exit: { at: "08:00" } }
+      ]
+    }
+  };
+
+  const eight = Date.parse("2026-09-12T08:00:00-06:00");
+  const nine = Date.parse("2026-09-12T09:00:00-06:00");
+
+  {
+    /* 8:30 AM in a KRCC block the plan only says ends "at the next anchor". */
+    const morning = status({ blockId: "slot-open", blockLabel: "KRCC", nextAnchor: anchor("All Things Considered", "slot-atc", "2026-09-12T16:00:00-06:00") });
+    morning.now = "2026-09-12T08:30:00-06:00";
+    morning.minuteOfDay = 8 * 60 + 30;
+
+    const relay = { current: { title: "KRCC", live: true, durationSeconds: 0 }, startedAt: new Date(eight).toISOString(), endsAt: new Date(nine).toISOString() };
+
+    const rows = resolveUpNext({
+      now: { ...channelCard, title: "KRCC" },
+      programme: { status: morning, plan: PLAN_OPEN, now: relay },
+      clock: () => Date.parse(morning.now)
+    });
+
+    check(
+      "a booked relay runs UNTIL the end samo states, when the plan cannot put a clock on it",
+      rows.length === 2 && rows[0].label === "UNTIL" && rows[0].at === nine && rows[1].label === "NEXT",
+      JSON.stringify(rows)
+    );
+
+    const before = resolveUpNext({
+      now: { ...channelCard, title: "KRCC" },
+      programme: { status: morning, plan: PLAN_OPEN, now: { ...relay, endsAt: undefined } },
+      clock: () => Date.parse(morning.now)
+    });
+
+    check(
+      "and from a samo that does not say, a live relay still has no end of its own",
+      before.length === 1 && before[0].label === "NEXT",
+      JSON.stringify(before)
+    );
+
+    /* The same slot in the plan that does put a clock on it: one UNTIL, not two. */
+    const clocked = status({ blockId: "slot-krcc", blockLabel: "KRCC", nextAnchor: anchor("All Things Considered", "slot-atc", "2026-09-12T16:00:00-06:00") });
+    clocked.now = morning.now;
+    clocked.minuteOfDay = morning.minuteOfDay;
+
+    const both = resolveUpNext({
+      now: { ...channelCard, title: "KRCC" },
+      programme: { status: clocked, plan: PLAN, now: relay },
+      clock: () => Date.parse(morning.now)
+    });
+
+    check(
+      "the block's end from the plan and the item's end from samo on the same minute are one row",
+      both.length === 2 && both[0].label === "UNTIL" && both[0].at === nine && both[1].label === "NEXT",
+      JSON.stringify(both)
+    );
+  }
+
+  {
+    /*
+     * The wall on 2026-09-13 at 20:00:08 (and every booked hour since): nine
+     * seconds after KRCC cut in, the status is still the one remembered from
+     * before -- the overnight block, and an appointment that has just
+     * started -- so nothing in it is still ahead. The now-playing is fresh,
+     * and says the relay runs until nine.
+     */
+    const stale = status({ blockId: "slot-night", blockLabel: "Overnight", nextAnchor: anchor("KRCC", "slot-open", "2026-09-12T08:00:00-06:00") });
+    stale.now = "2026-09-12T07:59:40-06:00";
+    stale.minuteOfDay = 7 * 60 + 59;
+
+    const rows = resolveUpNext({
+      now: { ...channelCard, title: "KRCC" },
+      programme: {
+        status: stale,
+        plan: PLAN_OPEN,
+        now: { current: { title: "KRCC", live: true, durationSeconds: 0 }, startedAt: new Date(eight).toISOString(), endsAt: new Date(nine).toISOString() }
+      },
+      clock: () => eight + 9 * 1000
+    });
+
+    check(
+      "seconds after a cut-in, with the status still the one from before it, the relay's end is on the wall",
+      rows.length === 1 && rows[0].label === "UNTIL" && rows[0].at === nine,
+      JSON.stringify(rows)
+    );
+  }
+
+  {
+    /* A live station the rotation picked, with a thirty-minute turn. */
+    const rows = resolveUpNext({
+      now: { ...channelCard, title: "Morning Edition", station: "Jake Channel" },
+      programme: {
+        status: status({ nextAnchor: anchor("Music hour", "music-hour", at(2.5 * HOUR)) }),
+        plan: PLAN,
+        now: { current: { title: "NPR", live: true, durationSeconds: 0 }, startedAt: at(-5 * MINUTE), endsAt: at(25 * MINUTE) }
+      },
+      clock
+    });
+
+    check(
+      "a station the rotation picked runs UNTIL its turn is up, then the booked block is the row after",
+      rows.length === 2 && rows[0].label === "UNTIL" && rows[0].at === T + 25 * MINUTE && rows[1].label === "NEXT" && rows[1].title === "Music hour",
+      JSON.stringify(rows)
+    );
+  }
+
+  {
+    /* An episode the feed never measured, capped to the room before the show. */
+    const capped = resolveUpNext({
+      now: channelCard,
+      programme: {
+        status: status({ nextAnchor: anchor("Music hour", "music-hour", at(2.5 * HOUR)) }),
+        plan: PLAN,
+        now: { current: { title: "#500 – Khabib", durationSeconds: 0 }, startedAt: at(-MINUTE), endsAt: at(2.5 * HOUR) }
+      },
+      clock
+    });
+
+    check(
+      "an unmeasured episode capped to the room before a booked block gives way to it: one NEXT row, no second end",
+      capped.length === 1 && capped[0].label === "NEXT" && capped[0].at === T + 2.5 * HOUR,
+      JSON.stringify(capped)
+    );
+
+    const shorter = resolveUpNext({
+      now: channelCard,
+      programme: {
+        status: status({ nextAnchor: anchor("Music hour", "music-hour", at(2.5 * HOUR)) }),
+        plan: PLAN,
+        now: { current: { title: "#500 – Khabib", durationSeconds: 0 }, startedAt: at(-MINUTE), endsAt: at(38 * MINUTE) }
+      },
+      clock
+    });
+
+    check(
+      "capped short of the booked block, the cap is the ENDS row",
+      shorter.length === 2 && shorter[0].label === "ENDS" && shorter[0].at === T + 38 * MINUTE && shorter[1].label === "NEXT",
+      JSON.stringify(shorter)
+    );
+  }
+
+  {
+    /* A three-hour episode an appointment will cut twenty-five minutes in. */
+    const rows = resolveUpNext({
+      now: channelCard,
+      programme: {
+        status: status({ nextAnchor: { ...anchor("All Things Considered", "slot-atc", at(25 * MINUTE)), policy: "startImmediately" } }),
+        plan: PLAN,
+        now: { current: { title: "#2554 - Carlo Rovelli", durationSeconds: 3 * 3600 }, startedAt: at(0), endsAt: at(25 * MINUTE) }
+      },
+      clock
+    });
+
+    check(
+      "an episode an appointment will cut ends when samo says, not when its length says",
+      rows.length === 1 && rows[0].label === "NEXT" && rows[0].at === T + 25 * MINUTE && !rows.some((r) => r.at === T + 3 * HOUR),
+      JSON.stringify(rows)
+    );
+  }
+
+  {
+    const song = resolveUpNext({
+      now: channelCard,
+      programme: {
+        status: status({ nextAnchor: anchor("Music hour", "music-hour", at(2.5 * HOUR)) }),
+        plan: PLAN,
+        now: { current: { title: "Bad Guy", durationSeconds: 194 }, startedAt: at(-MINUTE), endsAt: at(134 * 1000) }
+      },
+      clock
+    });
+
+    check(
+      "a song's end is still not a row, however samo states it",
+      song.length === 1 && song[0].label === "NEXT",
+      JSON.stringify(song)
+    );
+
+    const gap = resolveUpNext({
+      now: channelCard,
+      programme: {
+        status: status({ nextAnchor: anchor("Music hour", "music-hour", at(90 * 1000)) }),
+        plan: PLAN,
+        now: { current: { title: "Bad Guy", durationSeconds: 194 }, startedAt: at(0), endsAt: at(90 * 1000) }
+      },
+      clock
+    });
+
+    check(
+      "a song filling the gap in front of a booked block is explained by the block alone",
+      gap.length === 1 && gap[0].label === "NEXT" && gap[0].at === T + 90 * 1000,
+      JSON.stringify(gap)
+    );
+  }
+
+  {
+    const rows = resolveUpNext({
+      now: channelCard,
+      programme: {
+        status: status({ nextAnchor: anchor("Music hour", "music-hour", at(2.5 * HOUR)) }),
+        plan: PLAN,
+        now: { current: { title: "Old episode", durationSeconds: 3600 }, startedAt: at(-HOUR - MINUTE), endsAt: at(-MINUTE) }
+      },
+      clock
+    });
+
+    check(
+      "an end samo stated that is already behind names nothing -- the streamer is still on the item, and knows better",
+      rows.length === 1 && rows[0].label === "NEXT",
+      JSON.stringify(rows)
+    );
+  }
+
+  {
+    const relay = channelItemEnd({ now: { current: { title: "KRCC", live: true, durationSeconds: 0 }, startedAt: at(0), endsAt: at(HOUR) } });
+    const cut = channelItemEnd({ now: { current: { title: "#2554", durationSeconds: 3 * 3600 }, startedAt: at(0), endsAt: at(25 * MINUTE) } });
+    const old = channelItemEnd({ now: { current: { title: "Ep", durationSeconds: 2400 }, startedAt: at(0) } });
+    const none = channelItemEnd({ now: { current: { title: "Ep", durationSeconds: 0 }, startedAt: at(0) } });
+
+    check(
+      "channelItemEnd: a relay's end is live and as long as its slot",
+      relay.at === T + HOUR && relay.live === true && relay.length === 3600,
+      JSON.stringify(relay)
+    );
+    check(
+      "channelItemEnd: an item cut short is measured by its own length, so a long episode keeps its row",
+      cut.at === T + 25 * MINUTE && cut.live === false && cut.length === 3 * 3600,
+      JSON.stringify(cut)
+    );
+    check(
+      "channelItemEnd: without samo's word, a measured item ends at start plus length",
+      old.at === T + 2400 * 1000 && old.length === 2400,
+      JSON.stringify(old)
+    );
+    check(
+      "channelItemEnd: nothing bounds an unmeasured item nobody capped",
+      none.at === 0 && channelItemEnd({ now: null }).at === 0 && channelItemEnd(null).at === 0,
+      JSON.stringify(none)
+    );
+  }
+
+  /* ---------------------------------------------------------------- *
    * A cast queue: the next item, and where the radio goes after.
    * ---------------------------------------------------------------- */
 
@@ -1960,6 +2226,276 @@ function runUpNextChecks () {
  * The rows under the card, fetched: the channel's programme through samo,
  * a station's schedule from its publisher, and what is asked for when.
  */
+/*
+ * A remembered document must not outlive the boundary it names.
+ *
+ * The wall's journal, every booked hour for a week: the first card after a
+ * cut-in had no rows, because the status remembered from before it still
+ * named the block before and an appointment that had just started, and the
+ * now-playing remembered under an unchanged card key still said the previous
+ * item's end. Both are remembered no longer than the moment they name.
+ */
+async function runBoundaryChecks () {
+  console.log("\nBoundary checks\n");
+
+  const SECOND = 1000;
+
+  {
+    const now = 1_000_000_000_000;
+
+    check(
+      "ttlUntil: no boundary leaves the full life",
+      ttlUntil(60 * SECOND, 0, now) === 60 * SECOND && ttlUntil(60 * SECOND, undefined, now) === 60 * SECOND && ttlUntil(60 * SECOND, NaN, now) === 60 * SECOND
+    );
+    check(
+      "ttlUntil: a boundary further off than the life leaves the full life",
+      ttlUntil(60 * SECOND, now + 5 * 60 * SECOND, now) === 60 * SECOND
+    );
+    check(
+      "ttlUntil: a boundary inside the life is the life",
+      ttlUntil(60 * SECOND, now + 20 * SECOND, now) === 20 * SECOND
+    );
+    check(
+      "ttlUntil: a boundary at hand, or behind, is asked about again next poll -- not in a tight loop",
+      ttlUntil(60 * SECOND, now + 2 * SECOND, now) === BOUNDARY_MIN_TTL_MS && ttlUntil(60 * SECOND, now - 30 * SECOND, now) === BOUNDARY_MIN_TTL_MS
+    );
+    check(
+      "the floor is under a poll, and the lives it bounds are a minute",
+      BOUNDARY_MIN_TTL_MS > 0 && BOUNDARY_MIN_TTL_MS <= 10 * SECOND && ITEM_TTL_MS === 60 * SECOND && PROGRAMME_TTL_MS === 60 * SECOND
+    );
+  }
+
+  /*
+   * A fake samo whose now-playing and status name their boundaries from the
+   * real clock, as samo does; the wall's own clock is the cache's, and is
+   * moved by hand.
+   */
+  let nowDoc = null;
+  let statusDoc = null;
+  const served = [];
+
+  const { server } = fakeSamo(null, {
+    extra (url, req, res) {
+      served.push(url);
+
+      const json = (body) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+        return true;
+      };
+
+      if (url === "/api/v1/channels/jake/now") {
+        return json(nowDoc());
+      }
+
+      if (url === "/api/v1/channels/jake/schedule/status") {
+        return json(statusDoc());
+      }
+
+      if (url === "/api/v1/channels/jake/plan") {
+        return json({ custom: true, plan: { version: 1, blocks: [{ id: "general", default: true, enter: {}, exit: {} }] } });
+      }
+
+      return false;
+    }
+  });
+  const port = await listen(server);
+  const config = { baseUrl: `http://127.0.0.1:${port}`, token: "test-token", deviceId: "", timeoutMs: 2000, schedules: {} };
+
+  const count = (url) => served.filter((u) => u === url).length;
+  const NOW_URL = "/api/v1/channels/jake/now";
+  const STATUS_URL = "/api/v1/channels/jake/schedule/status";
+
+  /* A card for a relayed station on the channel. */
+  const card = { source: "channel", sourceId: "jake", key: ["channel", "Jake Channel", "KRCC", "", ""].join("\u0000"), title: "KRCC", station: "Jake Channel" };
+
+  {
+    /* A relay that ends twenty seconds from now, by samo's word. */
+    const started = Date.now() - 40 * 60 * SECOND;
+    nowDoc = () => ({
+      channelId: "jake",
+      current: { title: "KRCC", live: true, durationSeconds: 0, itemRef: "station:krcc" },
+      startedAt: new Date(started).toISOString(),
+      endsAt: new Date(Date.now() + 20 * SECOND).toISOString()
+    });
+
+    let tick = 0;
+    const base = Date.now();
+    const programmes = createDetailCache(48, () => base + tick);
+
+    const first = await channelNowFor(config, card, programmes, quietLog);
+    tick = 10 * SECOND;
+    const second = await channelNowFor(config, card, programmes, quietLog);
+
+    check(
+      "a channel's now-playing is remembered for the item: ten seconds on, the same document, no second request",
+      first && second === first && count(NOW_URL) === 1,
+      `${count(NOW_URL)} request(s)`
+    );
+
+    tick = 21 * SECOND;
+    const third = await channelNowFor(config, card, programmes, quietLog);
+
+    check(
+      "past the end samo stated, the next poll asks again -- the card key did not change, the item did",
+      third && third !== first && count(NOW_URL) === 2,
+      `${count(NOW_URL)} request(s)`
+    );
+
+    tick = 21 * SECOND + 59 * SECOND;
+    await channelNowFor(config, card, programmes, quietLog);
+    check(
+      "and the fresh document is again good until its own end",
+      count(NOW_URL) === 3,
+      `${count(NOW_URL)} request(s)`
+    );
+  }
+
+  {
+    /* A samo old enough not to say when a relay ends: remembered the full minute, as before. */
+    served.length = 0;
+    nowDoc = () => ({
+      channelId: "jake",
+      current: { title: "KRCC", live: true, durationSeconds: 0, itemRef: "station:krcc" },
+      startedAt: new Date(Date.now() - 40 * 60 * SECOND).toISOString()
+    });
+
+    let tick = 0;
+    const base = Date.now();
+    const programmes = createDetailCache(48, () => base + tick);
+
+    await channelNowFor(config, card, programmes, quietLog);
+    tick = 59 * SECOND;
+    await channelNowFor(config, card, programmes, quietLog);
+    check("with no end to go by, a now-playing lives its minute", count(NOW_URL) === 1, `${count(NOW_URL)} request(s)`);
+    tick = 61 * SECOND;
+    await channelNowFor(config, card, programmes, quietLog);
+    check("and no longer", count(NOW_URL) === 2, `${count(NOW_URL)} request(s)`);
+  }
+
+  {
+    /* A measured episode from that same old samo: its arithmetic end bounds the memory too. */
+    served.length = 0;
+    nowDoc = () => ({
+      channelId: "jake",
+      current: { title: "Ep 12", durationSeconds: 1800, itemRef: "episode:e12" },
+      startedAt: new Date(Date.now() - 1800 * SECOND + 15 * SECOND).toISOString()
+    });
+
+    let tick = 0;
+    const base = Date.now();
+    const programmes = createDetailCache(48, () => base + tick);
+
+    await channelNowFor(config, card, programmes, quietLog);
+    tick = 16 * SECOND;
+    await channelNowFor(config, card, programmes, quietLog);
+    check(
+      "a measured item's worked-out end bounds the memory just the same",
+      count(NOW_URL) === 2,
+      `${count(NOW_URL)} request(s)`
+    );
+  }
+
+  {
+    /* The streamer still on an item past the end it stated: asked again each poll, at the floor. */
+    served.length = 0;
+    nowDoc = () => ({
+      channelId: "jake",
+      current: { title: "Ep 12", durationSeconds: 1800, itemRef: "episode:e12" },
+      startedAt: new Date(Date.now() - 1900 * SECOND).toISOString(),
+      endsAt: new Date(Date.now() - 100 * SECOND).toISOString()
+    });
+
+    let tick = 0;
+    const base = Date.now();
+    const programmes = createDetailCache(48, () => base + tick);
+
+    await channelNowFor(config, card, programmes, quietLog);
+    tick = BOUNDARY_MIN_TTL_MS - 1000;
+    await channelNowFor(config, card, programmes, quietLog);
+    const before = count(NOW_URL);
+    tick = BOUNDARY_MIN_TTL_MS + 1000;
+    await channelNowFor(config, card, programmes, quietLog);
+
+    check(
+      "an item running past the end it stated is asked about again next poll, not every call",
+      before === 1 && count(NOW_URL) === 2,
+      `${before} then ${count(NOW_URL)} request(s)`
+    );
+  }
+
+  {
+    /*
+     * The status is remembered until the next booked block starts. The
+     * moment it does, the remembered one names a block that is over and an
+     * appointment already begun -- and the rows built from it are empty.
+     */
+    served.length = 0;
+    statusDoc = () => ({
+      timezone: "America/Denver",
+      now: new Date().toISOString(),
+      minuteOfDay: 7 * 60 + 59,
+      programming: {
+        planSource: "custom",
+        blockId: "general",
+        blockLabel: "General rotation",
+        nextAnchor: { blockId: "slot-krcc", label: "KRCC", start: new Date(Date.now() + 15 * SECOND).toISOString(), at: "08:00", in: "0s", policy: "startImmediately" }
+      }
+    });
+    nowDoc = () => ({ channelId: "jake", current: { title: "Bad Guy", durationSeconds: 194 }, startedAt: new Date().toISOString() });
+
+    let tick = 0;
+    const base = Date.now();
+    const programmes = createDetailCache(48, () => base + tick);
+    const known = { channelNow: nowDoc(), cast: null };
+
+    await gatherUpNext(config, card, known, programmes, quietLog);
+    tick = 10 * SECOND;
+    await gatherUpNext(config, card, known, programmes, quietLog);
+    check(
+      "the channel's status is remembered up to the next booked block: ten seconds on, no second request",
+      count(STATUS_URL) === 1,
+      `${count(STATUS_URL)} request(s)`
+    );
+
+    tick = 16 * SECOND;
+    await gatherUpNext(config, card, known, programmes, quietLog);
+    check(
+      "once the booked block has started, the next poll reads the status again -- the minute it was good for notwithstanding",
+      count(STATUS_URL) === 2,
+      `${count(STATUS_URL)} request(s)`
+    );
+    check(
+      "the plan, which no boundary moves, is still asked for once",
+      count("/api/v1/channels/jake/plan") === 1,
+      `${count("/api/v1/channels/jake/plan")} request(s)`
+    );
+
+    /* No appointment in sight: the status lives its minute. */
+    served.length = 0;
+    statusDoc = () => ({
+      timezone: "America/Denver",
+      now: new Date().toISOString(),
+      minuteOfDay: 7 * 60 + 59,
+      programming: { planSource: "custom", blockId: "general", blockLabel: "General rotation" }
+    });
+    const quiet = createDetailCache(48, () => base + tick);
+    tick = 0;
+    await gatherUpNext(config, card, known, quiet, quietLog);
+    tick = 59 * SECOND;
+    await gatherUpNext(config, card, known, quiet, quietLog);
+    tick = 61 * SECOND;
+    await gatherUpNext(config, card, known, quiet, quietLog);
+    check(
+      "with nothing booked, the status lives its minute and no longer",
+      count(STATUS_URL) === 2,
+      `${count(STATUS_URL)} request(s)`
+    );
+  }
+
+  server.close();
+}
+
 async function runUpNextFetchChecks () {
   console.log("\nUp next fetch checks\n");
 
@@ -2415,6 +2951,7 @@ async function runHelperChecks () {
 async function main () {
   run();
   runUpNextChecks();
+  await runBoundaryChecks();
   await runFetchChecks();
   await runUpNextFetchChecks();
   await runArtworkChecks();

@@ -13,11 +13,13 @@
  *
  *   - A Samo channel has a plan, and the plan has booked blocks that start on
  *     the clock. The next one of those is a fact -- "All Things Considered at
- *     4:00 PM" -- and so is the end of the block that is on now. The next
- *     TRACK is not: the scheduler picks it only when the current item ends,
- *     as a weighted draw among near-equal candidates seeded by the second, so
- *     a "next song" read off a preview would change every poll and be wrong
- *     when the moment came. It is left off on purpose.
+ *     4:00 PM" -- and so is the end of the block that is on now, and so is
+ *     the end of the item on air, which samo states outright (see
+ *     channelItemEnd). The next TRACK is not: the scheduler picks it only
+ *     when the current item ends, as a weighted draw among near-equal
+ *     candidates seeded by the second, so a "next song" read off a preview
+ *     would change every poll and be wrong when the moment came. It is left
+ *     off on purpose.
  *   - A cast queue is a list; the next item is the next item. When the list
  *     runs out the device tunes back to its default station, which is the
  *     honest "next" for an audiobook -- not chapter two, but "Jake Channel
@@ -230,19 +232,49 @@ function activeBlockEnd (programme, at) {
 }
 
 /*
- * When the channel's current item ends, or 0 for a live one or one with no
- * known length.
+ * When the channel's current item gives way: `{ at, live, length }`, with
+ * `at` 0 when nobody can say.
+ *
+ * Samo says so outright, as `endsAt` on the channel's now-playing -- the
+ * moment its own clocks are set to, whichever comes first of the end of the
+ * audio, the play window the scheduler capped the item to (a booked slot's
+ * end, the gap in front of an appointment, a live station's turn) and the
+ * appointment due to cut in on it. That is preferred over anything worked
+ * out here, because most of it cannot be worked out here: a relayed station
+ * has no length, an episode the feed never measured has none either, and the
+ * cap is samo's alone. For an unmeasured episode it is a ceiling -- the room
+ * before the next booked show -- and the episode ends there or sooner.
+ *
+ * A samo old enough not to say gets the old arithmetic, start plus length,
+ * which only ever answered for a measured item.
+ *
+ * `length` is what is known of the item's size, in seconds -- its own
+ * length, or failing that the span it has been given -- for the caller to
+ * decide whether the end is worth a row.
  */
 function channelItemEnd (programme) {
   const now = programme?.now;
-  const started = when(now?.startedAt);
-  const duration = number(now?.current?.durationSeconds);
+  const current = now?.current && typeof now.current === "object" ? now.current : null;
+  const none = { at: 0, live: false, length: 0 };
 
-  if (!started || duration < LONG_FORM_SECONDS || now?.current?.live) {
-    return 0;
+  if (!current) {
+    return none;
   }
 
-  return started + duration * 1000;
+  const live = Boolean(current.live);
+  const started = when(now.startedAt);
+  const duration = Math.max(0, number(current.durationSeconds));
+  const stated = when(now.endsAt);
+
+  const at = stated || (started && duration > 0 && !live ? started + duration * 1000 : 0);
+
+  if (!at) {
+    return none;
+  }
+
+  const span = started && at > started ? (at - started) / 1000 : 0;
+
+  return { at, live, length: Math.max(duration, span) };
 }
 
 function channelBoundaries (programme, at) {
@@ -260,10 +292,17 @@ function channelBoundaries (programme, at) {
     found.push({ kind: "until", at: blockEnd });
   }
 
-  const itemEnd = channelItemEnd(programme);
+  /*
+   * The item's own end, when it is long enough to be worth a row (see
+   * LONG_FORM_SECONDS). A relayed station runs UNTIL its slot or its turn
+   * ends, the way the block it is in does; anything with an end of its own
+   * ENDS. When the two -- or either and the next booked block -- fall on the
+   * same minute, fold says it once.
+   */
+  const item = channelItemEnd(programme);
 
-  if (itemEnd > at) {
-    found.push({ kind: "ends", at: itemEnd });
+  if (item.at > at && item.length >= LONG_FORM_SECONDS) {
+    found.push({ kind: item.live ? "until" : "ends", at: item.at });
   }
 
   return found;
@@ -833,6 +872,7 @@ module.exports = {
   parseSchedule,
   describeProgramme,
   activeBlockEnd,
+  channelItemEnd,
   localMidnight,
   parseClock,
   parseDuration,

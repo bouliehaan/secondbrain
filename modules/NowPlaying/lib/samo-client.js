@@ -15,7 +15,8 @@ const {
   resolveDue,
   scheduleProviderFor,
   parseSchedule,
-  describeProgramme
+  describeProgramme,
+  channelItemEnd
 } = require("./up-next");
 
 /*
@@ -95,6 +96,23 @@ const PLAN_TTL_MS = 15 * 60 * 1000;
 const STATION_TTL_MS = 15 * 60 * 1000;
 const SCHEDULE_TTL_MS = 5 * 60 * 1000;
 const SCHEDULE_MIN_TTL_MS = 30 * 1000;
+
+/*
+ * A document that names its own boundary -- a now-playing that says when
+ * its item ends, a status that says when the next booked block starts -- is
+ * stale at that boundary however recently it was read, and is remembered no
+ * longer than that (see ttlUntil). This is the least it is remembered for
+ * once the boundary is at hand or behind it: samo is on loopback and answers
+ * in a millisecond, so asking again on the next poll costs nothing, but a
+ * boundary that has just passed while samo is still on the old item must
+ * not be asked about in a tight loop either.
+ *
+ * Without this the wall showed no end -- often no rows at all -- for the
+ * first minute of every booked hour: the status remembered from before the
+ * cut-in still named the block before and an appointment that had just
+ * started, and nothing in it was still ahead.
+ */
+const BOUNDARY_MIN_TTL_MS = 5 * 1000;
 
 /* A schedule endpoint that failed is left alone for this long. */
 const SCHEDULE_RETRY_MS = 60 * 1000;
@@ -779,7 +797,27 @@ async function castLookup (config, state, log) {
  * and is not mistaken for "we have not asked".
  * ---------------------------------------------------------------------- */
 
-async function remembered (programmes, key, ttlMs, fetchValue, failedTtlMs = ttlMs) {
+/*
+ * How long to remember a document that is good for `ttlMs`, or until the
+ * boundary it names -- whichever is sooner, and never less than the floor.
+ * No boundary, or one that is not a moment, leaves the full life.
+ */
+function ttlUntil (ttlMs, boundaryMs, now = Date.now(), floorMs = BOUNDARY_MIN_TTL_MS) {
+  const boundary = Number(boundaryMs) || 0;
+
+  if (boundary <= 0) {
+    return ttlMs;
+  }
+
+  return Math.min(ttlMs, Math.max(floorMs, boundary - now));
+}
+
+/*
+ * `staleAt`, given, is asked of a freshly fetched value for the instant it
+ * stops being true -- the item's end, the next block's start -- and the
+ * value is remembered no longer than that.
+ */
+async function remembered (programmes, key, ttlMs, fetchValue, { failedTtlMs = ttlMs, staleAt = null } = {}) {
   const hit = programmes.get(key);
 
   if (hit) {
@@ -788,7 +826,11 @@ async function remembered (programmes, key, ttlMs, fetchValue, failedTtlMs = ttl
 
   const value = await fetchValue();
 
-  programmes.set(key, { value }, { retryAfterMs: value === null ? failedTtlMs : ttlMs });
+  const ttl = value === null
+    ? failedTtlMs
+    : staleAt ? ttlUntil(ttlMs, staleAt(value)) : ttlMs;
+
+  programmes.set(key, { value }, { retryAfterMs: ttl });
 
   return value;
 }
@@ -924,6 +966,26 @@ async function gatherDue (config, channelId, currentRef, programmes, covers, log
 }
 
 /*
+ * The channel's own now-playing for the card on air -- GET
+ * /channels/{id}/now -- remembered for as long as the item plays.
+ *
+ * Once per item, not once per key: the key is the card's, and the card is
+ * the same when a booked hour of KRCC hands over to another, or when the
+ * channel is between items and shows its own name. So the document is
+ * remembered no longer than the item's own end -- the moment samo said the
+ * item would give way, or, from a samo old enough not to say, the end of
+ * its measured length -- and the next poll after that asks again. Without
+ * that the wall kept the previous item's end, already behind it, for up to
+ * a minute of the next.
+ */
+async function channelNowFor (config, now, programmes, log) {
+  return remembered(programmes, `now:${now.key}`, ITEM_TTL_MS, () =>
+    getJSON(config, `/api/v1/channels/${encodeURIComponent(now.sourceId)}/now`, log), {
+    staleAt: (value) => channelItemEnd({ now: value }).at
+  });
+}
+
+/*
  * Gather what "up next" needs for this card: the channel's programme, or the
  * station's schedule, as far as either is knowable.
  *
@@ -939,9 +1001,16 @@ async function gatherUpNext (config, now, known, programmes, log) {
   if (now.source === "channel" && id) {
     const encoded = encodeURIComponent(id);
 
+    /*
+     * The status is good for a minute, or until the next booked block
+     * starts: from that moment it names the block before and an appointment
+     * already begun, and the rows built from it are empty.
+     */
     const [status, plan] = await Promise.all([
       remembered(programmes, `status:${id}`, PROGRAMME_TTL_MS, () =>
-        getJSON(config, `/api/v1/channels/${encoded}/schedule/status`, log)),
+        getJSON(config, `/api/v1/channels/${encoded}/schedule/status`, log), {
+        staleAt: (value) => Date.parse(text(value?.programming?.nextAnchor?.start)) || 0
+      }),
       remembered(programmes, `plan:${id}`, PLAN_TTL_MS, () =>
         getJSON(config, `/api/v1/channels/${encoded}/plan`, log))
     ]);
@@ -1048,15 +1117,13 @@ async function pollNowPlaying (configDir, options = {}, log = console) {
   /*
    * A tuned channel's now-playing says when its current item ends, which is
    * a row under the card; a cast channel's was fetched by the lookup above.
-   * Asked once per item -- the answer is the same for as long as the item
-   * plays -- and handed on to the decoration so the album lookup does not
-   * ask for it again.
+   * Asked once per item -- see channelNowFor -- and handed on to the
+   * decoration so the album lookup does not ask for it again.
    */
   let channelNow = cast?.kind === "channel" ? cast.now : null;
 
   if (upNext && now.source === "channel" && now.sourceId && !channelNow) {
-    channelNow = await remembered(programmes, `now:${now.key}`, ITEM_TTL_MS, () =>
-      getJSON(config, `/api/v1/channels/${encodeURIComponent(now.sourceId)}/now`, log));
+    channelNow = await channelNowFor(config, now, programmes, log);
   }
 
   const decorated = await decorate(config, now, cache, log, { channelNow });
@@ -1099,7 +1166,12 @@ module.exports = {
   decorate,
   gatherUpNext,
   gatherDue,
+  channelNowFor,
   stationSchedule,
+  ttlUntil,
+  BOUNDARY_MIN_TTL_MS,
+  ITEM_TTL_MS,
+  PROGRAMME_TTL_MS,
   COVER_CACHE_LIMIT,
   DEFAULT_BASE_URL,
   DEFAULT_TIMEOUT_MS,

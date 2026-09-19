@@ -72,8 +72,15 @@ line; a guess is not.** What that leaves, by source:
 - **A Samo channel** has a plan, and the plan has booked blocks that start on
   the clock. The next one is `NEXT` with its start; the end of the block on
   air now is `UNTIL`; a long item — an episode, not a song — gets `ENDS`.
-  Nearest first, at most two, and a block that ends exactly when the next
-  begins is one row, not two a minute apart. What the rows never say is the
+  The item's end is samo's word, not the wall's arithmetic: the channel's
+  now-playing says when the station will move on (`endsAt` — the end of the
+  audio, the play window the scheduler capped the item to, or the appointment
+  due to cut in, whichever is first), so a relayed station runs `UNTIL` its
+  slot or its turn is up, and an episode the feed never measured ends where
+  the scheduler capped it. A samo that does not say gets start plus length,
+  which only ever answers for a measured item. Nearest first, at most two,
+  and a block that ends exactly when the next begins is one row, not two a
+  minute apart. What the rows never say is the
   next *track*: samo's scheduler does not pick it until the current one ends,
   and picks by a weighted draw among near-equal candidates seeded by the
   second, so a "next song" read off a preview would change every poll and be
