@@ -30,6 +30,7 @@ const { execFileSync } = require("node:child_process");
 const DEFAULT_CONFIG = "/opt/MagicMirror/config/config.js";
 const NODE_ICAL = "/opt/MagicMirror/node_modules/node-ical";
 const KIOSK_LAUNCHER = "/usr/local/bin/calendar-kiosk";
+const KIOSK_DEFAULTS = "/etc/default/secondbrain";
 
 const CONFIG = process.argv.slice(2).find((arg) => !arg.startsWith("--") && arg !== "-")
   ?? DEFAULT_CONFIG;
@@ -119,12 +120,38 @@ function lastTimestamp (lines, needle) {
 function wallTimezone () {
   try {
     const match = fs.readFileSync(KIOSK_LAUNCHER, "utf8").match(/^\s*export\s+TZ=["']?([^"'\s]+)/m);
-    if (match) return match[1];
+    if (match) return expandDefault(match[1]);
   } catch {
     // Not on the mirror, or the launcher moved.
   }
 
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+/**
+ * A shell word the way the launcher's bash expands it.
+ *
+ * The launcher says `${SECONDBRAIN_TZ:-America/Denver}`: the defaults file's
+ * setting when it makes one, the fallback when it does not. Taken literally,
+ * that is no timezone at all, and every date below throws.
+ *
+ * @param {string} word the right-hand side of the launcher's `export TZ=`
+ * @returns {string} the value bash would export
+ */
+function expandDefault (word) {
+  const expansion = word.match(/^\$\{(\w+):-([^}]*)\}$/);
+  if (!expansion) return word;
+
+  const [, name, fallback] = expansion;
+  try {
+    const setting = fs.readFileSync(KIOSK_DEFAULTS, "utf8")
+      .match(new RegExp(`^\\s*${name}=["']?([^"'\\s]+)`, "m"));
+    if (setting) return setting[1];
+  } catch {
+    // No defaults file: the launcher's fallback is what it exports.
+  }
+
+  return fallback;
 }
 
 const TZ = wallTimezone();

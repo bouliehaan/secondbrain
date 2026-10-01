@@ -150,19 +150,61 @@ function run () {
   const polledAt = new Date(2026, 8, 11, 15, 41, 7).getTime();
 
   check(
-    "the poll time reads AM/PM with how long it took, in seconds",
-    texts(StatusLine.composeRight({ polledAt, pollMs: 41200 }))[0] === "POLLED 3:41:07 PM (41 S)"
+    "the poll reads as an age, with how long it took labelled as such",
+    texts(StatusLine.composeRight({ polledAt, pollMs: 21200 }, polledAt + 41 * 1000))[0] === "POLLED 41 S AGO (TOOK 21 S)"
+  );
+
+  check(
+    "the age ticks: a second later it is a second older, and the duration is not",
+    texts(StatusLine.composeRight({ polledAt, pollMs: 21200 }, polledAt + 42 * 1000))[0] === "POLLED 42 S AGO (TOOK 21 S)" &&
+    texts(StatusLine.composeRight({ polledAt, pollMs: 21200 }, polledAt + 59 * 1000))[0] === "POLLED 59 S AGO (TOOK 21 S)"
   );
 
   check(
     "a poll that took under half a second still says one second, not zero",
-    texts(StatusLine.composeRight({ polledAt, pollMs: 120 }))[0] === "POLLED 3:41:07 PM (1 S)"
+    texts(StatusLine.composeRight({ polledAt, pollMs: 120 }, polledAt))[0] === "POLLED 0 S AGO (TOOK 1 S)"
   );
 
   check(
-    "midnight and noon are 12, not 0",
-    StatusLine.formatClock(new Date(2026, 8, 11, 0, 5, 0).getTime()) === "12:05:00 AM" &&
-    StatusLine.formatClock(new Date(2026, 8, 11, 12, 5, 0).getTime()) === "12:05:00 PM"
+    "a poll with no duration is still an age",
+    texts(StatusLine.composeRight({ polledAt }, polledAt + 5000))[0] === "POLLED 5 S AGO"
+  );
+
+  check(
+    "the poll segment is the one the browser rewrites in place",
+    StatusLine.composeRight({ polledAt }, polledAt)[0].role === "poll" &&
+    StatusLine.composeRight({ ntp: "lock" }).every((seg) => seg.role === undefined)
+  );
+
+  check(
+    "an age is exact under a minute and coarse above it",
+    StatusLine.formatAge(0) === "0 S" &&
+    StatusLine.formatAge(59 * 1000) === "59 S" &&
+    StatusLine.formatAge(60 * 1000) === "1 M" &&
+    StatusLine.formatAge(59 * 60 * 1000 + 59 * 1000) === "59 M" &&
+    StatusLine.formatAge(3600 * 1000) === "1 H" &&
+    StatusLine.formatAge(86400 * 1000 * 2 + 5) === "2 D" &&
+    StatusLine.formatAge(-40) === "0 S" &&
+    StatusLine.formatAge("later") === "0 S"
+  );
+
+  check(
+    "a poll a minute old on a minute's interval is not overdue; one three intervals late is hatched",
+    bads(StatusLine.composeRight({ polledAt, pollIntervalMs: 60000 }, polledAt + 61 * 1000)).length === 0 &&
+    bads(StatusLine.composeRight({ polledAt, pollIntervalMs: 60000 }, polledAt + 180 * 1000)).length === 0 &&
+    bads(StatusLine.composeRight({ polledAt, pollIntervalMs: 60000 }, polledAt + 181 * 1000)).join() === "POLLED 3 M AGO"
+  );
+
+  check(
+    "the overdue line scales with the interval, and assumes the floor when no interval was said",
+    bads(StatusLine.composeRight({ polledAt, pollIntervalMs: 5 * 60000 }, polledAt + 10 * 60000)).length === 0 &&
+    bads(StatusLine.composeRight({ polledAt, pollIntervalMs: 5 * 60000 }, polledAt + 16 * 60000)).length === 1 &&
+    bads(StatusLine.composeRight({ polledAt }, polledAt + 181 * 1000)).length === 1
+  );
+
+  check(
+    "a poll from the future is zero seconds ago, not negative",
+    texts(StatusLine.composeRight({ polledAt }, polledAt - 5000))[0] === "POLLED 0 S AGO"
   );
 
   check(

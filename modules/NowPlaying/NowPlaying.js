@@ -5,7 +5,9 @@
  *
  * The browser half does no thinking. Every decision about what the lines should
  * say was made in lib/now-playing.js before the payload was sent, because that
- * is where it can be tested without a browser, a mirror or a radio.
+ * is where it can be tested without a browser, a mirror or a radio. The one
+ * thing decided here is how to write a moment -- a bare time or a day -- which
+ * depends on what day it is when the card is drawn, not when it was sent.
  */
 
 /*
@@ -15,6 +17,15 @@
  * anything.
  */
 const CONFIGURE_RETRY_MS = 10 * 1000;
+
+/*
+ * A card is redrawn at midnight so that what it says about today stays true.
+ * The backend only sends a card when something in it changed, and the day
+ * turning changes nothing it can see -- but "POSTED 11:04 AM" is a different
+ * claim at 12:01 AM, and a three-hour episode that started at ten can still be
+ * playing then. A second past midnight, so the day has turned when it runs.
+ */
+const MIDNIGHT_GRACE_MS = 1000;
 
 Module.register("NowPlaying", {
   defaults: {
@@ -54,6 +65,7 @@ Module.register("NowPlaying", {
     this.nowPlaying = null;
     this.loaded = false;
     this.configureRetryTimer = null;
+    this.midnightTimer = null;
 
     /* Nothing to show until the backend says otherwise. */
     this.hide(0);
@@ -71,6 +83,11 @@ Module.register("NowPlaying", {
     if (this.configureRetryTimer) {
       window.clearInterval(this.configureRetryTimer);
       this.configureRetryTimer = null;
+    }
+
+    if (this.midnightTimer) {
+      window.clearTimeout(this.midnightTimer);
+      this.midnightTimer = null;
     }
   },
 
@@ -113,6 +130,7 @@ Module.register("NowPlaying", {
     if (this.nowPlaying) {
       this.updateDom(0);
       this.show(0);
+      this.redrawAtMidnight();
     } else {
       /*
        * Order matters: redraw the empty shell first, then hide. Hiding a module
@@ -123,6 +141,29 @@ Module.register("NowPlaying", {
       this.updateDom(0);
       this.hide(0);
     }
+  },
+
+  /*
+   * Arrange for the card to be drawn again when the day turns. One timer at a
+   * time: a card that arrives at 11:58 PM replaces the one set at 11:57 PM
+   * rather than joining it.
+   */
+  redrawAtMidnight () {
+    if (this.midnightTimer) {
+      window.clearTimeout(this.midnightTimer);
+    }
+
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+    this.midnightTimer = window.setTimeout(() => {
+      this.midnightTimer = null;
+
+      if (this.nowPlaying) {
+        this.updateDom(0);
+        this.redrawAtMidnight();
+      }
+    }, midnight.getTime() - now.getTime() + MIDNIGHT_GRACE_MS);
   },
 
   getDom () {
@@ -278,15 +319,24 @@ Module.register("NowPlaying", {
       cell.title = [tile.show, tile.title].filter(Boolean).join(" — ") +
         (tile.held && tile.held.reason ? ` (held: ${tile.held.reason})` : "");
 
+      const initials = document.createElement("span");
+      initials.className = "nowplaying-due-initials";
+      initials.textContent = tile.initials || "";
+
       if (tile.artwork) {
         const image = document.createElement("img");
         image.src = tile.artwork;
         image.alt = tile.show || tile.title;
+
+        /*
+         * The picture is served by the helper from what it holds in memory;
+         * one it has since let go of, or one the browser cannot decode, is a
+         * tile with initials, not a broken-image glyph with the show's name
+         * spilling out of a 30px square.
+         */
+        image.onerror = () => image.replaceWith(initials);
         cell.appendChild(image);
       } else {
-        const initials = document.createElement("span");
-        initials.className = "nowplaying-due-initials";
-        initials.textContent = tile.initials || "";
         cell.appendChild(initials);
       }
 
@@ -321,8 +371,7 @@ Module.register("NowPlaying", {
       return "";
     }
 
-    const locale = (typeof config !== "undefined" && config.locale) || "en-US";
-    const hour12 = !(typeof config !== "undefined" && Number(config.timeFormat) === 24);
+    const { locale, hour12 } = this.clockFormat();
 
     const time = moment.toLocaleTimeString(locale, {
       hour: "numeric",
@@ -330,15 +379,61 @@ Module.register("NowPlaying", {
       hour12
     });
 
-    const today = new Date();
-    const sameDay =
-      moment.getFullYear() === today.getFullYear() &&
-      moment.getMonth() === today.getMonth() &&
-      moment.getDate() === today.getDate();
-
-    return sameDay
+    return this.isToday(moment)
       ? time
       : `${moment.toLocaleDateString(locale, { weekday: "short" })} ${time}`;
+  },
+
+  /*
+   * When an episode came out, as a glance wants it: the time when that was
+   * today -- "11:04 AM", and the bare time means today everywhere on this
+   * wall -- and otherwise the date, "Sep 9", because the hour of a release
+   * stops mattering once the day has. The year only when it is not this one:
+   * a channel does reach back for an old episode, and "Sep 9" on one from
+   * 2019 would be a lie by omission.
+   */
+  formatRelease (at) {
+    const moment = new Date(at);
+
+    if (!at || !Number.isFinite(moment.getTime())) {
+      return "";
+    }
+
+    const { locale, hour12 } = this.clockFormat();
+
+    if (this.isToday(moment)) {
+      return moment.toLocaleTimeString(locale, {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12
+      });
+    }
+
+    const thisYear = moment.getFullYear() === new Date().getFullYear();
+
+    return moment.toLocaleDateString(locale, {
+      month: "short",
+      day: "numeric",
+      ...(thisYear ? {} : { year: "numeric" })
+    });
+  },
+
+  /* The wall's own clock settings, from MagicMirror's config. */
+  clockFormat () {
+    return {
+      locale: (typeof config !== "undefined" && config.locale) || "en-US",
+      hour12: !(typeof config !== "undefined" && Number(config.timeFormat) === 24)
+    };
+  },
+
+  isToday (moment) {
+    const today = new Date();
+
+    return (
+      moment.getFullYear() === today.getFullYear() &&
+      moment.getMonth() === today.getMonth() &&
+      moment.getDate() === today.getDate()
+    );
   },
 
   renderArtwork (now) {
@@ -354,6 +449,13 @@ Module.register("NowPlaying", {
      * alt is the correct way to say that.
      */
     image.alt = "";
+
+    /*
+     * A picture that does not arrive -- the helper has let go of it, or the
+     * browser cannot decode it -- leaves a card with no frame, which is the
+     * card the helper would have sent had it known. Not an empty frame.
+     */
+    image.onerror = () => frame.remove();
 
     frame.appendChild(image);
 
@@ -372,15 +474,51 @@ Module.register("NowPlaying", {
     body.appendChild(title);
 
     const detail = this.detailLine(now);
+    const released = this.formatRelease(now.publishedAt);
 
-    if (detail) {
+    if (detail || released) {
       const meta = document.createElement("div");
       meta.className = "nowplaying-meta";
-      meta.textContent = detail;
+
+      if (detail) {
+        const line = document.createElement("span");
+        line.className = "nowplaying-detail";
+        line.textContent = detail;
+        meta.appendChild(line);
+      }
+
+      if (released) {
+        meta.appendChild(this.renderRelease(released));
+      }
+
       body.appendChild(meta);
     }
 
     return body;
+  },
+
+  /*
+   * When an episode came out, at the right-hand end of the meta line where
+   * the station sits at the end of the line above: `POSTED 11:04 AM`. The
+   * artist beside it gives way first, as the station does -- a show's name
+   * is on the cover and in the headline's shadow already; when the episode
+   * was posted is written nowhere else on the wall.
+   */
+  renderRelease (moment) {
+    const release = document.createElement("span");
+    release.className = "nowplaying-released";
+
+    const label = document.createElement("span");
+    label.className = "nowplaying-released-label";
+    label.textContent = "Posted";
+    release.appendChild(label);
+
+    const time = document.createElement("span");
+    time.className = "nowplaying-released-time";
+    time.textContent = moment;
+    release.appendChild(time);
+
+    return release;
   },
 
   /*

@@ -6,6 +6,8 @@ const {
   pollNowPlaying,
   loadSamoConfig,
   createDetailCache,
+  createArtworkStore,
+  ARTWORK_ROUTE,
   COVER_CACHE_LIMIT
 } = require("./lib/samo-client");
 const { steadyUpNext } = require("./lib/up-next");
@@ -69,6 +71,17 @@ module.exports = NodeHelper.create({
      */
     this.covers = createDetailCache(COVER_CACHE_LIMIT);
 
+    /*
+     * The pictures themselves. The two caches above remember a URL under
+     * ARTWORK_ROUTE for each card and each show; this holds the bytes behind
+     * those URLs, and the route below hands them to the browser. Served from
+     * here rather than inlined in the card so that a cover's size is the
+     * browser's problem, which it is well equipped for, and never the
+     * socket's or the DOM's.
+     */
+    this.artworks = createArtworkStore();
+    this.serveArtwork();
+
     /* The rows as last sent, so a clock read off a playing position holds still. */
     this.lastNext = [];
 
@@ -76,8 +89,7 @@ module.exports = NodeHelper.create({
      * The last payload we published, serialised.
      *
      * The frontend does its own identical check, but the comparison has to
-     * happen here too: a card carries its cover art inline as a data URI, and
-     * pushing forty kilobytes of unchanged base64 down the socket every ten
+     * happen here too: pushing an unchanged card down the socket every ten
      * seconds to have the browser throw it away is work nobody needs doing.
      */
     this.lastPayload = null;
@@ -98,6 +110,45 @@ module.exports = NodeHelper.create({
 
   stop () {
     this.stopPolling();
+  },
+
+  /*
+   * Hand the browser the pictures the store holds, at the URLs the cards
+   * carry: GET /nowplaying/artwork/<id>.
+   *
+   * MagicMirror gives every helper its express app before start() runs, and
+   * MMM-SecondBrain's webhook already hangs off it the same way. The id is a
+   * hash of the picture, so this route can only ever answer with something
+   * the helper already fetched on samo's say-so -- nothing on the LAN can
+   * name a URL and have the helper go and get it. The type comes from the
+   * bytes, sniffed when they were fetched, which matters here: MagicMirror
+   * serves with helmet's `nosniff`, so a picture labelled
+   * `application/octet-stream` would be refused by the browser exactly as
+   * the helper itself used to refuse it.
+   *
+   * A picture's URL names its content, so the browser is told to keep it:
+   * MagicMirror rebuilds the module's DOM wholesale on every update, and a
+   * cover that was fetched once should not be fetched again for every rebuild
+   * of a card that has not changed.
+   */
+  serveArtwork () {
+    if (!this.expressApp) {
+      return;
+    }
+
+    this.expressApp.get(`${ARTWORK_ROUTE}/:id`, (req, res) => {
+      const picture = this.artworks.get(req.params.id);
+
+      if (!picture) {
+        res.status(404).end();
+        return;
+      }
+
+      res.set("Content-Type", picture.type);
+      res.set("Content-Length", String(picture.bytes.length));
+      res.set("Cache-Control", "private, max-age=86400, immutable");
+      res.end(picture.bytes);
+    });
   },
 
   socketNotificationReceived (notification, payload) {
@@ -216,6 +267,7 @@ module.exports = NodeHelper.create({
           cache: this.cache,
           programmes: this.programmes,
           covers: this.covers,
+          artworks: this.artworks,
           upNext: this.config.upNext !== false,
           status
         },

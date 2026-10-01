@@ -1,6 +1,6 @@
 Module.register("MMM-SolarTheme", {
   defaults: {
-    lightAfterSunriseMinutes: 30,
+    lightAfterSunriseMinutes: 0,
     darkBeforeSunsetMinutes: 20,
 
     /*
@@ -11,7 +11,7 @@ Module.register("MMM-SolarTheme", {
     fallbackDarkTime: "19:00",
 
     checkIntervalMilliseconds: 15 * 1000,
-    transitionMilliseconds: 1400
+    transitionMilliseconds: 300
   },
 
   start() {
@@ -200,7 +200,11 @@ Module.register("MMM-SolarTheme", {
   themeIsLight(now) {
     if (
       Number.isFinite(this.sunrise) &&
-      Number.isFinite(this.sunset)
+      Number.isFinite(this.sunset) &&
+      // Yesterday's weather must not keep the page dark all morning while
+      // the provider is unavailable. Use the clock fallback until it refreshes.
+      new Date(this.sunrise).toDateString() === new Date(now).toDateString() &&
+      new Date(this.sunset).toDateString() === new Date(now).toDateString()
     ) {
       const lightAt =
         this.sunrise +

@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
@@ -51,14 +52,33 @@ const DEFAULT_TIMEOUT_MS = 6000;
 const ARTWORK_WIDTH = 256;
 
 /*
- * A ceiling on what we are willing to inline. Cover art that overshoots this is
- * dropped rather than truncated: a card with no picture is fine, a card with
- * half a picture is not.
+ * A ceiling on what we are willing to hold for one picture. Cover art that
+ * overshoots this is dropped rather than truncated: a card with no picture is
+ * fine, a card with half a picture is not.
+ *
+ * Generous on purpose. The bytes are served to the browser from the artwork
+ * store (see createArtworkStore) rather than inlined in the card, so the only
+ * thing this bounds is memory -- and the pictures that need the room are
+ * real. A feed's cover that is too big for samo's own 5 MB download cap is
+ * never kept by samo at all: its cover route redirects to the feed's CDN,
+ * where `?width=` means nothing and the original comes back as it is. One
+ * show on Jake Channel ships a 7.8 MB PNG that way, and the old 512 KB
+ * ceiling threw it away 2,500 times in a fortnight. Chromium draws a picture
+ * that size without noticing; the wall has no business refusing it.
  */
-const MAX_ARTWORK_BYTES = 512 * 1024;
+const MAX_ARTWORK_BYTES = 16 * 1024 * 1024;
+
+/*
+ * How much the artwork store holds altogether, across every picture on the
+ * card and in the due row. Most entries are a samo thumbnail of a few tens of
+ * kilobytes; the budget is sized so that a handful of the oversized originals
+ * described above fit beside them without pushing anything out.
+ */
+const ARTWORK_STORE_BYTES = 64 * 1024 * 1024;
 
 /* How many resolved artworks to keep. A channel cycles through far fewer than
- * this in a day, and each entry is bounded by MAX_ARTWORK_BYTES. */
+ * this in a day; the bytes themselves live in the artwork store, and an
+ * entry here is a URL into it. */
 const ARTWORK_CACHE_LIMIT = 24;
 
 /*
@@ -146,6 +166,18 @@ const USER_AGENT = "secondbrain-wall/1 (NowPlaying; +https://github.com/boulieha
 
 const text = (value) =>
   typeof value === "string" ? value.trim() : "";
+
+/*
+ * A moment samo wrote, as an ISO instant -- or "" when it wrote nothing, or
+ * something that is not a date. Samo spells its times RFC 3339 with whatever
+ * offset the feed used; one spelling here means the same episode makes the
+ * same card whichever it was.
+ */
+const instantOf = (value) => {
+  const parsed = new Date(text(value));
+
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : "";
+};
 
 /**
  * Read the samo credentials.
@@ -295,7 +327,61 @@ async function getExternalJSON (url, timeoutMs, log) {
 }
 
 /*
- * Fetch an image and return it as a data URI, or say why not.
+ * What kind of picture a buffer holds, from its first bytes, as the MIME type
+ * the browser would want -- or "" for anything that is not a picture Chromium
+ * can draw.
+ *
+ * The bytes are the truth; the Content-Type header is not. Samo names a
+ * stored cover after the extension it guessed from the feed's own header when
+ * it downloaded it, and serves anything it did not guess -- a .gif, an .avif,
+ * a .bin from a feed that said `image/jpg` or `binary/octet-stream` -- as
+ * `application/octet-stream`. That is how a show with a perfectly good cover
+ * had none on the wall: the header was believed over the picture, 1,100
+ * times in a fortnight. The signatures below are the ones any image decoder
+ * checks first, and the same ones the browser would sniff itself if the
+ * server's helmet did not forbid it.
+ */
+function sniffImageType (buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 8) {
+    return "";
+  }
+
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "image/png";
+  }
+
+  const head = buffer.subarray(0, 12).toString("latin1");
+
+  if (head.startsWith("GIF87a") || head.startsWith("GIF89a")) {
+    return "image/gif";
+  }
+
+  if (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP") {
+    return "image/webp";
+  }
+
+  /* ISO base media: a box length, then "ftyp" and the brand. */
+  if (head.slice(4, 8) === "ftyp" && /^(avif|avis)$/.test(head.slice(8, 12))) {
+    return "image/avif";
+  }
+
+  /* An SVG is text: an XML prologue, or the element itself, near the top. */
+  if (/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(
+    buffer.subarray(0, 512).toString("utf8")
+  )) {
+    return "image/svg+xml";
+  }
+
+  return "";
+}
+
+/*
+ * Fetch an image and return its bytes and what kind of picture they are, or
+ * say why not.
  *
  * The bytes are pulled here, in the server process, rather than letting the
  * browser load the URL directly. Two reasons, and the first is the important
@@ -312,7 +398,12 @@ async function getExternalJSON (url, timeoutMs, log) {
  * A samo-relative path is fetched from baseUrl with the token. An absolute URL
  * is somebody else's server -- a station's logo on its own CDN -- and gets no
  * Authorization header: sending samo's token to a third party would be a
- * credential leak, and they would not want it anyway.
+ * credential leak, and they would not want it anyway. A samo path that
+ * redirects off the box -- a feed cover samo could not keep -- is followed,
+ * and fetch drops the Authorization header at the origin boundary on its own.
+ *
+ * The picture's type comes from its bytes, never from the response header;
+ * see sniffImageType for the show that taught us that.
  *
  * Failure is a `reason` rather than a throw or a bare null: every caller has a
  * sensible answer for "no picture", but the journal deserves to know why the
@@ -327,7 +418,7 @@ async function fetchImage (config, target) {
     headers.Authorization = `Bearer ${config.token}`;
   }
 
-  const failure = (reason) => ({ dataUri: "", reason });
+  const failure = (reason) => ({ bytes: null, type: "", reason });
 
   try {
     const response = await fetch(url, {
@@ -341,15 +432,9 @@ async function fetchImage (config, target) {
       return failure(`HTTP ${response.status}`);
     }
 
-    const type = text(response.headers.get("content-type")) || "image/jpeg";
+    const bytes = Buffer.from(await response.arrayBuffer());
 
-    if (!type.startsWith("image/")) {
-      return failure(`not an image (${type})`);
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    if (buffer.length === 0) {
+    if (bytes.length === 0) {
       return failure("empty response");
     }
 
@@ -357,13 +442,21 @@ async function fetchImage (config, target) {
      * Dropped rather than truncated: a card with no picture is fine, a card
      * with half a picture is not.
      */
-    if (buffer.length > MAX_ARTWORK_BYTES) {
+    if (bytes.length > MAX_ARTWORK_BYTES) {
       return failure(
-        `${buffer.length} bytes is over the ${MAX_ARTWORK_BYTES}-byte ceiling`
+        `${bytes.length} bytes is over the ${MAX_ARTWORK_BYTES}-byte ceiling`
       );
     }
 
-    return { dataUri: `data:${type};base64,${buffer.toString("base64")}`, reason: "" };
+    const type = sniffImageType(bytes);
+
+    if (!type) {
+      const claimed = text(response.headers.get("content-type")) || "no content-type";
+
+      return failure(`not a picture the browser can draw (served as ${claimed})`);
+    }
+
+    return { bytes, type, reason: "" };
   } catch (error) {
     if (error.name === "TimeoutError" || error.name === "AbortError") {
       return failure(`no answer in ${config.timeoutMs} ms`);
@@ -371,6 +464,115 @@ async function fetchImage (config, target) {
 
     return failure(error.message);
   }
+}
+
+/* Where the browser finds the pictures the helper holds. Served by node_helper. */
+const ARTWORK_ROUTE = "/nowplaying/artwork";
+
+/*
+ * The pictures the helper has fetched, kept for the browser to load by URL.
+ *
+ * A card used to carry its cover inline, as a base64 data URI, which put a
+ * ceiling on the picture: every byte of it travelled in every notification
+ * and sat in the DOM, so anything over half a megabyte was refused -- and
+ * some covers are eight. Holding the bytes here and handing the card a URL
+ * under ARTWORK_ROUTE lifts that. The token still never reaches the page:
+ * the browser asks this process, not samo, and the id is a hash of the
+ * picture itself, so nothing on the LAN can make the helper fetch anything.
+ *
+ * Bounded by bytes, oldest out first, and a picture asked for again moves to
+ * the back of the queue. Entries are looked up by the URL the card carries as
+ * well as by id, so a cache that still names a picture can check the bytes
+ * are here before promising them to the browser -- see artworkAlive.
+ */
+function createArtworkStore (budget = ARTWORK_STORE_BYTES) {
+  const entries = new Map();
+  let held = 0;
+
+  const idOf = (url) => {
+    const match = new RegExp(`^${ARTWORK_ROUTE}/([0-9a-f]{24})$`).exec(text(url));
+
+    return match ? match[1] : "";
+  };
+
+  return {
+    /* Keep a picture; answer the URL the browser loads it by. */
+    put (bytes, type) {
+      const id = crypto.createHash("sha1").update(bytes).digest("hex").slice(0, 24);
+      const existing = entries.get(id);
+
+      if (existing) {
+        /* Freshly wanted: to the back of the queue. */
+        entries.delete(id);
+        entries.set(id, existing);
+        return `${ARTWORK_ROUTE}/${id}`;
+      }
+
+      entries.set(id, { bytes, type });
+      held += bytes.length;
+
+      while (held > budget && entries.size > 1) {
+        const oldest = entries.keys().next().value;
+
+        held -= entries.get(oldest).bytes.length;
+        entries.delete(oldest);
+      }
+
+      return `${ARTWORK_ROUTE}/${id}`;
+    },
+
+    /* The bytes and type behind an id, or null. */
+    get (id) {
+      return entries.get(text(id)) || null;
+    },
+
+    /* Whether a URL the card carries still leads to a picture here. */
+    holds (url) {
+      return entries.has(idOf(url));
+    },
+
+    get size () {
+      return entries.size;
+    },
+
+    get bytes () {
+      return held;
+    }
+  };
+}
+
+/* The store a caller that brought none of its own gets; see pollNowPlaying. */
+let fallbackStore = null;
+
+function sharedArtworkStore () {
+  if (!fallbackStore) {
+    fallbackStore = createArtworkStore();
+  }
+
+  return fallbackStore;
+}
+
+/*
+ * Whether a remembered artwork URL is still good: empty means "no picture",
+ * which is always still true; anything else must still be in the store, or
+ * the browser would be sent to a 404 and the card would be blank until the
+ * cache entry expired.
+ */
+function artworkAlive (store, url) {
+  return !url || store.holds(url);
+}
+
+/*
+ * Fetch a picture into the store and answer the URL the browser loads it by,
+ * or "" with the reason logged by the caller.
+ */
+async function storeImage (config, store, target) {
+  const result = await fetchImage(config, target);
+
+  return {
+    url: result.bytes ? store.put(result.bytes, result.type) : "",
+    reason: result.reason
+  };
 }
 
 /*
@@ -439,8 +641,10 @@ function samoPathOf (config, target) {
  * publish under /api/v1/ -- gets one try through samo, which answers 404 in a
  * millisecond over loopback, and is then fetched as the outsider it is. The
  * token only ever travels to baseUrl either way.
+ *
+ * Answers the URL the browser loads the picture by, into `store`, or "".
  */
-async function artworkFor (config, rawURL, log) {
+async function artworkFor (config, rawURL, store, log) {
   const target = text(rawURL);
 
   if (!target) {
@@ -451,7 +655,7 @@ async function artworkFor (config, rawURL, log) {
   const foreign =
     /^https?:\/\//i.test(target) && !target.startsWith(`${config.baseUrl}/`);
 
-  let result = { dataUri: "", reason: "" };
+  let result = { url: "", reason: "" };
 
   if (local) {
     /*
@@ -461,15 +665,15 @@ async function artworkFor (config, rawURL, log) {
      */
     const separator = local.includes("?") ? "&" : "?";
 
-    result = await fetchImage(config, `${local}${separator}width=${ARTWORK_WIDTH}`);
+    result = await storeImage(config, store, `${local}${separator}width=${ARTWORK_WIDTH}`);
   }
 
   /* Only a URL that named some other host is worth a second opinion. */
-  if (!result.dataUri && (!local || foreign)) {
-    result = await fetchImage(config, target);
+  if (!result.url && (!local || foreign)) {
+    result = await storeImage(config, store, target);
   }
 
-  if (!result.dataUri) {
+  if (!result.url) {
     /*
      * Samo said there was a picture and the wall could not produce it. That is
      * the one artwork failure worth a line in the journal -- it is a broken
@@ -480,20 +684,23 @@ async function artworkFor (config, rawURL, log) {
     log.warn(`[NowPlaying] Could not fetch artwork ${target}: ${result.reason}`);
   }
 
-  return result.dataUri;
+  return result.url;
 }
 
 /*
- * Resolve an itemRef into the album line and a cover.
+ * Resolve an itemRef into the album line, a cover, and -- for an episode --
+ * when it came out.
  *
  * Refs come in four shapes (internal/channels: `track:`, `episode:`, `stream:`
  * and `station:`). The first two are looked up for the album line -- the third
  * line of the card, which exists nowhere else -- so this runs for every new
- * track. The cover is a fallback: samo names the picture itself in the device
- * state, and only when it named nothing is one deduced here. For a track or an
- * episode that is the album's or the show's; for a relayed station it is the
- * station's own cover or logo, which is the least a card for it should show.
- * A `stream:` ref is a bare URL with nothing to look up.
+ * track. An episode's record also says when the feed published it, which the
+ * card shows and nothing else carries. The cover is a fallback: samo names
+ * the picture itself in the device state, and only when it named nothing is
+ * one deduced here. For a track or an episode that is the album's or the
+ * show's; for a relayed station it is the station's own cover or logo, which
+ * is the least a card for it should show. A `stream:` ref is a bare URL with
+ * nothing to look up.
  */
 async function resolveRefDetail (config, ref, log) {
   const [kind, ...rest] = ref.split(":");
@@ -519,6 +726,7 @@ async function resolveRefDetail (config, ref, log) {
     return {
       album: text(track.albumTitle),
       artist: text(track.displayArtist),
+      publishedAt: "",
       artworkPath: albumId
         ? `/api/v1/music/albums/${encodeURIComponent(albumId)}/cover`
         : ""
@@ -542,6 +750,8 @@ async function resolveRefDetail (config, ref, log) {
       /* The show is the "album" of a podcast -- same slot, same meaning. */
       album: text(episode.podcastTitle),
       artist: "",
+      /* When the feed put it out. Absent from a feed that never said. */
+      publishedAt: instantOf(episode.publishedAt),
       artworkPath: showId
         ? `/api/v1/podcasts/shows/${encodeURIComponent(showId)}/cover`
         : ""
@@ -552,6 +762,7 @@ async function resolveRefDetail (config, ref, log) {
     return {
       album: "",
       artist: "",
+      publishedAt: "",
       artworkPath: await resolveStationArtwork(config, id, log)
     };
   }
@@ -633,8 +844,8 @@ function createDetailCache (limit = ARTWORK_CACHE_LIMIT, clock = Date.now) {
 }
 
 /*
- * Fill in the album line and the cover for a card that already knows what is
- * playing.
+ * Fill in the album line, the cover and an episode's release for a card that
+ * already knows what is playing.
  *
  * Deliberately additive: `now` is already complete and showable before this
  * runs, and every failure in here leaves it that way. Nothing here is allowed
@@ -650,24 +861,31 @@ function createDetailCache (limit = ARTWORK_CACHE_LIMIT, clock = Date.now) {
  * enough to predate the field, and they deduce what they can from the item
  * ref, which for a relayed station is nothing.
  *
- * `extras.channelNow` is the channel's now-playing document when the caller
- * has already fetched it for the rows under the card; it saves asking twice
- * in one poll and changes nothing else.
+ * `store` is the artwork store the picture's bytes go into and the browser
+ * reads them back from; the card carries the URL. `extras.channelNow` is the
+ * channel's now-playing document when the caller has already fetched it for
+ * the rows under the card; it saves asking twice in one poll and changes
+ * nothing else.
  */
-async function decorate (config, now, cache, log, extras = {}) {
+async function decorate (config, now, cache, store, log, extras = {}) {
   const cached = cache.get(now.key);
 
-  if (cached) {
+  /*
+   * A remembered card is only as good as its picture: the store is bounded
+   * separately, and a URL it has since let go of would be a blank frame. That
+   * is a miss, and costs one fetch.
+   */
+  if (cached && artworkAlive(store, cached.artwork)) {
     return { ...now, ...cached };
   }
 
-  const detail = { album: now.album, artwork: "" };
+  const detail = { album: now.album, artwork: "", publishedAt: "" };
 
   /* The picture we set out to fetch, whoever named it. */
   let wanted = now.artwork;
 
   if (wanted) {
-    detail.artwork = await artworkFor(config, wanted, log);
+    detail.artwork = await artworkFor(config, wanted, store, log);
   }
 
   /*
@@ -716,9 +934,11 @@ async function decorate (config, now, cache, log, extras = {}) {
           detail.album = "";
         }
 
+        detail.publishedAt = resolved.publishedAt || "";
+
         if (!wanted && resolved.artworkPath) {
           wanted = resolved.artworkPath;
-          detail.artwork = await artworkFor(config, wanted, log);
+          detail.artwork = await artworkFor(config, wanted, store, log);
         }
       }
     }
@@ -726,7 +946,19 @@ async function decorate (config, now, cache, log, extras = {}) {
     wanted = await resolveStationArtwork(config, now.sourceId, log);
 
     if (wanted) {
-      detail.artwork = await artworkFor(config, wanted, log);
+      detail.artwork = await artworkFor(config, wanted, store, log);
+    }
+  } else if (now.source === "queue" && text(now.itemRef).startsWith("episode:")) {
+    /*
+     * An episode cast from a phone arrives with its title, its show and its
+     * cover already on the item, and not the one thing the card wants that
+     * the item does not carry: when it came out. One lookup per episode,
+     * remembered with the rest for as long as it plays.
+     */
+    const resolved = await resolveRefDetail(config, now.itemRef, log);
+
+    if (resolved) {
+      detail.publishedAt = resolved.publishedAt || "";
     }
   }
 
@@ -882,10 +1114,11 @@ async function stationSchedule (config, station, programmes, log) {
 }
 
 /*
- * A show's cover for the due row, as a small data URI, or "" -- remembered
- * per show rather than per episode, because that is what it is a picture of.
+ * A show's cover for the due row, as a URL into the artwork store, or "" --
+ * remembered per show rather than per episode, because that is what it is a
+ * picture of.
  */
-async function showCover (config, podcastId, covers, log) {
+async function showCover (config, podcastId, covers, store, log) {
   const id = text(podcastId);
 
   if (!id) {
@@ -895,12 +1128,14 @@ async function showCover (config, podcastId, covers, log) {
   const key = `cover:${id}`;
   const hit = covers.get(key);
 
-  if (hit) {
+  /* A remembered URL the store has since let go of is a miss; see decorate. */
+  if (hit && artworkAlive(store, hit.value)) {
     return hit.value;
   }
 
-  const result = await fetchImage(
+  const result = await storeImage(
     config,
+    store,
     `/api/v1/podcasts/shows/${encodeURIComponent(id)}/cover?width=${DUE_ARTWORK_WIDTH}`
   );
 
@@ -912,15 +1147,15 @@ async function showCover (config, podcastId, covers, log) {
    */
   const missing = result.reason === "HTTP 404";
 
-  if (!result.dataUri && !missing) {
+  if (!result.url && !missing) {
     log.warn(`[NowPlaying] Could not fetch the cover of show ${id} for the due row: ${result.reason}`);
   }
 
-  covers.set(key, { value: result.dataUri }, {
-    retryAfterMs: result.dataUri || missing ? COVER_TTL_MS : COVER_RETRY_MS
+  covers.set(key, { value: result.url }, {
+    retryAfterMs: result.url || missing ? COVER_TTL_MS : COVER_RETRY_MS
   });
 
-  return result.dataUri;
+  return result.url;
 }
 
 /*
@@ -928,7 +1163,7 @@ async function showCover (config, podcastId, covers, log) {
  * `{ tiles, pending }`. Two documents that change slowly and are remembered
  * accordingly, then one small picture per show that is remembered for a day.
  */
-async function gatherDue (config, channelId, currentRef, programmes, covers, log) {
+async function gatherDue (config, channelId, currentRef, programmes, covers, store, log) {
   const encoded = encodeURIComponent(channelId);
 
   const fetchSources = () => getJSON(config, `/api/v1/channels/${encoded}/sources`, log);
@@ -959,7 +1194,7 @@ async function gatherDue (config, channelId, currentRef, programmes, covers, log
 
   const tiles = await Promise.all(due.tiles.map(async (tile) => ({
     ...tile,
-    artwork: await showCover(config, tile.podcastId, covers, log)
+    artwork: await showCover(config, tile.podcastId, covers, store, log)
   })));
 
   return { tiles, pending: due.pending };
@@ -1115,6 +1350,15 @@ async function pollNowPlaying (configDir, options = {}, log = console) {
   const upNext = options.upNext !== false;
 
   /*
+   * Where the pictures go. The helper owns one and serves it to the browser;
+   * a caller without one shares a store nobody serves, which is fine for a
+   * check that only wants the card. Shared rather than fresh per call, because
+   * a cache that remembers a URL is only worth having while the store behind
+   * it is the same one.
+   */
+  const artworks = options.artworks || sharedArtworkStore();
+
+  /*
    * A tuned channel's now-playing says when its current item ends, which is
    * a row under the card; a cast channel's was fetched by the lookup above.
    * Asked once per item -- see channelNowFor -- and handed on to the
@@ -1126,7 +1370,7 @@ async function pollNowPlaying (configDir, options = {}, log = console) {
     channelNow = await channelNowFor(config, now, programmes, log);
   }
 
-  const decorated = await decorate(config, now, cache, log, { channelNow });
+  const decorated = await decorate(config, now, cache, artworks, log, { channelNow });
 
   if (!upNext) {
     return { ...decorated, next: [], due: { tiles: [], pending: 0 } };
@@ -1142,6 +1386,7 @@ async function pollNowPlaying (configDir, options = {}, log = console) {
       text(channelNow?.current?.itemRef),
       programmes,
       options.covers || createDetailCache(COVER_CACHE_LIMIT),
+      artworks,
       log
     )
     : { tiles: [], pending: 0 };
@@ -1163,6 +1408,10 @@ module.exports = {
   pollNowPlaying,
   loadSamoConfig,
   createDetailCache,
+  createArtworkStore,
+  sniffImageType,
+  ARTWORK_ROUTE,
+  ARTWORK_STORE_BYTES,
   decorate,
   gatherUpNext,
   gatherDue,

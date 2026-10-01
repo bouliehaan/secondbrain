@@ -1,10 +1,17 @@
-# Wait briefly for the NVIDIA output to appear, then enable it.
+# The wall's monitor, on whichever output it is plugged into: the first one
+# xrandr reports connected. Naming the output broke when the NVIDIA card came
+# out -- and xrandr exits 0 on an output it cannot find, so it never retried.
+# Waits up to fifteen seconds for an output to show up.
 for i in $(seq 1 15); do
-    xrandr --output HDMI-1-0 \
-        --mode 1920x1080 \
-        --rate 60 \
-        --primary &&
+    output="$(xrandr --query | awk '$2 == "connected" { print $1; exit }')"
+
+    if [ -n "$output" ] &&
+        xrandr --output "$output" \
+            --mode 1920x1080 \
+            --rate 60 \
+            --primary; then
         break
+    fi
 
     sleep 1
 done
@@ -13,10 +20,29 @@ xset s off
 xset -dpms
 xset s noblank
 
-picom -b &
+# openbox-autostart runs this file with sh, not bash: POSIX only.
+
+# The clock is a transparent window, and only a compositor makes it one;
+# without picom X paints it as a black box over the page. picom 12 (Ubuntu
+# 26.04) refuses to start without a backend named, where 11 defaulted to
+# xrender, so name it.
+picom -b --backend xrender &
 unclutter -idle 0.5 -root &
-/usr/bin/calendar-kiosk &
+
+# The .deb installs these under /usr/bin, scripts/deploy.sh under
+# /usr/local/bin. Start whichever this box has, the hand-deployed one first.
+start_installed() {
+    for dir in /usr/local/bin /usr/bin; do
+        if [ -x "$dir/$1" ]; then
+            "$dir/$1" &
+            return 0
+        fi
+    done
+    echo "autostart: $1 is not installed" >&2
+}
+
+start_installed calendar-kiosk
 
 # BEGIN MAGICMIRROR PYTHON CLOCK
-/usr/bin/magicmirror-python-clock.py &
+start_installed magicmirror-python-clock.py
 # END MAGICMIRROR PYTHON CLOCK

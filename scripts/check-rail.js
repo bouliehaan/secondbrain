@@ -7,8 +7,9 @@
  * These need no browser and no mirror: they hand RailLogic.allocate the
  * heights Rail.js would have measured and read the counts back. The cases
  * worth guarding are the promises the rail makes -- the rest of today is
- * always listed, every card stack keeps a card, nothing is drawn in part --
- * and the order things give way in when those promises collide.
+ * always listed whole, every card stack keeps a card, nothing is drawn in
+ * part -- and the order everything else gives way in when those promises
+ * collide, with today never among the things that give.
  *
  *   node scripts/check-rail.js
  */
@@ -31,7 +32,7 @@ function check (name, condition, detail = "") {
  * Building blocks, in the sizes the wall actually draws them.
  * ---------------------------------------------------------------------- */
 
-const CLOCK = { id: "clock", height: 86 };
+const CLOCK = { id: "clock", height: 86, keep: true };
 const FREEZE = { id: "freeze", height: 78 };
 const WEATHER = { id: "weather", height: 112 };
 const RADIO = { id: "nowplaying", height: 72 };
@@ -80,8 +81,13 @@ const sum = (xs) => xs.reduce((a, b) => a + b, 0);
 /* What a result costs, worked out independently of the library's own sum. */
 function costOf (m, r) {
   const parts = [];
+  const hidden = new Set(r.hidden || []);
 
   for (const b of m.blocks) {
+    if (hidden.has(b.id)) {
+      continue;
+    }
+
     if (b.list) {
       const n = r.lists[b.list] || 0;
       if (n > 0 || b.standalone) parts.push(b.base + sum(b.items.slice(0, n)));
@@ -115,6 +121,54 @@ function costOf (m, r) {
 
 function run () {
   console.log("\nRail layout checks\n");
+
+  {
+    // Captured at 1920x1080 with two transfers shown and a third held back.
+    // Tomorrow's heading + first event fit by 0.078125px. A blanket 2px
+    // reserve incorrectly left 55.671875px blank below today's events.
+    const fs = require("node:fs");
+    const vm = require("node:vm");
+    let renderer;
+    vm.runInNewContext(fs.readFileSync(require.resolve("../modules/Rail/Rail.js"), "utf8"), {
+      Module: { register: (_name, definition) => { renderer = definition; } }
+    });
+    const m = model([
+      CLOCK,
+      { id: "weather", height: 107.75 },
+      { id: "forecast", list: "forecast", base: 27.25, items: [28, 28, 28, 28, 28, 28, 27] },
+      { id: "nowplaying", standalone: true, base: 72.859375, sections: [
+        { list: "upnext", base: 9, items: [22] },
+        { list: "due", base: 13, items: [30] }
+      ] },
+      { id: "secondbrain", base: 0, sections: [
+        { list: "transfers", base: 30.5, items: [86.0625, 92.0625, 92.0625] }
+      ] },
+      { id: "schedule", base: 27.25, more: 0, days: [
+        { base: 31.59375, items: [24, 24, 24, 24, 24], today: true },
+        { base: 31.59375, items: [24, 24, 24, 24, 24, 24] }
+      ] }
+    ], 1056 - renderer.defaults.slackPx);
+    const r = Rail.allocate(m);
+    check("two transfers leave room for tomorrow's first event", r.lists.transfers === 2 && r.schedule.days === 2 && r.schedule.tail?.events === 1, JSON.stringify(r));
+    check("the captured rail fills without clipping", r.fits && r.height - r.cost < 1, JSON.stringify(r));
+  }
+
+  {
+    // The live rail left 74px below tomorrow: a new day and an event fit,
+    // but a separate overflow line made Rail reject both. A heading count
+    // costs no vertical space and must let the next day's first row in.
+    const agenda = { ...schedule([day(3, { today: true }), day(8), day(7)]), more: 0 };
+    const blocks = [CLOCK, WEATHER, forecast(), RADIO, agenda];
+    const firstTwo = Rail.allocate(model(blocks), { ladder: [["forecast", "all"], ["schedule", 2]] });
+    const m = model(blocks, firstTwo.cost + 74);
+    const r = Rail.allocate(m);
+    check("74 spare pixels show the next day's event instead of blank space", r.schedule.days === 3 && r.schedule.tail.events === 1, JSON.stringify(r));
+    check("the heading reports the other six events", r.schedule.tail.more === 6, JSON.stringify(r.schedule));
+    check("the remainder is smaller than another event", r.height - r.cost < 26 && r.fits, JSON.stringify(r));
+
+    const crowded = Rail.allocate({ ...m, height: firstTwo.cost - 100 });
+    check("compact counts still protect all of today when crowded", crowded.schedule.days >= 1 && !(crowded.schedule.days === 1 && crowded.schedule.tail), JSON.stringify(crowded));
+  }
 
   /* ------------------------------------------------------------------ *
    * A quiet day: everything fits, so everything is shown.
@@ -151,16 +205,16 @@ function run () {
   }
 
   /* ------------------------------------------------------------------ *
-   * The ladder: what the leftover goes to, in order.
+   * The ladder: what the leftover goes to, in order. Today is the floor and
+   * tomorrow is the leftover; everything between goes up whole, in order.
    * ------------------------------------------------------------------ */
 
   {
     /*
      * Clock 86, weather 112, forecast min 58, messages 30+72 = 102, schedule
      * base 42 + today 37+52 = 131; four gaps 40: 529 before the ladder.
-     * Leftover 525 for: tomorrow (37+26=63), forecast to 2 (28), messages 2
-     * (78), day 3 (63), forecast to 3 (28), messages 3 (78), forecast to 5
-     * (55), then all remaining days.
+     * Leftover 525 for: messages 2 and 3 (78 each), the forecast's other
+     * four rows (111), then tomorrow (37+26=63) and every day after.
      */
     const m = model([
       CLOCK, WEATHER, forecast(),
@@ -175,11 +229,9 @@ function run () {
   {
     /*
      * Same rail, 300 pixels less: 754 total, 529 spoken for, 225 left.
-     * Ladder: tomorrow 63 (162 left), forecast to 2 -> 28 (134 left),
-     * messages 2 -> 78 (56 left), day 3 -> 63 does not fit and a partial
-     * needs 37 + 26 + 24 = 87, no; forecast to 3 -> 28 (28 left); messages
-     * 3 -> 78, no; forecast to 5 -> the fourth row is exactly 28 and fits,
-     * the fifth does not.
+     * Ladder: every text first -> 78 + 78 (69 left); the forecast whole ->
+     * 28 + 28 fit (13 left) and the fourth row does not; tomorrow -> 63,
+     * no, and a partial needs 37 + 26 + 24 = 87, no; nothing fits in 13.
      */
     const m = model([
       CLOCK, WEATHER, forecast(),
@@ -188,11 +240,112 @@ function run () {
     ], 754);
     const r = Rail.allocate(m);
 
-    check("tomorrow comes before the second message", r.schedule.days >= 2, JSON.stringify(r.schedule));
-    check("the second message comes before the third forecast row", r.lists.messages === 2 && r.lists.forecast >= 3, JSON.stringify(r.lists));
-    check("a rung that does not fit is left out, not squeezed in", r.schedule.days === 2 && r.schedule.tail === null, JSON.stringify(r.schedule));
-    check("a rung takes the whole items that do fit and leaves the rest", r.lists.forecast === 4, JSON.stringify(r.lists));
+    check("every text comes before tomorrow", r.lists.messages === 3, JSON.stringify(r.lists));
+    check("the forecast comes before tomorrow", r.lists.forecast > 1 && r.schedule.days === 1, JSON.stringify(r));
+    check("a rung takes the whole items that do fit and leaves the rest", r.lists.forecast === 3, JSON.stringify(r.lists));
+    check("a rung that does not fit is left out, not squeezed in", r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
     check("what is left over is less than the smallest thing that wanted it", m.height - r.cost < 27, `${m.height - r.cost}px spare`);
+  }
+
+  {
+    /*
+     * At 900: texts to 685, the forecast whole to 796, tomorrow to 859; the
+     * day after (63) does not fit in the 41 left, and with one row it has
+     * no partial to offer.
+     */
+    const m = model([
+      CLOCK, WEATHER, forecast(),
+      secondbrain({ messages: 3 }),
+      schedule([day(2, { today: true }), day(1), day(1), day(1), day(1)])
+    ], 900);
+    const r = Rail.allocate(m);
+
+    check("with the forecast whole, the days take what is left one at a time", r.lists.forecast === 5 && r.schedule.days === 2, JSON.stringify(r));
+    check("what is left over is less than the next day", m.height - r.cost < 63, `${m.height - r.cost}px spare`);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * The wall on the evening of 2026-09-13, as it measured itself: three
+   * events left today, seven tomorrow, a package, a download, the radio on,
+   * and two test texts. It showed one text and three rows of tomorrow.
+   * ------------------------------------------------------------------ */
+
+  {
+    const wall = (texts) => ({ height: 1054, gap: 10, blocks: [
+      { id: "clock", height: 89, keep: true },
+      { id: "weather", height: 107.75 },
+      { id: "forecast", list: "forecast", base: 27.25, items: [28, 28, 28, 28, 27] },
+      { id: "nowplaying", standalone: true, base: 72.86, sections: [
+        { list: "upnext", base: 9, items: [22] },
+        { list: "due", base: 13, items: [30] }
+      ] },
+      { id: "secondbrain", base: 0, sections: [
+        { list: "messages", base: 30.5, items: [72, 78, 78].slice(0, texts) },
+        { list: "inbound", base: 40.5, items: [69.06] },
+        { list: "transfers", base: 40.5, items: [86.06] }
+      ] },
+      { id: "schedule", base: 27.25, more: 21.59, days: [
+        { base: 36.59, items: [22, 24, 24], today: true },
+        { base: 31.59, items: [24, 24, 24, 24, 24, 24, 24] },
+        { base: 31.59, items: [24, 24, 24, 24, 24, 24, 24, 24, 24] }
+      ] }
+    ] });
+
+    const r = Rail.allocate(wall(2));
+
+    check("the wall of 2026-09-13: both texts, and today whole", r.lists.messages === 2 && r.schedule.days >= 1 && r.schedule.tail === null && r.fits, JSON.stringify(r));
+    check("tomorrow gave way to the second text, not the other way round", r.schedule.days === 1, JSON.stringify(r.schedule));
+
+    const asItWas = Rail.allocate(wall(2), { ladder: [["upnext", 1], ["due", 1], ["schedule", 2], ["forecast", 2], ["messages", 2]] });
+    check("(with tomorrow ahead of the texts, as the order once was, the second text lost)", asItWas.lists.messages === 1 && asItWas.schedule.days === 2 && asItWas.schedule.tail !== null, JSON.stringify(asItWas));
+
+    const three = Rail.allocate(wall(3));
+    check("a third text still comes before tomorrow", three.lists.messages === 3 && three.schedule.days === 1, JSON.stringify(three));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * The same wall on an ordinary day: one text, a package, a download, the
+   * radio on with a row and its covers, three events left today and seven
+   * tomorrow. Until 2026-09-19 the order put tomorrow on the fourth rung,
+   * and this rail showed three rows of tomorrow, "+ 4 more", and a forecast
+   * cut to its first row; the other four rows of the week's weather were
+   * what tomorrow had cost.
+   * ------------------------------------------------------------------ */
+
+  {
+    const wall = () => ({ height: 1054, gap: 10, blocks: [
+      { id: "clock", height: 86, keep: true },
+      { id: "weather", height: 107.75 },
+      { id: "forecast", list: "forecast", base: 27.25, items: [28, 28, 28, 28, 27] },
+      { id: "nowplaying", standalone: true, base: 72.86, sections: [
+        { list: "upnext", base: 9, items: [22] },
+        { list: "due", base: 13, items: [30] }
+      ] },
+      { id: "secondbrain", base: 0, sections: [
+        { list: "messages", base: 30.5, items: [72] },
+        { list: "inbound", base: 40.5, items: [69.06] },
+        { list: "transfers", base: 40.5, items: [86.06] }
+      ] },
+      { id: "schedule", base: 27.25, more: 21.59, days: [
+        { base: 36.59, items: [22, 24, 24], today: true },
+        { base: 31.59, items: [24, 24, 24, 24, 24, 24, 24] },
+        { base: 31.59, items: [24, 24, 24, 24, 24, 24, 24, 24, 24] }
+      ] }
+    ] });
+
+    const r = Rail.allocate(wall());
+
+    check("an ordinary day: the week's weather is whole", r.lists.forecast === 5, JSON.stringify(r.lists));
+    check("the radio's row and its covers are up", r.lists.upnext === 1 && r.lists.due === 1, JSON.stringify(r.lists));
+    check("today is whole and tomorrow, which does not fit, is left to the grid", r.schedule.days === 1 && r.schedule.tail === null && r.fits, JSON.stringify(r.schedule));
+
+    const asItWas = Rail.allocate(wall(), { ladder: [
+      ["messages", "all"], ["upnext", 1], ["due", 1], ["schedule", 2], ["forecast", 2], ["inbound", 2],
+      ["upnext", "all"], ["schedule", 3], ["forecast", 3], ["inbound", 3], ["forecast", 5], ["transfers", "all"], ["schedule", "all"]
+    ] });
+    check("(with tomorrow on the fourth rung, as the order was, the forecast lost four rows to three of tomorrow)",
+      asItWas.lists.forecast === 1 && asItWas.schedule.days === 2 && asItWas.schedule.tail !== null && asItWas.schedule.tail.events === 3,
+      JSON.stringify(asItWas));
   }
 
   /* ------------------------------------------------------------------ *
@@ -200,8 +353,12 @@ function run () {
    * ------------------------------------------------------------------ */
 
   {
-    /* 218 + 58+10 + 42 + today 63 = 391 of 500; 109 left. Tomorrow whole is 37+8*26 = 245. */
-    const m = model([CLOCK, WEATHER, forecast(), schedule([day(1, { today: true }), day(8)])], 500);
+    /*
+     * 218 + 58+10 + 42 + today 63 = 391, and the forecast's other four rows
+     * 111: 502 of 600; 98 left. Tomorrow whole is 37+8*26 = 245; two rows
+     * and the line are 37+52+24 = 113; one row and the line, 87.
+     */
+    const m = model([CLOCK, WEATHER, forecast(), schedule([day(1, { today: true }), day(8)])], 600);
     const r = Rail.allocate(m);
 
     check("a day too long for the space is shown in part", r.schedule.days === 2 && r.schedule.tail !== null, JSON.stringify(r.schedule));
@@ -212,8 +369,8 @@ function run () {
   }
 
   {
-    /* Not even one row of tomorrow fits: 391 of 420; 29 left; a row and the line need 37+26+24. */
-    const m = model([CLOCK, WEATHER, forecast(), schedule([day(1, { today: true }), day(8)])], 420);
+    /* Not even one row of tomorrow fits: 502 of 580; 78 left; a row and the line need 37+26+24 = 87. */
+    const m = model([CLOCK, WEATHER, forecast(), schedule([day(1, { today: true }), day(8)])], 580);
     const r = Rail.allocate(m);
 
     check("a day with no room for a single row is left off entirely", r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
@@ -254,42 +411,92 @@ function run () {
 
   {
     /*
-     * 881 without transfers, inbound and forecast. At 800, today gives way
-     * from its end: each row taken is 26 back, the line costs 24, so the
-     * first row taken buys 2 and each after it 26. 881 -> 879 -> 853 -> 827 -> 801 -> 775.
+     * Without transfers, inbound and forecast: clock 86, freeze 78, weather
+     * 112, radio 72, the message 102, today 391; five gaps 50: 891. Today's
+     * own rows are never on the list. At 850 the radio card goes, whole,
+     * with its gap: 809.
      */
+    const r = Rail.allocate(heavy(12, 850));
+
+    check("then the radio card goes, whole", r.hidden.join() === "nowplaying" && r.lists.messages === 1, JSON.stringify(r));
+    check("today is still whole", r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
+    check("it fits", r.fits && costOf(heavy(12, 850), r) <= 850);
+  }
+
+  {
+    /* 809 at 800: the last message goes too, with its gap: 697. */
     const r = Rail.allocate(heavy(12, 800));
 
-    check("only then does today lose rows, from the end", r.schedule.days === 1 && r.schedule.tail !== null, JSON.stringify(r.schedule));
-    check("with a count of what was taken", r.schedule.tail && r.schedule.tail.events === 7 && r.schedule.tail.more === 5, JSON.stringify(r.schedule.tail));
-    check("the message card outlasts today's tail", r.lists.messages === 1);
-    check("it fits", r.fits && costOf(r === null ? null : heavy(12, 800), r) <= 800);
+    check("then the last message -- and today has not lost a row", r.lists.messages === 0 && r.schedule.days >= 1 && r.schedule.tail === null, JSON.stringify(r));
+    check("what the message could not use, tomorrow can", r.schedule.days === 2, JSON.stringify(r.schedule));
+    check("in that order", r.sacrificed.join() === "transfers,inbound,forecast,nowplaying,messages", JSON.stringify(r.sacrificed));
+    check("it fits", r.fits && costOf(heavy(12, 800), r) <= 800);
   }
 
   {
-    /*
-     * Today down to its header and the line. Clock, freeze, weather, radio
-     * 348, the message 102, five gaps 50: 500 before the schedule, whose
-     * header and today's are 79 and the line 24 -- 603. One row more is 629.
-     */
-    const r = Rail.allocate(heavy(12, 610));
+    /* 697 at 690: the weather goes: 575. */
+    const r = Rail.allocate(heavy(12, 690));
 
-    check("today's floor is its header and the line", r.schedule.days === 1 && r.schedule.tail && r.schedule.tail.events === 0 && r.schedule.tail.more === 12, JSON.stringify(r.schedule));
-    check("the message is the last card standing", r.lists.messages === 1 && r.lists.inbound === 0 && r.lists.transfers === 0);
+    check("then the weather", r.hidden.includes("weather") && !r.hidden.includes("freeze"), JSON.stringify(r.hidden));
+    check("today is still whole even then", r.schedule.days >= 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
+    check("it fits", r.fits && costOf(heavy(12, 690), r) <= 690);
   }
 
   {
-    const r = Rail.allocate(heavy(12, 560));
+    /* 575 at 570: the freeze card is the very last thing to go: 487. */
+    const r = Rail.allocate(heavy(12, 570));
 
-    check("the message card is the very last thing to go", r.lists.messages === 0 && r.sacrificed.includes("messages"), JSON.stringify(r));
-    check("what cannot fit is reported as not fitting", r.fits === (r.cost <= 560));
+    check("the freeze card is the last thing to go", r.hidden.includes("freeze") && r.sacrificed[r.sacrificed.length - 1] === "freeze", JSON.stringify(r));
+    check("leaving the clock and all of today", r.hidden.length === 3 && !r.hidden.includes("clock") && r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r));
+    check("it fits", r.fits && costOf(heavy(12, 570), r) <= 570);
+  }
+
+  {
+    const r = Rail.allocate(heavy(12, 480));
+
+    check("a rail that cannot fit today under the clock says so", r.fits === false && r.overflow > 0, JSON.stringify(r));
+    check("and still lists all of today rather than a row less", r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
+    check("the clock is never hidden", !r.hidden.includes("clock"), JSON.stringify(r.hidden));
   }
 
   {
     const r = Rail.allocate(heavy(12, 100));
 
-    check("a rail that cannot fit its floor says so", r.fits === false && r.overflow > 0, JSON.stringify(r));
-    check("and the schedule still has today's header", r.schedule.days === 1);
+    check("even a rail far too small keeps today whole", r.fits === false && r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * The day the rule is for: a full day, the cards up, the radio on.
+   * ------------------------------------------------------------------ */
+
+  {
+    /*
+     * Eighteen events left today, a text, a package, the radio with its rows
+     * and covers, a freeze warning. Nothing but the clock and today has a
+     * claim to a pixel until today is listed whole.
+     */
+    const m = model([
+      CLOCK, FREEZE, WEATHER, forecast(), radio(),
+      secondbrain({ messages: 2, inbound: 1 }),
+      schedule([day(18, { today: true }), day(3), day(2)])
+    ]);
+    const r = Rail.allocate(m);
+
+    check("on a full day every one of today's events is listed", r.schedule.days >= 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
+    check("and it is the cards that gave way", r.sacrificed.length > 0 && !r.sacrificed.includes("schedule"), JSON.stringify(r.sacrificed));
+    check("it fits", r.fits && costOf(m, r) <= m.height, `${costOf(m, r)} into ${m.height}`);
+
+    /* And when the day gets fuller still. */
+    for (const n of [20, 24, 28, 32]) {
+      const fuller = model([
+        CLOCK, FREEZE, WEATHER, forecast(), radio(),
+        secondbrain({ messages: 2, inbound: 1 }),
+        schedule([day(n, { today: true }), day(3)])
+      ]);
+      const rr = Rail.allocate(fuller);
+
+      check(`${n} events left today are all listed`, rr.schedule.days >= 1 && rr.schedule.tail === null && rr.fits, JSON.stringify(rr));
+    }
   }
 
   /* ------------------------------------------------------------------ *
@@ -356,9 +563,33 @@ function run () {
       secondbrain({ messages: 1, inbound: 1, transfers: 1 }),
       schedule([day(12, { today: true })])
     ], 940);
-    const r = Rail.allocate(m, { sacrifice: ["schedule", "transfers", "inbound", "forecast", "messages"] });
+    const r = Rail.allocate(m, { sacrifice: ["messages", "schedule", "transfers", "inbound", "forecast"] });
 
-    check("the giving-way order can be changed from config", r.schedule.tail !== null && r.lists.transfers === 1, JSON.stringify(r));
+    check("the giving-way order can be changed from config", r.sacrificed[0] === "messages" && r.lists.messages === 0, JSON.stringify(r));
+    check("but naming the schedule changes nothing: today is still whole", r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
+    check("and the next name is taken instead", r.lists.transfers === 0, JSON.stringify(r.lists));
+  }
+
+  {
+    const m = model([CLOCK, WEATHER, forecast(), schedule([day(30, { today: true })])], 400);
+    const r = Rail.allocate(m, { sacrifice: ["clock", "weather", "forecast"] });
+
+    check("naming the clock changes nothing either", !r.hidden.includes("clock") && r.hidden.includes("weather"), JSON.stringify(r));
+  }
+
+  {
+    /*
+     * A minimum of three days puts two beyond the floor, and those can still
+     * give way from the end -- the last day's row behind "+ 1 more" (which
+     * saves only 2), then the day -- but today cannot. Clock 86, schedule 42
+     * + today 37+52 + two days of 37+26: 257; one gap: 353.
+     */
+    const m = model([CLOCK, schedule([day(2, { today: true }), day(1), day(1)])], 340);
+    const r = Rail.allocate(m, { minimums: { schedule: 3 }, ladder: [], sacrifice: ["schedule"] });
+
+    check("days beyond the floor can give way", r.schedule.floor === 1 && r.schedule.days < 3, JSON.stringify(r.schedule));
+    check("today cannot", r.schedule.days >= 1 && !(r.schedule.tail && r.schedule.days === 1), JSON.stringify(r.schedule));
+    check("it fits", r.fits);
   }
 
   /* ------------------------------------------------------------------ *
@@ -376,23 +607,36 @@ function run () {
 
   {
     /*
-     * Clock 86, weather 112, forecast 58, card 78, messages 102, schedule
-     * 42 + 37 + 52 = 131; five gaps 50: 617. With 660 there is room for the
-     * first row (10 + 22, to 649) and nothing else -- not the covers (43),
-     * not tomorrow (63), not a second forecast row (28).
+     * Clock 86, weather 112, forecast 58, card 78, one message 102, schedule
+     * 42 + 37 + 52 = 131; five gaps 50: 617. The forecast's other four rows
+     * are 111, to 728; then the first row (10 + 22) to 760, the covers (43)
+     * to 803, the second row (22) to 825, tomorrow (63) to 888. Each height
+     * below is two pixels past one of those, which nothing after it fits in.
      */
-    const m = model([CLOCK, WEATHER, forecast(), radio(), secondbrain({ messages: 3 }), schedule([day(2, { today: true }), day(1)])], 660);
-    const r = Rail.allocate(m);
+    const rail = (height) => model([CLOCK, WEATHER, forecast(), radio(), secondbrain({ messages: 1 }), schedule([day(2, { today: true }), day(1)])], height);
 
-    check("the first row is the first rung of the ladder, ahead of the covers and tomorrow", r.lists.upnext === 1 && r.lists.due === 0 && r.schedule.days === 1 && r.lists.forecast === 1, JSON.stringify(r));
+    const a = Rail.allocate(rail(730));
+    check("with the texts up, the forecast is next, ahead of the radio's rows", a.lists.forecast === 5 && a.lists.upnext === 0 && a.lists.due === 0 && a.schedule.days === 1, JSON.stringify(a));
+
+    const b = Rail.allocate(rail(762));
+    check("then the radio's first row, ahead of the covers and tomorrow", b.lists.forecast === 5 && b.lists.upnext === 1 && b.lists.due === 0 && b.schedule.days === 1, JSON.stringify(b));
+
+    const c = Rail.allocate(rail(805));
+    check("then the covers", c.lists.upnext === 1 && c.lists.due === 1 && c.schedule.days === 1, JSON.stringify(c));
+
+    const d = Rail.allocate(rail(827));
+    check("then the second row", d.lists.upnext === 2 && d.lists.due === 1 && d.schedule.days === 1, JSON.stringify(d));
+
+    const e = Rail.allocate(rail(890));
+    check("and tomorrow last of all", e.lists.upnext === 2 && e.lists.due === 1 && e.schedule.days === 2 && e.schedule.tail === null, JSON.stringify(e));
   }
 
   {
-    /* 649 + 43 = 692 for the covers; 700 fits them and nothing after. */
-    const m = model([CLOCK, WEATHER, forecast(), radio(), secondbrain({ messages: 3 }), schedule([day(2, { today: true }), day(1)])], 700);
+    /* 83 spare pixels with a second text waiting: the text takes them (78) and neither a forecast row nor the radio's row fits in what is left. */
+    const m = model([CLOCK, WEATHER, forecast(), radio(), secondbrain({ messages: 2 }), schedule([day(2, { today: true }), day(1)])], 700);
     const r = Rail.allocate(m);
 
-    check("the covers come next, ahead of tomorrow", r.lists.upnext === 1 && r.lists.due === 1 && r.schedule.days === 1, JSON.stringify(r));
+    check("but a second text comes before the forecast and the radio's row", r.lists.messages === 2 && r.lists.forecast === 1 && r.lists.upnext === 0 && r.lists.due === 0, JSON.stringify(r.lists));
   }
 
   {
@@ -407,18 +651,18 @@ function run () {
   {
     /*
      * The second row waits its turn. The floor with a package is 721 (617
-     * plus the inbound section, 40 + 64); then the first row (32), the
-     * covers (43), tomorrow (63), tomorrow's forecast row (28), the second
-     * message (78) and the second package (70) -- 1035 -- and only then the
-     * 22 of the second row, to 1057.
+     * plus the inbound section, 40 + 64); then the texts (78 + 78, to 877),
+     * the forecast (111, to 988), the first row (32), the covers (43), the
+     * second package (70) -- 1133 -- and only then the 22 of the second
+     * row, to 1155; tomorrow (63) after that.
      */
-    const m = model([CLOCK, WEATHER, forecast(), radio(), secondbrain({ messages: 3, inbound: 2 }), schedule([day(2, { today: true }), day(1), day(1)])], 1060);
+    const m = model([CLOCK, WEATHER, forecast(), radio(), secondbrain({ messages: 3, inbound: 2 }), schedule([day(2, { today: true }), day(1), day(1)])], 1157);
     const r = Rail.allocate(m);
 
-    check("the second row comes after the second message and the second package", r.lists.upnext === 2 && r.lists.due === 1 && r.lists.messages === 2 && r.lists.inbound === 2, JSON.stringify(r.lists));
+    check("the second row comes after the texts, the forecast and the second package", r.lists.upnext === 2 && r.lists.due === 1 && r.lists.messages === 3 && r.lists.forecast === 5 && r.lists.inbound === 2 && r.schedule.days === 1, JSON.stringify(r));
 
-    const tighter = Rail.allocate({ ...m, height: 1050 });
-    check("and not before them", tighter.lists.upnext === 1 && tighter.lists.due === 1 && tighter.lists.messages === 2 && tighter.lists.inbound === 2, JSON.stringify(tighter.lists));
+    const tighter = Rail.allocate({ ...m, height: 1150 });
+    check("and not before them", tighter.lists.upnext === 1 && tighter.lists.due === 1 && tighter.lists.messages === 3 && tighter.lists.inbound === 2, JSON.stringify(tighter.lists));
   }
 
   {
@@ -426,8 +670,9 @@ function run () {
     const m = model([CLOCK, FREEZE, WEATHER, forecast(), radio(), secondbrain({ messages: 1, inbound: 1, transfers: 1 }), schedule([day(14, { today: true })])], 900);
     const r = Rail.allocate(m);
 
-    check("when the floor gives way the rows and covers are already gone and the card is still there", r.lists.upnext === 0 && r.lists.due === 0 && r.fits && costOf(m, r) === r.cost, JSON.stringify(r));
+    check("when the floor gives way the rows and covers are already gone, and the card goes whole in its turn", r.lists.upnext === 0 && r.lists.due === 0 && r.hidden.includes("nowplaying") && r.fits && costOf(m, r) === r.cost, JSON.stringify(r));
     check("neither is in the giving-way order, having nothing to give", !r.sacrificed.includes("upnext") && !r.sacrificed.includes("due"), JSON.stringify(r.sacrificed));
+    check("and today is whole", r.schedule.days === 1 && r.schedule.tail === null, JSON.stringify(r.schedule));
   }
 
   {
@@ -482,6 +727,14 @@ function run () {
         bad = `tail does not add up: ${JSON.stringify(r.schedule)}`;
       } else if (r.schedule.tail && r.schedule.tail.events === 0 && !r.sacrificed.includes("schedule")) {
         bad = `an empty tail outside a sacrifice: ${JSON.stringify(r.schedule)}`;
+      } else if (r.schedule.days < r.schedule.floor || (r.schedule.tail && r.schedule.days <= r.schedule.floor)) {
+        bad = `today is not whole: ${JSON.stringify(r.schedule)}`;
+      } else if (r.hidden.includes("clock")) {
+        bad = `the clock was hidden: ${JSON.stringify(r)}`;
+      } else if (86 + 10 + 42 + days[0].base + sum(days[0].items) <= m.height && !r.fits) {
+        bad = `today would fit under the clock alone but the rail does not fit: ${JSON.stringify(r)}`;
+      } else if (r.fits && r.sacrificed.length === 0 && r.hidden.length > 0) {
+        bad = `hidden without a sacrifice: ${JSON.stringify(r)}`;
       } else {
         for (const [id, n] of Object.entries(r.lists)) {
           const own = blocks.flatMap((b) => b.list ? [b] : (b.sections || [])).find((l) => l.list === id)?.items
@@ -499,7 +752,7 @@ function run () {
       }
     }
 
-    check("2000 random rails: cost adds up, fits is honest, the floor holds when it can, tails add up", bad === null, bad || "");
+    check("2000 random rails: cost adds up, fits is honest, today is always whole, the clock stays, tails add up", bad === null, bad || "");
   }
 }
 

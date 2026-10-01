@@ -85,14 +85,17 @@ module.exports = NodeHelper.create({
       stateDir: "/var/lib/magicmirror-secondbrain",
       maxItems: 3,
       maxPackageItems: 3,
+      maxDownloadItems: 3,
       packageStaleAfterHours: 36,
       pollIntervalMs: MINIMUM_POLL_INTERVAL_MS
     };
 
     this.timer = null;
+    this.timerIntervalMs = null;
     this.polling = false;
     this.lastPollAt = 0;
     this.published = false;
+    this.lastUpdate = null;
     this.webhookItems = new Map();
 
     if (this.expressApp) {
@@ -192,6 +195,16 @@ module.exports = NodeHelper.create({
         ),
 
         /*
+         * Active torrents and recent finishes. This used to go unforwarded,
+         * and the library's fallback of one meant the wall never showed a
+         * second download whatever the config said.
+         */
+        maxDownloadItems: Math.max(
+          0,
+          Number(payload?.maxDownloadItems ?? 3)
+        ),
+
+        /*
          * How long a shipment stays on the wall after the last mail about it.
          * Zero or absent falls back to the library default.
          */
@@ -208,7 +221,27 @@ module.exports = NodeHelper.create({
 
       this.publishCached();
       this.schedulePolling();
-      this.pollNow();
+
+      /*
+       * The browser's config is not a request to poll. MagicMirror calls a
+       * module's resume() on every show(), the frontend shows itself on every
+       * update that changes a card, and its resume() sends this config again --
+       * so each poll that changed anything used to start the next one at once,
+       * past the floor. A download's rate changes on every poll, and from
+       * midnight to seven on 2026-09-26 the cards changed on every poll: a
+       * fresh Gmail and Proton login every seven seconds, some three thousand
+       * of them. A page that has just loaded still needs something to draw, so
+       * it gets the last answer again; a poll that is due runs as it always
+       * did.
+       */
+      if (Date.now() - this.lastPollAt >= this.config.pollIntervalMs) {
+        this.pollNow();
+      } else if (this.lastUpdate) {
+        this._sendSanitizedSocketNotification(
+          "SECOND_BRAIN_UPDATE",
+          this.lastUpdate
+        );
+      }
 
       return;
     }
@@ -255,6 +288,7 @@ module.exports = NodeHelper.create({
         {
           maxItems: this.config.maxItems,
           maxPackageItems: this.config.maxPackageItems,
+          maxDownloadItems: this.config.maxDownloadItems,
           packageStaleAfterHours: this.config.packageStaleAfterHours
         },
         console
@@ -285,9 +319,20 @@ module.exports = NodeHelper.create({
   },
 
   schedulePolling() {
+    /*
+     * Only when the interval changes. The config arrives again on every
+     * resume, and restarting the timer each time would keep pushing the next
+     * poll back -- often enough, forever.
+     */
+    if (this.timer && this.timerIntervalMs === this.config.pollIntervalMs) {
+      return;
+    }
+
     if (this.timer) {
       clearInterval(this.timer);
     }
+
+    this.timerIntervalMs = this.config.pollIntervalMs;
 
     this.timer = setInterval(
       () => this.pollNow(),
@@ -309,6 +354,7 @@ module.exports = NodeHelper.create({
         {
           maxItems: this.config.maxItems,
           maxPackageItems: this.config.maxPackageItems,
+          maxDownloadItems: this.config.maxDownloadItems,
           packageStaleAfterHours: this.config.packageStaleAfterHours,
           stateDir: this.config.stateDir
         },
@@ -344,21 +390,26 @@ module.exports = NodeHelper.create({
 
       this.published = true;
 
+      this.lastUpdate = {
+        items: finalItems,
+
+        /*
+         * Per-source health for the status line under the calendar: which
+         * of Gmail, Proton and Transmission answered, how long the poll
+         * took, and how often one is due -- so the line can say when the
+         * next is late. The frontend re-broadcasts it; the items diff there
+         * ignores it, so an unchanged wall still gets a fresh poll time.
+         */
+        status: getLastPollStatus()
+          ? { ...getLastPollStatus(), intervalMs: this.config.pollIntervalMs }
+          : null,
+
+        generatedAt: Date.now()
+      };
+
       this._sendSanitizedSocketNotification(
         "SECOND_BRAIN_UPDATE",
-        {
-          items: finalItems,
-
-          /*
-           * Per-source health for the status line under the calendar: which
-           * of Gmail, Proton and Transmission answered, and how long the poll
-           * took. The frontend re-broadcasts it; the items diff there ignores
-           * it, so an unchanged wall still gets a fresh poll time.
-           */
-          status: getLastPollStatus(),
-
-          generatedAt: Date.now()
-        }
+        this.lastUpdate
       );
     } catch (error) {
       console.error(

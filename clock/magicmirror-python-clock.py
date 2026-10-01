@@ -8,9 +8,10 @@ browser, drawing the kernel's time -- which chrony keeps against NIST -- on a
 because the browser's clock drifted, and nothing about how it keeps time has
 changed since it went in. Only how it looks has.
 
-What it draws, top right of the wall, in Rajdhani to match the page:
+What it draws, top right of the wall, in Orbitron with a slashed zero
+and Rajdhani supporting labels to match the page:
 
-    3:42:07 PM
+    03:42:07 PM
     FRI SEP 11 // SUNSET 7:14 PM
 
 Colours and the sun line come from a small JSON file MMM-SolarTheme's helper
@@ -31,41 +32,55 @@ time.tzset()
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib, Pango
 
-# The face the page uses. Pango takes points: at 96 dpi 63pt is the 84px the
-# stylesheet draws the hidden browser clock at, so this window fills exactly
-# the space the page reserves for it.
-FONT_TIME = "Rajdhani SemiBold 63"
+# Orbitron supplies the wide, square numerals and slashed zero naturally.
+# Fit one font size at startup; keep it unchanged for every displayed time.
+TIME_FAMILY = "Orbitron Medium"
 FONT_PERIOD = "Rajdhani SemiBold 20"
 FONT_DATE = "Rajdhani SemiBold 13"
 TIME_PX = 84
 DATE_PX = 17.3
 
-# Rajdhani carries Devanagari, so its line box is a quarter taller than the
-# Latin digits need: the ascender is 0.930 em but the caps stop at 0.643 em,
-# so at 84px there are 24px of nothing above the numerals and 29px below the
-# baseline, and a label drawn where it lands puts all of that on the wall as
-# padding. So the labels are placed by their ink instead: the numerals' caps
-# sit exactly at the top of the window, the date line a fixed gap under the
-# baseline, and the window is only as tall as the ink. The two numbers are
-# the font's own (OS/2 typo ascender and cap height, per 1000 units).
+# Keep the supporting labels' original Rajdhani metrics and date gap.
+# The time's own font padding is measured once at construction.
 FONT_ASCENT = 0.930
 FONT_CAP = 0.643
 DATE_GAP = 10       # from the numerals' baseline to the top of the date line
-WINDOW_WIDTH = 460
+WINDOW_WIDTH = 420  # custom.css --dashboard-sidebar
 
-# Rajdhani has no tabular figures: a "1" is 0.327 em wide and a "4" is 0.533,
-# so a right-aligned "3:41:07" shifted left and right as the seconds ticked
-# over. Every character of the time therefore sits in its own cell of fixed
-# width -- the widest digit's, or the colon's -- centred, the way a tabular
-# font would set it. The cells are placed once; a tick changes what is in a
-# cell, never where the cell is. The template is H H : M M : S S, and the
-# first hour cell is empty from one o'clock to nine.
+# Orbitron is proportional. Reserve its widest digit's natural advance for
+# each numeral so narrow digits do not move their neighbours. Colons retain
+# their own natural advance. There is no extra tracking or glyph stretching.
 PERIOD_PX = 26.7
-DIGIT_W = 45        # 0.533 em at 84px, rounded up
-COLON_W = 17        # 0.199 em at 84px, rounded up
 PERIOD_W = 40       # "AM" is 39.1px and "PM" 38.5px at 20pt, tracked
 PERIOD_GAP = 2      # the last digit's cell already carries its own side bearing
 TIME_CELLS = ("d", "d", ":", "d", "d", ":", "d", "d")
+TIME_WIDTH = WINDOW_WIDTH - PERIOD_W - PERIOD_GAP
+TIME_HEIGHT = round(FONT_CAP * TIME_PX)
+
+
+def fit_time_font(widget):
+    """Choose the largest unchanged Orbitron face that fits every time."""
+    layout = widget.create_pango_layout("")
+    font = Pango.FontDescription(TIME_FAMILY)
+    # Measure actual Pango allocations, including pixel rounding. This runs
+    # only at construction, never on a tick or an hour/AM/PM transition.
+    for pixels in range(TIME_HEIGHT * 2, 0, -1):
+        font.set_absolute_size(pixels * Pango.SCALE)
+        layout.set_font_description(font)
+        digit_width = 0
+        for digit in "0123456789":
+            layout.set_text(digit, -1)
+            _, logical = layout.get_pixel_extents()
+            digit_width = max(digit_width, logical.width)
+        layout.set_text(":", -1)
+        _, logical = layout.get_pixel_extents()
+        colon_width = logical.width
+        layout.set_text("0123456789", -1)
+        ink, _ = layout.get_pixel_extents()
+        if 6 * digit_width + 2 * colon_width <= TIME_WIDTH and ink.height <= TIME_HEIGHT:
+            return font.to_string(), -ink.y, digit_width, colon_width
+    raise RuntimeError("Clock font cannot fit the reserved time row")
+
 
 # Dark values, matching custom.css; the state file overrides them by daylight.
 DEFAULT_INK = "#eeeff0"
@@ -118,32 +133,24 @@ class ClockWindow(Gtk.Window):
 
         self.set_app_paintable(True)
 
-        # Two labels on a fixed canvas, each moved to where its ink belongs
-        # (see the metrics above). Rows, in window pixels:
-        #   numerals' caps  0 .. 54          label top at -24
-        #   baseline        54
-        #   date line caps  64 .. 75         label top at 59
+        # Keep the existing 54px time row and date placement so the dashboard
+        # below the clock does not move. Place the time by its measured ink.
         caps = FONT_CAP * TIME_PX
-        self.time_y = -round((FONT_ASCENT - FONT_CAP) * TIME_PX)
+        self.time_font, self.time_y, digit_width, colon_width = fit_time_font(self)
         self.date_y = round(caps + DATE_GAP - (FONT_ASCENT - FONT_CAP) * DATE_PX)
         self.win_width = WINDOW_WIDTH
         self.win_height = round(caps + DATE_GAP + FONT_CAP * DATE_PX) + 2
 
         self.canvas = Gtk.Fixed()
 
-        # The time, one label per cell, right-aligned as a block to the edge
-        # of the window with the AM/PM cell after it. Positions are fixed at
-        # construction and never move. GTK allocates a label taller than its
-        # text and centres the text in that; pinning yalign to the top is
-        # what makes the ink land on the rows computed above.
+        # Digit positions and font size stay fixed, including when a "1"
+        # replaces a wider numeral. The whole row fits the 420px rail.
         self.period_y = round(caps - FONT_ASCENT * PERIOD_PX)
-        block_width = sum(DIGIT_W if kind == "d" else COLON_W for kind in TIME_CELLS)
-        block_x = self.win_width - PERIOD_W - PERIOD_GAP - block_width
-
         self.cells = []
-        x = block_x
+        block_width = 6 * digit_width + 2 * colon_width
+        x = TIME_WIDTH - block_width
         for kind in TIME_CELLS:
-            width = DIGIT_W if kind == "d" else COLON_W
+            width = colon_width if kind == ":" else digit_width
             cell = Gtk.Label()
             cell.set_size_request(width, -1)
             cell.set_xalign(0.5)
@@ -165,7 +172,15 @@ class ClockWindow(Gtk.Window):
         self.date_label.set_yalign(0.0)
         self.canvas.put(self.date_label, 0, self.date_y)
 
-        self.add(self.canvas)
+        # Overlay children do not contribute their font line boxes to the
+        # window's preferred size. Only the reserved clock rectangle does;
+        # the labels' invisible descenders must not extend over the rail.
+        face = Gtk.DrawingArea()
+        face.set_size_request(self.win_width, self.win_height)
+        overlay = Gtk.Overlay()
+        overlay.add(face)
+        overlay.add_overlay(self.canvas)
+        self.add(overlay)
 
         # What each label last showed, so a tick only touches what changed.
         self.cell_markup = [None] * len(self.cells)
@@ -217,7 +232,7 @@ class ClockWindow(Gtk.Window):
         # time.strftime queries the OS kernel time directly, which chrony keeps perfectly synced.
         # Seconds at full size and weight, so the reference clock reads as one number;
         # AM/PM small and tracked after it, the way the page's tags are set.
-        clock_str = time.strftime("%I:%M:%S").lstrip('0')
+        clock_str = time.strftime("%I:%M:%S")
         period = time.strftime("%p")
         date_str = time.strftime("%a %b ") + str(int(time.strftime("%d")))
         date_str = date_str.upper()
@@ -231,14 +246,9 @@ class ClockWindow(Gtk.Window):
         else:
             date_line = GLib.markup_escape_text(date_str)
 
-        # The time, one character per cell, padded on the left so the minutes
-        # and seconds always land in the same cells whatever the hour's width.
-        chars = clock_str.rjust(len(TIME_CELLS))
-        for index, char in enumerate(chars):
-            markup = (
-                f'<span font="{FONT_TIME}" foreground="{ink}">{char}</span>'
-                if char != " " else ""
-            )
+        # A fixed HH:MM:SS face: changing digits never resizes the row.
+        for index, char in enumerate(clock_str):
+            markup = f'<span font="{self.time_font}" foreground="{ink}">{char}</span>'
             if markup != self.cell_markup[index]:
                 self.cells[index].set_markup(markup)
                 self.cell_markup[index] = markup

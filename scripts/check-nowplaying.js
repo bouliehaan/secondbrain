@@ -31,15 +31,39 @@ const {
 
 const {
   pollNowPlaying,
+  gatherDue,
   createDetailCache,
+  createArtworkStore,
+  sniffImageType,
+  ARTWORK_ROUTE,
+  ARTWORK_RETRY_MS,
+  MAX_ARTWORK_BYTES,
   channelNowFor,
   gatherUpNext,
   ttlUntil,
   BOUNDARY_MIN_TTL_MS,
   ITEM_TTL_MS,
-  PROGRAMME_TTL_MS,
-  ARTWORK_RETRY_MS
+  PROGRAMME_TTL_MS
 } = require("../modules/NowPlaying/lib/samo-client.js");
+
+/*
+ * Whether a card's artwork is a picture the browser will get: a URL under the
+ * helper's artwork route, with bytes of the given type behind it in `store`.
+ * The card never carries the bytes -- see createArtworkStore for why -- so a
+ * check that wants to know what arrived has to look where the browser would.
+ */
+function pictureBehind (store, artwork) {
+  const match = typeof artwork === "string" &&
+    new RegExp(`^${ARTWORK_ROUTE}/([0-9a-f]{24})$`).exec(artwork);
+
+  return match ? store.get(match[1]) : null;
+}
+
+function hasPicture (store, card, type = "image/png") {
+  const picture = pictureBehind(store, card?.artwork);
+
+  return Boolean(picture) && picture.type === type;
+}
 
 const {
   resolveUpNext,
@@ -56,18 +80,48 @@ const {
 
 /*
  * MagicMirror's NodeHelper, reduced to the contract the helper uses: `create`
- * copies the module definition onto an instance, and sendSocketNotification is
- * what reaches the browser. On the mirror `require("node_helper")` resolves
- * through MagicMirror's module aliases; here it resolves to this, so the real
- * node_helper.js can be started, asked and read without a server behind it.
+ * copies the module definition onto an instance, sendSocketNotification is
+ * what reaches the browser, and `expressApp` is the web server the helper
+ * hangs its artwork route on -- here, a recorder of routes, each of which a
+ * check can call with a request of its own making. On the mirror
+ * `require("node_helper")` resolves through MagicMirror's module aliases; here
+ * it resolves to this, so the real node_helper.js can be started, asked and
+ * read without a server behind it.
  */
 class FakeNodeHelper {
   constructor () {
     this.sent = [];
+    this.routes = new Map();
+    this.expressApp = {
+      get: (route, handler) => this.routes.set(route, handler)
+    };
   }
 
   sendSocketNotification (notification, payload) {
     this.sent.push({ notification, payload });
+  }
+
+  /* GET a path through the recorded routes, as express would; answers what was sent. */
+  request (path) {
+    const answer = { status: 200, headers: {}, body: null };
+    const res = {
+      status (code) { answer.status = code; return res; },
+      set (name, value) { answer.headers[name.toLowerCase()] = value; return res; },
+      end (body) { answer.body = body === undefined ? null : body; return res; }
+    };
+
+    for (const [route, handler] of this.routes) {
+      const pattern = new RegExp(`^${route.replace(/:(\w+)/g, "(?<$1>[^/]+)")}$`);
+      const match = pattern.exec(path);
+
+      if (match) {
+        handler({ params: match.groups || {} }, res);
+        return answer;
+      }
+    }
+
+    answer.status = 404;
+    return answer;
   }
 
   static create (definition) {
@@ -275,6 +329,11 @@ function run () {
   check(
     "a finite queue item keeps its position, unlike a live stream",
     cast.live === false && cast.positionSeconds === 42 && cast.durationSeconds === 210
+  );
+  check(
+    "a queue card names its item by ref, for the lookups the item does not carry",
+    cast.itemRef === "track:t1",
+    `got ${JSON.stringify(cast.itemRef)}`
   );
 
   /* ---------------------------------------------------------------- *
@@ -626,6 +685,17 @@ function fakeSamo (state, { token = "test-token", extra = null } = {}) {
       return json({
         id: "e-12",
         podcastId: "show-3",
+        podcastTitle: "Comedy Bang Bang: The Podcast",
+        /* RFC 3339 with the feed's own offset, as samo writes it. */
+        publishedAt: "2026-09-13T11:04:00-06:00"
+      });
+    }
+
+    /* A feed that never dated its episode. */
+    if (url === "/api/v1/podcasts/episodes/e-13") {
+      return json({
+        id: "e-13",
+        podcastId: "show-3",
         podcastTitle: "Comedy Bang Bang: The Podcast"
       });
     }
@@ -698,7 +768,8 @@ async function runFetchChecks () {
 
   const cache = createDetailCache();
   const programmes = createDetailCache();
-  const first = await pollNowPlaying(dir, { cache, programmes }, quietLog);
+  const artworks = createArtworkStore();
+  const first = await pollNowPlaying(dir, { cache, programmes, artworks }, quietLog);
 
   check(
     "a channel card is built from the device list in one poll",
@@ -711,10 +782,9 @@ async function runFetchChecks () {
     `got ${JSON.stringify(first.album)}`
   );
   check(
-    "cover art arrives as a data URI, so the browser never needs the token",
-    typeof first.artwork === "string" &&
-      first.artwork.startsWith("data:image/png;base64,"),
-    `got ${JSON.stringify(String(first.artwork).slice(0, 32))}`
+    "cover art is held by the helper and the card carries its URL, so the browser never needs the token",
+    hasPicture(artworks, first) && pictureBehind(artworks, first.artwork).bytes.equals(PNG),
+    `got ${JSON.stringify(String(first.artwork).slice(0, 48))}`
   );
   check(
     "the cover is requested at a thumbnail width rather than full size",
@@ -728,7 +798,7 @@ async function runFetchChecks () {
    * built from and which is remembered like the album is.
    */
   const countBefore = requests.length;
-  const second = await pollNowPlaying(dir, { cache, programmes }, quietLog);
+  const second = await pollNowPlaying(dir, { cache, programmes, artworks }, quietLog);
 
   check(
     "an unchanged track is not looked up again",
@@ -773,7 +843,7 @@ async function runFetchChecks () {
     deviceId: ""
   });
 
-  const pod = await pollNowPlaying(podDir, {}, quietLog);
+  const pod = await pollNowPlaying(podDir, { artworks }, quietLog);
 
   check(
     "a podcast episode keeps its title and show",
@@ -786,13 +856,105 @@ async function runFetchChecks () {
     pod.album === "",
     `got album=${JSON.stringify(pod.album)}`
   );
+  /* The fake serves this one as image/jpeg; the bytes are a PNG, and win. */
   check(
-    "the podcast still gets its show artwork",
-    typeof pod.artwork === "string" && pod.artwork.startsWith("data:image/jpeg;base64,")
+    "the podcast still gets its show artwork, typed by what the bytes are rather than what samo said",
+    hasPicture(artworks, pod, "image/png"),
+    `got ${JSON.stringify(pictureBehind(artworks, pod.artwork)?.type)}`
+  );
+  check(
+    "a podcast card says when the feed published the episode, as one ISO instant",
+    pod.publishedAt === "2026-09-13T17:04:00.000Z",
+    `got ${JSON.stringify(pod.publishedAt)}`
+  );
+  check(
+    "a track has no release to speak of",
+    first.publishedAt === "",
+    `got ${JSON.stringify(first.publishedAt)}`
   );
 
   podSamo.server.close();
   fs.rmSync(podDir, { recursive: true, force: true });
+
+  /*
+   * An episode cast from a phone: the item carries its title, show and cover,
+   * and not when it came out. That is one lookup, remembered with the rest
+   * for as long as the episode plays; an undated feed leaves the card
+   * without a release rather than without a card.
+   */
+  const castEpisode = (ref) => ({
+    deviceName: "Living Room",
+    mode: "queue",
+    status: "playing",
+    positionSeconds: 90,
+    durationSeconds: 5400,
+    item: {
+      ref,
+      title: "Shine The Vinyl",
+      subtitle: "Comedy Bang Bang: The Podcast",
+      artworkUrl: "/api/v1/podcasts/shows/show-3/cover",
+      kind: "episode",
+      durationSeconds: 5400
+    },
+    output: { backend: "alsa", open: true },
+    server: { paired: true }
+  });
+
+  const castSamo = fakeSamo(castEpisode("episode:e-12"));
+  const castPort = await listen(castSamo.server);
+  const castDir = fs.mkdtempSync(path.join(os.tmpdir(), "nowplaying-check-"));
+
+  writeConfig(castDir, {
+    baseUrl: `http://127.0.0.1:${castPort}`,
+    token: "test-token",
+    deviceId: ""
+  });
+
+  const castCache = createDetailCache();
+  const castFirst = await pollNowPlaying(castDir, { cache: castCache, artworks }, quietLog);
+
+  check(
+    "an episode cast from a phone is looked up for when it came out",
+    castFirst !== null && castFirst.source === "queue" &&
+      castFirst.publishedAt === "2026-09-13T17:04:00.000Z",
+    `got ${JSON.stringify(castFirst && [castFirst.source, castFirst.publishedAt])}`
+  );
+  check(
+    "the cast episode's show is still the artist, not repeated as the album",
+    castFirst.artist === "Comedy Bang Bang: The Podcast" && castFirst.album === "",
+    `got ${JSON.stringify([castFirst.artist, castFirst.album])}`
+  );
+
+  const castCount = castSamo.requests.length;
+  await pollNowPlaying(castDir, { cache: castCache, artworks }, quietLog);
+
+  check(
+    "the cast episode is looked up once, not once per poll",
+    !castSamo.requests.slice(castCount).some((url) => url.includes("/podcasts/episodes/")),
+    castSamo.requests.slice(castCount).join(" ")
+  );
+
+  castSamo.server.close();
+
+  const undatedSamo = fakeSamo(castEpisode("episode:e-13"));
+  const undatedPort = await listen(undatedSamo.server);
+
+  writeConfig(castDir, {
+    baseUrl: `http://127.0.0.1:${undatedPort}`,
+    token: "test-token",
+    deviceId: ""
+  });
+
+  const undated = await pollNowPlaying(castDir, {}, quietLog);
+
+  check(
+    "an episode whose feed never dated it keeps its card and shows no release",
+    undated !== null && undated.title === "Shine The Vinyl" && undated.publishedAt === "",
+    `got ${JSON.stringify(undated && [undated.title, undated.publishedAt])}`
+  );
+
+  undatedSamo.server.close();
+  fs.rmSync(castDir, { recursive: true, force: true });
 
   /* A bad token must fail closed and quietly, not render a broken card. */
   const badTokenDir = fs.mkdtempSync(path.join(os.tmpdir(), "nowplaying-check-"));
@@ -879,12 +1041,26 @@ function fakeCDN () {
       return res.end(PNG);
     }
 
+    /* A feed's cover as the feed hosts it: the original, however big. */
+    if (req.url.startsWith("/big.png")) {
+      res.writeHead(200, { "content-type": "image/png" });
+      return res.end(BIG_PNG);
+    }
+
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("no");
   });
 
   return { server, requests };
 }
+
+/*
+ * A picture the old inline ceiling refused. Only the signature has to be
+ * right for the helper to know what it is; the rest is what a 3000x3000
+ * cover mostly is anyway. 700 KB: over the 512 KB that used to be the limit,
+ * well under the ceiling that now only guards memory.
+ */
+const BIG_PNG = Buffer.concat([PNG, Buffer.alloc(700 * 1024)]);
 
 async function runArtworkChecks () {
   console.log("\nNow Playing artwork checks\n");
@@ -949,6 +1125,68 @@ async function runArtworkChecks () {
       return true;
     }
 
+    /*
+     * The show covers the wall had none of, as samo actually serves them --
+     * read off the mirror's journal on 2026-09-18, where these two accounted
+     * for 3,700 "Could not fetch" lines in a fortnight.
+     */
+
+    /* A cover samo saved as .bin (the feed said `image/jpg`) and so serves
+     * as the one type its extension table has no better answer for. */
+    if (url === "/api/v1/podcasts/shows/pod-bin/cover") {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.end(PNG);
+      return true;
+    }
+
+    /* A cover too big for samo's own download cap: samo kept no copy and
+     * sends the wall to the feed's CDN, where `?width=` means nothing. */
+    if (url === "/api/v1/podcasts/shows/pod-huge/cover") {
+      res.writeHead(307, { location: `${cdnUrl}/big.png` });
+      res.end();
+      return true;
+    }
+
+    /* A header that lies the other way: says picture, is a page. */
+    if (url === "/api/v1/podcasts/shows/pod-html/cover") {
+      res.writeHead(200, { "content-type": "image/jpeg" });
+      res.end("<!doctype html><title>Sign in</title>");
+      return true;
+    }
+
+    /* Beyond any picture: what the ceiling is still for. */
+    if (url === "/api/v1/podcasts/shows/pod-giant/cover") {
+      res.writeHead(200, { "content-type": "image/png" });
+      res.end(Buffer.concat([PNG, Buffer.alloc(MAX_ARTWORK_BYTES)]));
+      return true;
+    }
+
+    /* A channel that owes an episode of each of the first two. */
+    if (url === "/api/v1/channels/owing/obligations") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        items: [
+          { channelId: "owing", sourceId: "src-bin", itemRef: "episode:e-bin", title: "Episode 1", tier: "A", state: "pending", settleAt: 1, credit: 0, airings: 0 },
+          { channelId: "owing", sourceId: "src-huge", itemRef: "episode:e-huge", title: "Episode 2", tier: "B", state: "pending", settleAt: 2, credit: 0, airings: 0 }
+        ],
+        pending: 2,
+        total: 2
+      }));
+      return true;
+    }
+
+    if (url === "/api/v1/channels/owing/sources") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        items: [
+          { id: "src-bin", kind: "podcast_subscription", label: "Saved As Bin", config: { podcastId: "pod-bin" }, enabled: true },
+          { id: "src-huge", kind: "podcast_subscription", label: "Too Big For Samo", config: { podcastId: "pod-huge" }, enabled: true }
+        ],
+        total: 2
+      }));
+      return true;
+    }
+
     return false;
   };
 
@@ -978,8 +1216,8 @@ async function runArtworkChecks () {
 
   writeConfig(dir, { baseUrl, token: "test-token", deviceId: "" });
 
-  const isPng = (card) =>
-    typeof card?.artwork === "string" && card.artwork.startsWith("data:image/png;base64,");
+  const artworks = createArtworkStore();
+  const isPng = (card) => hasPicture(artworks, card, "image/png");
   const since = (mark) => requests.slice(mark);
 
   /*
@@ -997,7 +1235,7 @@ async function runArtworkChecks () {
   });
 
   let mark = requests.length;
-  const relay = await pollNowPlaying(dir, {}, quietLog);
+  const relay = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a channel relaying a station gets the picture samo named for it",
@@ -1010,8 +1248,9 @@ async function runArtworkChecks () {
     since(mark).join(" ")
   );
   check(
-    "the browser is never handed a bare artwork URL",
-    !String(relay?.artwork).startsWith("/") && !String(relay?.artwork).startsWith("http")
+    "the browser is never handed samo's URL, only the helper's route to the same picture",
+    String(relay?.artwork).startsWith(`${ARTWORK_ROUTE}/`) &&
+      !String(relay?.artwork).includes("/api/v1/") && !String(relay?.artwork).startsWith("http")
   );
 
   /*
@@ -1028,7 +1267,7 @@ async function runArtworkChecks () {
   });
 
   mark = requests.length;
-  const relayLogo = await pollNowPlaying(dir, {}, quietLog);
+  const relayLogo = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a relayed station samo named no picture for falls back to the station's own cover",
@@ -1053,7 +1292,7 @@ async function runArtworkChecks () {
   });
 
   mark = requests.length;
-  const track = await pollNowPlaying(dir, {}, quietLog);
+  const track = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a catalog track keeps its album line from the track walk",
@@ -1082,7 +1321,7 @@ async function runArtworkChecks () {
   });
 
   mark = requests.length;
-  const uploaded = await pollNowPlaying(dir, {}, quietLog);
+  const uploaded = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "samo's own cover is recognised however the daemon spelled the host",
@@ -1100,7 +1339,7 @@ async function runArtworkChecks () {
   });
 
   const cdnMark = cdn.requests.length;
-  const logo = await pollNowPlaying(dir, {}, quietLog);
+  const logo = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a station's logo on somebody else's server is fetched without our token",
@@ -1120,7 +1359,7 @@ async function runArtworkChecks () {
   });
 
   mark = requests.length;
-  const bridge = await pollNowPlaying(dir, {}, quietLog);
+  const bridge = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "an outside URL that merely looks like samo's falls through to its own host",
@@ -1138,7 +1377,7 @@ async function runArtworkChecks () {
     kind: "track"
   });
 
-  const cast = await pollNowPlaying(dir, {}, quietLog);
+  const cast = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a cast queue item gets its picture through the same path",
@@ -1167,7 +1406,7 @@ async function runArtworkChecks () {
   const noisyLog = { log () {}, warn: (line) => warned.push(line), error () {} };
 
   failCovers = true;
-  const missed = await pollNowPlaying(dir, { cache, programmes }, noisyLog);
+  const missed = await pollNowPlaying(dir, { cache, programmes, artworks }, noisyLog);
 
   check(
     "a cover that fails to fetch leaves the card up without a picture",
@@ -1185,7 +1424,7 @@ async function runArtworkChecks () {
   failCovers = false;
   clock += 10_000;
   mark = requests.length;
-  const soon = await pollNowPlaying(dir, { cache, programmes }, quietLog);
+  const soon = await pollNowPlaying(dir, { cache, programmes, artworks }, quietLog);
 
   check(
     "the failure is remembered for the next few polls rather than retried every ten seconds",
@@ -1194,7 +1433,7 @@ async function runArtworkChecks () {
   );
 
   clock += ARTWORK_RETRY_MS;
-  const retried = await pollNowPlaying(dir, { cache, programmes }, quietLog);
+  const retried = await pollNowPlaying(dir, { cache, programmes, artworks }, quietLog);
 
   check(
     "after the retry window the picture is asked for again and arrives",
@@ -1205,7 +1444,7 @@ async function runArtworkChecks () {
   /* A picture that arrived is kept for good, with no retry clock on it. */
   clock += ARTWORK_RETRY_MS * 10;
   mark = requests.length;
-  const kept = await pollNowPlaying(dir, { cache, programmes }, quietLog);
+  const kept = await pollNowPlaying(dir, { cache, programmes, artworks }, quietLog);
 
   check(
     "a picture that arrived is not fetched again",
@@ -1234,7 +1473,7 @@ async function runArtworkChecks () {
   };
 
   mark = requests.length;
-  const castElvis = await pollNowPlaying(dir, {}, quietLog);
+  const castElvis = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a station cast to the device shows what it is airing, not its name",
@@ -1251,7 +1490,7 @@ async function runArtworkChecks () {
   /* The probe moves on; the device's own report of the item does not. */
   box.station = { ...box.station, nowPlaying: { title: "Burning Love", artist: "Elvis Presley" } };
 
-  const nextElvis = await pollNowPlaying(dir, {}, quietLog);
+  const nextElvis = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "the station is asked again each poll, so the headline follows the probe",
@@ -1262,7 +1501,7 @@ async function runArtworkChecks () {
   /* samo cannot say: the card stays up as the bare item rather than vanishing. */
   box.station = null;
 
-  const unknownElvis = await pollNowPlaying(dir, {}, quietLog);
+  const unknownElvis = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a cast station samo cannot describe is still a card",
@@ -1296,7 +1535,7 @@ async function runArtworkChecks () {
   };
 
   mark = requests.length;
-  const castChannelCard = await pollNowPlaying(dir, {}, quietLog);
+  const castChannelCard = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a channel cast to the device shows what it is airing, with the channel as context",
@@ -1316,12 +1555,148 @@ async function runArtworkChecks () {
     current: { ...box.channelNow.current, title: "Burning Love" }
   };
 
-  const nextChannelCard = await pollNowPlaying(dir, {}, quietLog);
+  const nextChannelCard = await pollNowPlaying(dir, { artworks }, quietLog);
 
   check(
     "a cast channel's headline follows samo's now-playing from poll to poll",
     nextChannelCard?.title === "Burning Love" && nextChannelCard.key !== castChannelCard.key,
     `got ${JSON.stringify(nextChannelCard?.title)}`
+  );
+
+  /*
+   * The podcasts with no artwork, 2026-09-18. Both shows had a cover in samo
+   * and in the app; the wall alone had none, because the helper believed
+   * samo's Content-Type header over the bytes for one and refused the size
+   * of the other. What the bytes are is decided by looking at them, and
+   * their size is the browser's business now that they are served rather
+   * than inlined.
+   */
+  const samples = {
+    jpeg: Buffer.from("ffd8ffe000104a464946", "hex"),
+    gif: Buffer.from("474946383961010001008000", "hex"),
+    webp: Buffer.from("52494646100000005745425056503820", "hex"),
+    avif: Buffer.from("0000001866747970617669660000", "hex"),
+    svg: Buffer.from('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    page: Buffer.from("<!doctype html><html><body>no</body></html>"),
+    short: Buffer.from("GIF89a")
+  };
+
+  check(
+    "a picture is known by its first bytes, whatever the header said",
+    sniffImageType(PNG) === "image/png" && sniffImageType(samples.jpeg) === "image/jpeg" &&
+      sniffImageType(samples.gif) === "image/gif" && sniffImageType(samples.webp) === "image/webp" &&
+      sniffImageType(samples.avif) === "image/avif" &&
+      sniffImageType(samples.svg) === "image/svg+xml",
+    JSON.stringify(Object.fromEntries(Object.entries(samples).map(([k, v]) => [k, sniffImageType(v)])))
+  );
+  check(
+    "and what is not a picture is not one, however it is labelled",
+    sniffImageType(samples.page) === "" && sniffImageType(samples.short) === "" && sniffImageType(null) === ""
+  );
+
+  const showCard = (podcastId) => snapshot({
+    id: podcastId,
+    kind: "channel",
+    name: "Jake Channel",
+    title: "An episode",
+    artist: "A show",
+    artworkUrl: `/api/v1/podcasts/shows/${podcastId}/cover`
+  });
+
+  box.state = showCard("pod-bin");
+  warned.length = 0;
+  const bin = await pollNowPlaying(dir, { artworks }, noisyLog);
+
+  check(
+    "a cover samo serves as application/octet-stream is still the picture it is",
+    isPng(bin) && pictureBehind(artworks, bin.artwork).bytes.equals(PNG) && warned.length === 0,
+    `got ${JSON.stringify(bin?.artwork)}; ${JSON.stringify(warned)}`
+  );
+
+  box.state = showCard("pod-huge");
+  let cdnMark2 = cdn.requests.length;
+  const huge = await pollNowPlaying(dir, { artworks }, noisyLog);
+
+  check(
+    "a cover samo could not keep is followed to the feed's CDN and taken at whatever size it is",
+    isPng(huge) && pictureBehind(artworks, huge.artwork).bytes.length === BIG_PNG.length && warned.length === 0,
+    `got ${JSON.stringify(huge?.artwork)} ${pictureBehind(artworks, huge?.artwork)?.bytes.length}; ${JSON.stringify(warned)}`
+  );
+  check(
+    "and samo's token does not follow the redirect off the box",
+    cdn.requests.slice(cdnMark2).some((r) => r.url.startsWith("/big.png")) &&
+      cdn.requests.slice(cdnMark2).every((r) => r.authorization === ""),
+    JSON.stringify(cdn.requests.slice(cdnMark2))
+  );
+
+  box.state = showCard("pod-html");
+  const page = await pollNowPlaying(dir, { artworks }, noisyLog);
+
+  check(
+    "a header that says picture over a page that is not one is not believed either, and the journal says what was served",
+    page !== null && page.artwork === "" && warned.length === 1 &&
+      warned[0].includes("not a picture") && warned[0].includes("image/jpeg"),
+    `got ${JSON.stringify(page?.artwork)}; ${JSON.stringify(warned)}`
+  );
+
+  box.state = showCard("pod-giant");
+  warned.length = 0;
+  const giant = await pollNowPlaying(dir, { artworks }, noisyLog);
+
+  check(
+    "a picture beyond the ceiling is still dropped whole rather than held",
+    giant !== null && giant.artwork === "" && warned.length === 1 && warned[0].includes("ceiling"),
+    `got ${JSON.stringify(giant?.artwork)}; ${JSON.stringify(warned)}`
+  );
+
+  /* The same two shows in the due row, where most of the journal's lines came from. */
+  const covers = createDetailCache();
+  warned.length = 0;
+  const owing = await gatherDue(
+    { baseUrl, token: "test-token", timeoutMs: 6000 },
+    "owing",
+    "",
+    createDetailCache(),
+    covers,
+    artworks,
+    noisyLog
+  );
+
+  check(
+    "the due row gets both covers: the one served as octet-stream and the one that lives on the feed's CDN",
+    owing.tiles.length === 2 && owing.tiles.every((tile) => hasPicture(artworks, tile, "image/png")) &&
+      pictureBehind(artworks, owing.tiles[1].artwork).bytes.length === BIG_PNG.length && warned.length === 0,
+    `got ${JSON.stringify(owing.tiles.map((t) => [t.show, t.artwork]))}; ${JSON.stringify(warned)}`
+  );
+
+  /*
+   * The caches remember a URL; the store behind it is bounded on its own.
+   * A URL the store has since let go of must count as a miss, or the browser
+   * is sent to a 404 and the tile is blank for a day.
+   */
+  const cramped = createArtworkStore(PNG.length + 1);
+  const crampedCache = createDetailCache();
+
+  box.state = showCard("pod-bin");
+  mark = requests.length;
+  const held = await pollNowPlaying(dir, { cache: crampedCache, artworks: cramped }, quietLog);
+
+  /* Something else pushes it out. */
+  cramped.put(BIG_PNG, "image/png");
+
+  check(
+    "a store past its budget lets the oldest picture go",
+    hasPicture(cramped, held) === false && cramped.size === 1,
+    `size ${cramped.size}, holds ${cramped.holds(held?.artwork)}`
+  );
+
+  mark = requests.length;
+  const back = await pollNowPlaying(dir, { cache: crampedCache, artworks: cramped }, quietLog);
+
+  check(
+    "a remembered card whose picture the store let go of is fetched again rather than sent to a 404",
+    hasPicture(cramped, back) && since(mark).includes("/api/v1/podcasts/shows/pod-bin/cover?width=256"),
+    `got ${JSON.stringify(back?.artwork)}; ${since(mark).join(" ")}`
   );
 
   server.close();
@@ -2656,19 +3031,21 @@ async function runUpNextFetchChecks () {
   const cache = createDetailCache();
   const programmes = createDetailCache();
   const covers = createDetailCache();
+  const artworks = createArtworkStore();
+  const tilePng = (tile) => hasPicture(artworks, tile, "image/png");
 
   /* ---------------------------------------------------------------- *
    * A channel: the programme rides along with the card.
    * ---------------------------------------------------------------- */
 
-  const first = await pollNowPlaying(dir, { cache, programmes, covers }, quietLog);
+  const first = await pollNowPlaying(dir, { cache, programmes, covers, artworks }, quietLog);
 
   check(
     "a channel card carries the episodes it owes, covers and all, in samo's order",
     first && first.due && first.due.pending === 4 && first.due.tiles.length === 4 &&
-      first.due.tiles[0].show === "The Joe Rogan Experience" && first.due.tiles[0].artwork.startsWith("data:image/png;base64,") &&
-      first.due.tiles[1].artwork.startsWith("data:image/png;base64,"),
-    JSON.stringify(first && first.due && first.due.tiles.map((t) => [t.show, t.artwork.slice(0, 20)]))
+      first.due.tiles[0].show === "The Joe Rogan Experience" && tilePng(first.due.tiles[0]) &&
+      tilePng(first.due.tiles[1]),
+    JSON.stringify(first && first.due && first.due.tiles.map((t) => [t.show, t.artwork]))
   );
   check(
     "a show samo has no cover for keeps its tile, as initials",
@@ -2682,7 +3059,7 @@ async function runUpNextFetchChecks () {
   );
   check(
     "a show samo names from its feed keeps that name, its cover, and its hold -- and the wall looked nothing up itself",
-    first.due.tiles[3].show === "DarkHorse Podcast" && first.due.tiles[3].initials === "DP" && first.due.tiles[3].artwork.startsWith("data:image/png") &&
+    first.due.tiles[3].show === "DarkHorse Podcast" && first.due.tiles[3].initials === "DP" && tilePng(first.due.tiles[3]) &&
       first.due.tiles[3].held.rule === "itemSeparation" && !requests.some((u) => u.includes("/podcasts/episodes/")),
     JSON.stringify([first.due.tiles[3], requests.filter((u) => u.includes("/episodes/"))])
   );
@@ -2704,7 +3081,7 @@ async function runUpNextFetchChecks () {
   );
 
   let mark = requests.length;
-  const again = await pollNowPlaying(dir, { cache, programmes, covers }, quietLog);
+  const again = await pollNowPlaying(dir, { cache, programmes, covers, artworks }, quietLog);
 
   check(
     "the next poll of the same track asks samo for the device list and nothing else -- the owed episodes, their covers and names included",
@@ -2724,11 +3101,11 @@ async function runUpNextFetchChecks () {
   await new Promise((resolve) => setTimeout(resolve, 5));
 
   mark = requests.length;
-  const dropped = await pollNowPlaying(dir, { cache, programmes, covers }, quietLog);
+  const dropped = await pollNowPlaying(dir, { cache, programmes, covers, artworks }, quietLog);
 
   check(
     "a new show's first episode arrives at the front with its name and cover, the sources re-read for it",
-    dropped.due.tiles[0].show === "Brand New Show" && dropped.due.tiles[0].artwork.startsWith("data:image/png") && dropped.due.pending === 5 &&
+    dropped.due.tiles[0].show === "Brand New Show" && tilePng(dropped.due.tiles[0]) && dropped.due.pending === 5 &&
       requests.slice(mark).filter((u) => u === "/api/v1/channels/jake/sources").length === 1,
     JSON.stringify([dropped.due.tiles[0], requests.slice(mark)])
   );
@@ -2757,7 +3134,7 @@ async function runUpNextFetchChecks () {
   };
 
   mark = requests.length;
-  const radio4 = await pollNowPlaying(dir, { cache, programmes, covers }, quietLog);
+  const radio4 = await pollNowPlaying(dir, { cache, programmes, covers, artworks }, quietLog);
 
   check(
     "a station owes nothing -- the due row is a channel's alone",
@@ -2781,7 +3158,7 @@ async function runUpNextFetchChecks () {
   );
 
   mark = requests.length;
-  const stillOn = await pollNowPlaying(dir, { cache, programmes, covers }, quietLog);
+  const stillOn = await pollNowPlaying(dir, { cache, programmes, covers, artworks }, quietLog);
 
   check(
     "the station record and its schedule are remembered between polls",
@@ -2811,7 +3188,7 @@ async function runUpNextFetchChecks () {
   };
 
   mark = requests.length;
-  const queued = await pollNowPlaying(dir, { cache, programmes, covers }, quietLog);
+  const queued = await pollNowPlaying(dir, { cache, programmes, covers, artworks }, quietLog);
 
   check(
     "a cast queue's next item needs no request beyond the device list",
@@ -2904,6 +3281,32 @@ async function runHelperChecks () {
     "an unchanged answer is not re-sent between polls",
     helper.sent.length === 2,
     `sent ${helper.sent.length} message(s)`
+  );
+
+  /*
+   * The card names its picture by a URL on this server, and the helper is
+   * what answers it: the bytes it fetched, typed by what they are, told to
+   * be kept. Nothing else -- an id nobody was given is nothing.
+   */
+  const artworkUrl = helper.sent[0].payload.nowPlaying.artwork;
+  const served = helper.request(artworkUrl);
+
+  check(
+    "the card's artwork is a URL on the helper's own route",
+    typeof artworkUrl === "string" && artworkUrl.startsWith(`${ARTWORK_ROUTE}/`),
+    `got ${JSON.stringify(artworkUrl)}`
+  );
+  check(
+    "which serves the picture's bytes, typed by what they are, for the browser to keep",
+    served.status === 200 && Buffer.isBuffer(served.body) && served.body.equals(PNG) &&
+      served.headers["content-type"] === "image/png" &&
+      served.headers["content-length"] === String(PNG.length) &&
+      /immutable/.test(served.headers["cache-control"] || ""),
+    JSON.stringify({ status: served.status, headers: served.headers, bytes: served.body?.length })
+  );
+  check(
+    "and answers 404 for a picture it does not hold",
+    helper.request(`${ARTWORK_ROUTE}/000000000000000000000000`).status === 404
   );
 
   helper.stop();

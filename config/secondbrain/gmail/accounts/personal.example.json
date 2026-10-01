@@ -14,6 +14,10 @@
   "maxAgeDays": 14,
   "maxResults": 8,
 
+  "_comment_mail": "How long an unread mail in importantMailbox stays on the wall, counted from when it arrived. personMailMinutes is for mail a person wrote. automatedMailMinutes is for mail a machine sent: confirmations, receipts, reminders, codes, invitations, newsletters. Opening a mail takes it down sooner. Texts go by voiceDisplayMinutes instead.",
+  "personMailMinutes": 720,
+  "automatedMailMinutes": 30,
+
   "monitorVoice": true,
   "voiceMailbox": "INBOX",
 

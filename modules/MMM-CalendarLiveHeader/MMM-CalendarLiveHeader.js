@@ -337,10 +337,11 @@ Module.register("MMM-CalendarLiveHeader", {
   /*
    * The ISO week, once per row of the month grid, in the Monday cell.
    *
-   * CalendarExt3 can number weeks itself, but it counts from the configured
-   * first day of the week -- Sunday here -- and so disagrees with the ISO
-   * number in the title for six days out of seven. This writes the real one,
-   * from the cell's own date, and CalendarExt3's is left switched off.
+   * CalendarExt3 can number weeks itself, but it counts from whatever first
+   * day of the week it is configured with, and only agrees with the ISO
+   * number in the title when that is Monday. This writes the real one, from
+   * the cell's own date, whatever the grid starts on, and CalendarExt3's is
+   * left switched off.
    */
   renderWeekNumbers() {
     const mondays =
@@ -393,7 +394,10 @@ Module.register("MMM-CalendarLiveHeader", {
     const tag =
       document.createElement("span");
 
-    tag.className = "sb-tag";
+    /* The tag lights when the event is in progress; NEXT stays unlit. */
+    tag.className = next.live
+      ? "sb-tag sb-tag-lit"
+      : "sb-tag";
     tag.textContent = next.tag;
     status.appendChild(tag);
 
@@ -433,8 +437,10 @@ Module.register("MMM-CalendarLiveHeader", {
    *   NEXT  DENTIST // 3:00 PM            later today, within lookAheadHours
    *   NEXT  UFC FIGHT NIGHT // SAT 16     not today, but the next timed thing
    *
-   * Nothing at all when there is nothing timed ahead. There is no greeting:
-   * the wall is an appliance, and the person reading it knows their name.
+   * Only NOW is live: its tag is lit, and the NEXT tag is the unlit chip
+   * until the event begins. Nothing at all when there is nothing timed
+   * ahead. There is no greeting: the wall is an appliance, and the person
+   * reading it knows their name.
    */
   buildStatus(now) {
     const {
@@ -445,6 +451,7 @@ Module.register("MMM-CalendarLiveHeader", {
     if (currentEvent) {
       return {
         tag: "Now",
+        live: true,
         title: currentEvent.title,
         when: `Until ${this.formatTime(currentEvent.end)}`
       };

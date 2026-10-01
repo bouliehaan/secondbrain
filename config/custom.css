@@ -9,10 +9,24 @@
  * 45° hatching for hazard and out-of-month, and real telemetry as the only
  * decoration. The chrome has no accent colour. Emphasis is inversion: today,
  * the event happening now, and a warning are the things drawn ink-on-ground
- * the other way round. Colour is content, not chrome: the calendar events
- * carry their calendar's colour (config.js), and the cover art in the radio
- * card is drawn as it comes. Against a monochrome ground those are the pops
- * that make the grey work; a wall of black bars is not.
+ * the other way round.
+ *
+ * A tag is a lamp. Every label sits in the same slanted block, but the block
+ * is unlit -- a chip a shade above the ground, the word in ink -- unless the
+ * thing it names is happening: TODAY, NOW, NOW PLAYING, a freeze warning, a
+ * card that arrived as a warning. Those are lit, reversed out of the fill.
+ * The section headers (FORECAST, SCHEDULE...) are structure, and structure
+ * is never lit. Seen across a dark room, a lit tag means something is on.
+ *
+ * The fill is not the ink. At night the ink is near-white, and a block of it
+ * on a black wall glows; the lit tags, today's bar and the heavy rules are
+ * drawn a step down from the ink (--sb-f) so they read as white from across
+ * the room without being the brightest thing in it. Type stays in the ink.
+ *
+ * Colour is content, not chrome: the calendar events carry their calendar's
+ * colour (config.js), and the cover art in the radio card is drawn as it
+ * comes. Against a monochrome ground those are the pops that make the grey
+ * work; a wall of black bars is not.
  *
  * Daylight is the same token set inverted (html.solar-light, set by
  * MMM-SolarTheme from sun position). Nothing below is written twice.
@@ -23,10 +37,11 @@
  * this file has not loaded, and they carry no light-mode rules of their own.
  *
  * Layout geometry -- the fixed regions, the month grid height maths, the
- * agenda flex -- is carried over unchanged from the previous stylesheet. It
- * took a long time to get right and none of it is about colour. What the
- * rail's modules may draw into their boxes is decided by modules/Rail, which
- * hides whole items rather than letting any box clip one.
+ * agenda flex -- is carried over from the previous stylesheet. It took a
+ * long time to get right and none of it is about colour. What the rail's
+ * modules may draw into their boxes is decided by modules/Rail, which hides
+ * whole items rather than letting any box clip one; the schedule is anchored
+ * to the bottom of the rail so what it cannot use sits above it (SCHEDULE).
  ******************************************************************************/
 
 /******************************************************************************
@@ -42,6 +57,8 @@ html.solar-dark {
   --sb-t: #eeeff0;   /* ink */
   --sb-t2: #9d9ea0;  /* ink, secondary */
   --sb-t3: #575859;  /* ink, faint */
+  --sb-f: #c9cacc;   /* fill: ink as a block -- a lit tag, today, the heavy rules. 70% of the ink's light */
+  --sb-c: #1e1e20;   /* chip: an unlit tag, a shade above the ground */
   --sb-h-soft: #131315;  /* hatch stroke for out-of-month cells: a whisper */
   --sb-on-color: #060607; /* ink on a calendar colour, in both themes */
 
@@ -68,6 +85,8 @@ html.solar-light {
   --sb-t: #0c0c0d;
   --sb-t2: #5a5a5c;
   --sb-t3: #9c9c9a;
+  --sb-f: #0c0c0d;   /* by day the fill is the ink: a black label on grey paper does not glow */
+  --sb-c: #c8c8c5;
   --sb-h-soft: #dedddb;
 }
 
@@ -221,7 +240,9 @@ html.solar-theme-enabled .CX3A .cell {
  * SHARED TYPE ROLES
  *
  * Three roles carry the whole register:
- *   .sb-tag   a label reversed out in a block with a slanted right end
+ *   .sb-tag   a label in a block with a slanted right end: unlit (a chip,
+ *             the word in ink) unless it is also .sb-tag-lit, when the word
+ *             is reversed out of the fill. Lit means happening now.
  *   .sb-meta  small tracked uppercase, secondary ink
  *   .sb-sep   the "//" between things
  * Module stylesheets define their own copies of these so they stand alone;
@@ -235,8 +256,8 @@ html.solar-theme-enabled .CX3A .cell {
 
   clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
 
-  background: var(--sb-t);
-  color: var(--sb-g);
+  background: var(--sb-c);
+  color: var(--sb-t);
 
   font-size: 13px;
   font-weight: 600;
@@ -244,6 +265,11 @@ html.solar-theme-enabled .CX3A .cell {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.sb-tag-lit {
+  background: var(--sb-f);
+  color: var(--sb-g);
 }
 
 .sb-meta {
@@ -355,6 +381,11 @@ html.solar-theme-enabled .CX3A .cell {
   margin: 0 !important;
 }
 
+/*
+ * The rail adds whole rows, cards and days as room becomes available
+ * (modules/Rail). Seams stay exactly 10px regardless of how much is shown.
+ * The schedule expands its rows to absorb any remainder after fitting items.
+ */
 .region.top.right > .container {
   display: flex !important;
   flex-direction: column !important;
@@ -450,7 +481,7 @@ html.solar-theme-enabled .CX3A .cell {
 }
 
 /*
- * This selector targets only the Sunday-Saturday header, even though
+ * This selector targets only the weekday-name header (Mon..Sun), even though
  * CalendarExt3 also gives it the weekGrid class.
  */
 .CX3 > .headerContainer {
@@ -541,7 +572,7 @@ html.solar-theme-enabled .CX3A .cell {
   margin: 0 !important;
   padding: 2px 0 9px !important;
 
-  border-bottom: 2px solid var(--sb-t) !important;
+  border-bottom: 2px solid var(--sb-f) !important;
 
   color: var(--sb-t) !important;
 
@@ -689,8 +720,9 @@ html.solar-theme-enabled .CX3A .cell {
  * Today.
  *
  * The one loud thing in the grid: the cell's header row becomes a solid bar
- * of ink with the numeral and the word TODAY reversed out of it, and the
- * cell is framed in a 2px ink outline. It is a target lock, not a highlight.
+ * of the fill with the numeral and the word TODAY reversed out of it, and the
+ * cell is framed in a 2px outline of the same. It is a target lock, not a
+ * highlight -- and it is lit, in the sense the tags are: it is the day.
  *
  * That is the whole of how today is marked. The days before it are drawn
  * exactly like the days after it -- nothing dims, nothing hatches -- because
@@ -699,11 +731,11 @@ html.solar-theme-enabled .CX3A .cell {
  * this one.
  */
 .CX3 .cell.today {
-  box-shadow: inset 0 0 0 2px var(--sb-t) !important;
+  box-shadow: inset 0 0 0 2px var(--sb-f) !important;
 }
 
 .CX3 .cell.today .cellHeader {
-  background: var(--sb-t);
+  background: var(--sb-f);
 }
 
 .CX3 .cell.today .cellHeader::after {
@@ -765,7 +797,8 @@ html.solar-theme-enabled .CX3A .cell {
   display: inline !important;
 }
 
-.CX3 .today .cellDate {
+/* .cell.today, not .today: it has to outrank the weekend rule above when today is one. */
+.CX3 .cell.today .cellDate {
   background: transparent !important;
   color: var(--sb-g) !important;
 
@@ -794,7 +827,7 @@ html.solar-theme-enabled .CX3A .cell {
   margin: 0 !important;
 }
 
-/* "+N more" -- a small reversed square rather than a white pill. */
+/* "+N more" -- a small reversed square rather than a white pill. Lit: it says the wall is hiding something. */
 .CX3 .cell.hasMore::after {
   bottom: 6px !important;
   right: 6px !important;
@@ -806,7 +839,7 @@ html.solar-theme-enabled .CX3A .cell {
 
   border-radius: 0 !important;
 
-  background: var(--sb-t) !important;
+  background: var(--sb-f) !important;
   color: var(--sb-g) !important;
 
   font-size: 11px !important;
@@ -932,8 +965,9 @@ html.solar-light .CX3 .event {
 /*
  * Module headers, where MagicMirror renders one: WEATHER, FORECAST,
  * SCHEDULE. The header text is a bare node, so the tag is the header element
- * itself: fit to the word, reversed out, slanted; and the hairline it sits on
- * is the top edge of the content beneath it.
+ * itself: fit to the word, slanted, unlit -- a header is structure, and
+ * structure is never lit -- and the hairline it sits on is the top edge of
+ * the content beneath it.
  */
 .region.top.right .module > header,
 html.solar-light .region.top.right .module > header {
@@ -954,8 +988,8 @@ html.solar-light .region.top.right .module > header {
 
   border: 0 !important;
 
-  background: var(--sb-t) !important;
-  color: var(--sb-g) !important;
+  background: var(--sb-c) !important;
+  color: var(--sb-t) !important;
 
   font-size: 13px !important;
   font-weight: 600 !important;
@@ -1004,7 +1038,7 @@ html.solar-light .region.top.right .module > header {
 .region.top.right .module.clock {
   padding: 0 0 9px !important;
 
-  border-bottom: 2px solid var(--sb-t);
+  border-bottom: 2px solid var(--sb-f);
   border-radius: 0;
 
   background: transparent !important;
@@ -1026,9 +1060,12 @@ html.solar-light .region.top.right .module.clock .time * {
 }
 
 /*
- * MagicMirror wraps the digital clock in an inline-flex grid with a gap and
- * draws the date above the time. Both are flattened here so the box is
- * exactly the rows described above: date under time, no gaps but the 10px.
+ * MagicMirror wraps the digital clock in an inline-flex grid with a gap, and
+ * inside that a column with a 3px gap of its own, and draws the date above
+ * the time. Both are flattened here so the box is exactly the rows described
+ * above: date under time, no gaps but the 10px. The inner gap matters: left
+ * in, the box measured 89px on the wall against the 86 the overlay fills,
+ * and the rail's first card sat 3px lower than the rule said it would.
  */
 .region.top.right .module.clock .clock-grid {
   display: flex !important;
@@ -1044,6 +1081,8 @@ html.solar-light .region.top.right .module.clock .time * {
 
   margin: 0 !important;
   padding: 0 !important;
+
+  gap: 0 !important;
 }
 
 /*
@@ -1181,22 +1220,29 @@ html.solar-light .region.top.right .clock .date {
 /******************************************************************************
  * SCHEDULE (MMM-CalendarExt3Agenda)
  *
- * The agenda receives every remaining pixel beneath everything else -- but
- * what it and the cards above it are allowed to draw into that is decided by
- * the Rail module, which measures the rail and hides whole rows, cards, days
- * and events so that the rest of today is always listed and nothing ends
- * mid-row. The flex here is only the box; the fit is modules/Rail.
+ * The agenda is the last block in the rail and the elastic one: it takes
+ * what the cards above it leave, in whole days and rows, as decided by the
+ * Rail module, which measures the rail and hides whole rows, cards, days and
+ * events so that the rest of today is always listed and nothing ends mid-row.
+ *
+ * The module fills the remaining height with no auto margin, so SCHEDULE
+ * follows the preceding module by exactly the standard gap. Spare room goes
+ * to more content first; Rail distributes any remainder through visible rows.
+ * When over-full it shrinks to what is left, which Rail.js reads back to refit
+ * before paint. Measurement temporarily restores natural sizes.
  ******************************************************************************/
 
-.region.top.right .module.MMM-CalendarExt3Agenda,
-.region.top.right .module.side-agenda {
+/* Direct children, one step above the rail's own margin: 0 on every module. */
+.region.top.right > .container > .module.MMM-CalendarExt3Agenda,
+.region.top.right > .container > .module.side-agenda {
   display: flex !important;
-  flex: 1 1 0 !important;
+  flex: 1 1 auto !important;
   flex-direction: column !important;
 
   min-height: 0 !important;
   overflow: hidden !important;
 
+  margin: 0 !important;
   padding: 0 !important;
 
   border: 0;
@@ -1261,7 +1307,7 @@ html.solar-light .CX3A {
 .CX3A .agenda .cell,
 html.solar-light .CX3A .agenda .cell {
   margin: 0 !important;
-  padding: 0 0 4px !important;
+  padding: 0 0 calc(4px + var(--rail-day-extra, 0px)) !important;
 
   border: 0 !important;
   border-radius: 0;
@@ -1366,7 +1412,7 @@ html.solar-light .CX3A .relativeDay {
   max-width: none !important;
 
   margin: 0 !important;
-  padding: 5px 0 1px !important;
+  padding: 5px 0 calc(1px + var(--rail-event-extra, 0px)) !important;
 
   border-radius: 0 !important;
 
@@ -1493,7 +1539,7 @@ html.solar-light .CX3A .event {
 
   width: 8px;
 
-  border: 2px solid var(--sb-t);
+  border: 2px solid var(--sb-f);
 }
 
 .CX3A .event.current::before {
@@ -1556,8 +1602,16 @@ html.solar-light .CX3A .event {
  *
  * Retain the browser clock's exact layout space, but make its rendering
  * invisible. The visible clock is the native X11 overlay.
+ *
+ * Only the ink is hidden -- the numerals and the date, which the overlay
+ * draws in their place. The module's own box stays visible, because the
+ * only thing it draws is the rule 9px under the date (CLOCK, above), and
+ * that rule is where the rail begins: the overlay's ink, then the rule, then
+ * the rail's gap and the first card. Hiding the whole module hid the rule
+ * with the numerals, and the rail started 24px below the clock with nothing
+ * between them.
  ******************************************************************************/
 
-.module.clock.side-clock {
+.module.clock.side-clock .module-content {
   visibility: hidden !important;
 }

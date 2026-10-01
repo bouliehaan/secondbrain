@@ -36,8 +36,10 @@ $(MM_MODULE)/node_modules: $(MM_MODULE)/package-lock.json
 ## check: everything CI runs. Needs no mirror, no account and no credentials.
 check: deps syntax
 	@node scripts/check-packages.js     >/dev/null && echo "  packages     ok"
+	@node scripts/check-mail.js         >/dev/null && echo "  mail         ok"
 	@node scripts/check-nowplaying.js   >/dev/null && echo "  nowplaying   ok"
 	@node scripts/check-freeze-watch.js >/dev/null && echo "  freeze-watch ok"
+	@node scripts/check-solar-theme.js  >/dev/null && echo "  solar-theme  ok"
 	@node scripts/check-status-line.js  >/dev/null && echo "  status-line  ok"
 	@node scripts/check-rail.js         >/dev/null && echo "  rail         ok"
 

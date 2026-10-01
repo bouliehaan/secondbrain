@@ -100,13 +100,18 @@ let config = {
         instanceId: "wallCalendar",
 
         locale: "en-US",
-        firstDayOfWeek: 0,
+
+        /*
+         * Monday first, against the en-US locale: the week the wall shows is
+         * the one the household keeps, and each row is then an ISO week.
+         */
+        firstDayOfWeek: 1,
 
         /*
          * The ISO week number in each row is written by MMM-CalendarLiveHeader
-         * from the Monday cell's date. CalendarExt3's own numbering counts
-         * from Sunday, the first day of the grid, and would be one behind the
-         * number in the title for six days out of seven.
+         * from the Monday cell's date. With Monday first and four minimal days
+         * CalendarExt3's own numbering would agree, but it stays switched off
+         * so the number is written once, in one place.
          */
         minimalDaysOfNewYear: 4,
         showWeekNumber: false,
@@ -301,7 +306,8 @@ let config = {
         roundTemp: true,
         degreeLabel: false,
 
-        maxNumberOfDays: 5,
+        /* Offer a full week; Rail shows only the whole rows that fit. */
+        maxNumberOfDays: 7,
         showPrecipitationProbability: true,
         fade: false,
 
@@ -371,8 +377,18 @@ let config = {
          * it only earns a throttle from Gmail.
          */
         pollIntervalMs: 60000,
+
+        /*
+         * How many of each kind the module offers the rail: texts and mail,
+         * packages, downloads. The rail keeps one of each on the wall and
+         * gives the rest whatever room is left, in its ladder's order --
+         * extra downloads last of the cards, so a second torrent is on the
+         * wall only when every other card and the week's weather already
+         * are, and only tomorrow's schedule waits behind it.
+         */
         maxItems: 3,
         maxPackageItems: 3,
+        maxDownloadItems: 3,
 
         /*
          * How long a shipment stays on the wall after the last mail about it.
@@ -401,7 +417,7 @@ let config = {
         },
 
         locale: "en-US",
-        firstDayOfWeek: 0,
+        firstDayOfWeek: 1,
         minimalDaysOfNewYear: 1,
 
         startDayIndex: 0,
@@ -471,55 +487,60 @@ let config = {
 
     /*
      * The rail's layout. Reads the rail after every change to it and hides
-     * whole items -- forecast rows, cards, days, events -- so that the
-     * schedule always lists the rest of today, every card stack keeps a
-     * card, and nothing ends mid-row. The order things are added in, and
-     * the order they give way in when even that does not fit, are the
-     * defaults in modules/Rail/lib/rail.js; override any of the three here.
-     * See docs/MODULES.md.
+     * whole items -- forecast rows, cards, days, events, and when it comes
+     * to it whole blocks -- so that the schedule always lists the rest of
+     * today, whole, every card stack keeps a card, and nothing ends mid-row.
+     * Today is the floor of the rail: nothing above it may cost it a row,
+     * and only the clock is never moved for it. The order things are added
+     * in, and the order they give way in when even that does not fit, are
+     * the defaults in modules/Rail/lib/rail.js; override any of the three
+     * here. See docs/MODULES.md.
      */
     {
       module: "Rail",
       config: {
         /*
-         * Where the space left after the minimums goes, a rung at a time:
-         * what the radio does next, the covers of the episodes the channel
-         * owes, then tomorrow, then tomorrow's row of the forecast, then a
-         * second message, a second package, the radio's second row, the day
-         * after, and so on down. A rung that does not fit whole takes the
-         * items that do and is closed.
+         * Where the space left after the minimums goes, a rung at a time.
+         * Today is the floor and tomorrow is the leftover: everything
+         * between them goes up whole, in order, and the schedule beyond
+         * today takes what that leaves. Every text there is, then the
+         * week's weather, then what the radio does next and the covers of
+         * the episodes the channel owes, then every package, the radio's
+         * second row, every download, and only then tomorrow, the day
+         * after, and on down. A rung that does not fit whole takes the
+         * items that do and is closed. Texts are first because a text is
+         * on the wall nowhere else and gone in an hour; tomorrow is last
+         * because it is on the grid to the left, and the order that once
+         * put it ahead of the forecast's second row cut the week's weather
+         * to a row or two on any ordinary day.
          */
         ladder: [
+          ["messages", "all"],
+          ["forecast", "all"],
           ["upnext", 1],
           ["due", 1],
-          ["schedule", 2],
-          ["forecast", 2],
-          ["messages", 2],
-          ["inbound", 2],
+          ["inbound", "all"],
           ["upnext", "all"],
-          ["schedule", 3],
-          ["forecast", 3],
-          ["messages", 3],
-          ["inbound", 3],
-          ["forecast", 5],
           ["transfers", "all"],
           ["schedule", "all"]
         ],
 
         /*
          * What goes, first to last, on a day so full that today's events and
-         * one card of each kind do not fit together. The schedule gives up
-         * today's rows from the end behind a "+ N more" line, and only after
-         * the packages and the forecast; a text is the last thing to go.
+         * one card of each kind do not fit together. The cards one at a
+         * time, a text the last of them; then the radio card whole, then the
+         * weather, then the freeze warning. Today's events are not on this
+         * list and cannot be put on it: the rest of today is always listed
+         * whole, and the only thing that never moves for it is the clock.
          */
-        sacrifice: ["transfers", "inbound", "forecast", "schedule", "messages"]
+        sacrifice: ["transfers", "inbound", "forecast", "nowplaying", "messages", "weather", "freeze"]
       }
     },
 
     {
       module: "MMM-SolarTheme",
       config: {
-        lightAfterSunriseMinutes: 30,
+        lightAfterSunriseMinutes: 0,
         darkBeforeSunsetMinutes: 20,
         fallbackLightTime: "07:00",
         fallbackDarkTime: "19:00"

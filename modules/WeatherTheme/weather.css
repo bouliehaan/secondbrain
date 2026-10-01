@@ -153,7 +153,7 @@
 
 /* Today: the live edge. */
 .fc-today {
-  box-shadow: inset 2px 0 0 var(--sb-t, #eeeff0);
+  box-shadow: inset 2px 0 0 var(--sb-f, #c9cacc);
 }
 
 .fc-icon .wi {

@@ -130,7 +130,10 @@ while true; do
 
     SESSION_URL="${URL}/?kiosk_session=$(date +%s%N)"
 
+    # X11, never Wayland: the native clock is an X window kept above this
+    # one, and it cannot sit above a window it cannot see.
     "$CHROMIUM" \
+        --ozone-platform=x11 \
         --user-data-dir="$PROFILE" \
         --kiosk \
         --app="$SESSION_URL" \

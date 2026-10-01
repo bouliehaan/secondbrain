@@ -4,13 +4,15 @@
  * The line under the month grid.
  *
  *   CAL 4/4 // GMAIL OK // PROTON DOWN // TRANSMISSION OK // SAMO OK
- *                              POLLED 15:41:07 (41 S) // NTP LOCK // UP 41 D
+ *                    POLLED 41 S AGO (TOOK 21 S) // NTP LOCK // UP 41 D
  *
  * Every word on it is something the wall already knows or can cheaply ask:
  * the mail poll's per-source result comes from MMM-SecondBrain, samo's from
  * NowPlaying, both re-broadcast as module notifications; the helper asks
  * chrony whether the clock is locked, reads uptime, and probes each calendar
- * feed with a plain GET every fifteen minutes.
+ * feed with a plain GET every fifteen minutes. The poll's age is the one
+ * thing here that changes on its own, and it ticks: that segment is
+ * rewritten in place once a second.
  *
  * The probe is the reason this module exists. A calendar that starts
  * answering 404 does not go blank -- the grid keeps drawing whatever it last
@@ -36,10 +38,21 @@ Module.register("StatusLine", {
       ntp: undefined,
       uptimeSec: null,
       polledAt: null,
-      pollMs: null
+      pollMs: null,
+      pollIntervalMs: null
     };
 
     this.configured = false;
+    this.ticker = null;
+  },
+
+  suspend () {
+    this.stopTicker();
+  },
+
+  resume () {
+    this.startTicker();
+    this.updateDom(0);
   },
 
   getStyles () {
@@ -56,6 +69,7 @@ Module.register("StatusLine", {
       notification === "ALL_MODULES_STARTED"
     ) {
       this.configureBackend();
+      this.startTicker();
       return;
     }
 
@@ -63,6 +77,7 @@ Module.register("StatusLine", {
       this.state.sources = Array.isArray(payload.sources) ? payload.sources : null;
       this.state.polledAt = payload.at ?? null;
       this.state.pollMs = payload.ms ?? null;
+      this.state.pollIntervalMs = payload.intervalMs ?? null;
       this.updateDom(0);
       return;
     }
@@ -131,6 +146,44 @@ Module.register("StatusLine", {
     });
   },
 
+  /*
+   * The poll's age is the one thing on the line that moves between
+   * notifications. Once a second, that segment alone is rewritten -- its text
+   * and its hatch -- rather than the whole line redrawn: a redraw a second
+   * across the bottom of the wall is a flicker waiting to happen.
+   */
+  startTicker () {
+    if (this.ticker) {
+      return;
+    }
+
+    this.ticker = window.setInterval(() => this.tick(), 1000);
+  },
+
+  stopTicker () {
+    if (this.ticker) {
+      window.clearInterval(this.ticker);
+      this.ticker = null;
+    }
+  },
+
+  tick () {
+    const segment = StatusLineLogic.composeRight(this.state).find((s) => s.role === "poll");
+    const item = document.querySelector(`#${this.identifier} .statusline-item[data-role="poll"]`);
+
+    if (!segment || !item) {
+      return;
+    }
+
+    if (item.textContent !== segment.text) {
+      item.textContent = segment.text;
+    }
+
+    if (item.classList.contains("statusline-bad") !== Boolean(segment.bad)) {
+      item.classList.toggle("statusline-bad", Boolean(segment.bad));
+    }
+  },
+
   getDom () {
     const lib = StatusLineLogic;
 
@@ -167,6 +220,11 @@ Module.register("StatusLine", {
       const item = document.createElement("span");
       item.className = "statusline-item" + (segment.bad ? " statusline-bad" : "");
       item.textContent = segment.text;
+
+      if (segment.role) {
+        item.dataset.role = segment.role;
+      }
+
       side.appendChild(item);
     });
 

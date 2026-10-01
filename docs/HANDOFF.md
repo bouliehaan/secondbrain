@@ -51,16 +51,25 @@ The separate native clock fixed the time-accuracy problem but rendered badly:
 - seconds must match hour/minute size and weight
 - a colon belongs between minutes and seconds
 
-`clock/magicmirror-python-clock.py` is the current renderer. It draws
-Rajdhani, 12-hour with a small AM/PM, seconds at full size, and reads its ink
-colours and the next sun event from `/tmp/magicmirror-clock-state`, written by
-`MMM-SolarTheme`'s helper. Rajdhani's line box is a quarter taller than its
-Latin digits (it carries Devanagari), so the labels are placed by their ink
-from the font's own metrics: the numerals' caps flush with the top of the
-window at 12px, the date line 10px under the baseline. `config/custom.css`
-reserves that same 75px for the hidden browser clock. Verified under Xvfb on
-the mirror; the alignment against the live page can only be confirmed on the
-physical display.
+`clock/magicmirror-python-clock.py` draws Orbitron Medium, with naturally
+wide, square numerals and a slashed zero. The OFL font is bundled under
+`config/fonts/orbitron/` and installed system-wide by both the package and
+the maintainer deploy script. The renderer chooses one font size at startup
+that fits every digit in the existing row; no glyph is stretched or resized
+on a tick. Orbitron is proportional, so each numeral reserves the widest
+digit's natural advance and each colon reserves its own natural advance.
+This keeps all positions fixed as narrow digits such as `1` appear, without
+adding tracking to fill the row. A leading zero keeps both hour positions
+occupied. The date and small AM/PM retain Rajdhani. GTK/Pango draws the text
+directly; no SVG loader or Python cairo dependency is added.
+It reads its ink colours and the next sun event from
+`/tmp/magicmirror-clock-state`, written by `MMM-SolarTheme`'s helper.
+The time row remains 54px tall, flush with the window's top at 12px, with
+the date line 10px below it. `config/custom.css` reserves the same 75px of
+visible ink as before; an overlay container fixes the window at 420×77px so
+font line-box padding cannot enlarge it. The 100ms timer, OS time reads,
+timezone and NTP setup are unchanged. Verify rendering under Xvfb, then
+confirm stacking and alignment against the live page on the physical display.
 
 The file alone changes nothing on the wall: the clock that is drawing is a
 process the X session started at login. `scripts/deploy.sh` starts the new

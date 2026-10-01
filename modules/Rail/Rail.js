@@ -9,8 +9,11 @@
  * only agenda on the wall and it was the thing cut short. This module reads
  * the rail after every change to it, measures what everything would take at
  * full height, and hides whole items -- forecast rows, cards, days, events,
- * the rows under the radio card -- so that the rest of today is always
- * listed and nothing ends mid-row.
+ * the rows under the radio card, and on a day full enough whole cards and
+ * blocks -- so that the rest of today is always listed, whole, and nothing
+ * ends mid-row. Today is the floor: nothing above it in the rail is allowed
+ * to cost it a row, and the only thing it can never displace is the clock,
+ * whose box the native overlay fills whatever the page draws there.
  *
  * The decision is RailLogic.allocate in lib/rail.js, a pure function from
  * measured heights to counts, so it can be checked without a browser. This
@@ -20,7 +23,7 @@
  * cuts off and lets the schedule take its natural height, so every item has
  * its real size; the class comes off in the same task, before the browser
  * paints, so the wall never sees the untrimmed rail. Applying toggles one
- * class per hidden item and writes the "+ N more" lines. Both are idempotent:
+ * class per hidden item and writes the "+ N more" heading counts. Both are idempotent:
  * a pass that finds nothing to change changes nothing.
  *
  * It runs from a MutationObserver on the rail, so a module that redraws is
@@ -44,8 +47,12 @@ Module.register("Rail", {
     /* Where the rail's modules are. Their order is the rail's order. */
     container: ".region.top.right > .container",
 
-    /* Pixels kept back from the budget, for the half-pixels of measuring. */
-    slackPx: 2,
+    /*
+     * Use the whole measured height. Reserving even two pixels can reject
+     * a complete day heading and event, leaving a much larger blank gap.
+     * fit() checks the rendered overflow and corrects actual rounding.
+     */
+    slackPx: 0,
 
     /*
      * Modules whose redraws never change their height, so a change inside
@@ -239,6 +246,10 @@ Module.register("Rail", {
   },
 
   fit () {
+    // Allocate at natural row heights on every pass, including after a card
+    // appears or disappears. Last pass's expansion must not displace content.
+    this.container.style.removeProperty("--rail-event-extra");
+    this.container.style.removeProperty("--rail-day-extra");
     const model = this.measure();
     let alloc = RailLogic.allocate(model, this.options());
     this.apply(model, alloc);
@@ -264,7 +275,34 @@ Module.register("Rail", {
       this.apply(model, alloc);
     }
 
+    this.fillRemainder(model);
     this.report(model, alloc);
+  },
+
+  /* Fill the last fraction of a row without widening the module seams. */
+  fillRemainder (model) {
+    const block = model.blocks.find((b) => Array.isArray(b.days));
+    if (!block) return;
+
+    const days = block.days.filter((day) => !day.ref.cell.classList.contains("rail-cut"));
+    if (!days.length) return;
+
+    const agenda = block.ref.module.querySelector(".CX3A .agenda");
+    if (!agenda) return;
+
+    const style = window.getComputedStyle(agenda);
+    const bottom = this.rect(agenda).bottom
+      - (parseFloat(style.paddingBottom) || 0)
+      - (parseFloat(style.borderBottomWidth) || 0);
+    const spare = Math.max(0, bottom - this.rect(days[days.length - 1].ref.cell).bottom);
+    const events = days.flatMap((day) => day.ref.events)
+      .filter((event) => !event.classList.contains("rail-cut"));
+    const count = events.length || days.length;
+    // Round down to Chromium's layout unit so expansion cannot clip a row.
+    const extra = Math.floor(spare * 64 / count) / 64;
+    if (extra > 0) {
+      this.container.style.setProperty(events.length ? "--rail-event-extra" : "--rail-day-extra", `${extra}px`);
+    }
   },
 
   options () {
@@ -315,6 +353,18 @@ Module.register("Rail", {
   measureBlock (module) {
     const classes = module.classList;
 
+    if (classes.contains("clock")) {
+      return this.fixed(module, "clock", { keep: true });
+    }
+
+    if (classes.contains("side-freezewatch") || classes.contains("FreezeWatch")) {
+      return this.fixed(module, "freeze");
+    }
+
+    if (classes.contains("side-current-weather")) {
+      return this.fixed(module, "weather");
+    }
+
     if (classes.contains("side-forecast")) {
       return this.measureForecast(module);
     }
@@ -335,15 +385,28 @@ Module.register("Rail", {
   },
 
   /*
-   * A module that has not drawn its list yet -- LOADING, or an agenda that is
-   * still waiting for events -- is whatever height it is, and stays.
+   * A module measured as one thing: the clock, the freeze card, the current
+   * weather -- and any module that has not drawn its list yet, LOADING, or an
+   * agenda still waiting for events, which is whatever height it is.
+   *
+   * The id is what the giving-way order names it by. The clock is `keep`:
+   * the visible clock is the native overlay drawn above the browser, and
+   * this module only reserves its space, so hiding it would slide the rest
+   * of the rail under the overlay's ink.
    */
-  fixed (module) {
+  fixed (module, id, extra = {}) {
     return {
-      id: module.id || module.className,
+      id: id || this.moduleName(module) || module.id || module.className,
       height: this.rect(module).height,
-      ref: { module }
+      ref: { module },
+      ...extra
     };
+  },
+
+  /* MagicMirror's wrapper is `module <name> <classes...>`; the name is second. */
+  moduleName (module) {
+    const names = Array.from(module.classList).filter((c) => c !== "module");
+    return names.length > 0 ? names[0] : null;
   },
 
   measureForecast (module) {
@@ -473,32 +536,15 @@ Module.register("Rail", {
         base: cellMarginals[i] - items.reduce((a, b) => a + b, 0),
         items,
         today: cell.classList.contains("today"),
-        ref: { cell, events, body: cell.querySelector(".cellBody") }
+        ref: { cell, events, header: cell.querySelector(".cellHeaderMain") }
       };
     });
-
-    /*
-     * The "+ N more" line is ours, so nothing has measured it yet: put one in
-     * the first day, read it, take it out again.
-     */
-    let more = 0;
-    const host = days[0] && days[0].ref.body;
-
-    if (host) {
-      const probe = this.moreLine(99);
-      probe.classList.add("rail-probe");
-      host.appendChild(probe);
-      const probeStyle = window.getComputedStyle(probe);
-      more = this.rect(probe).height
-        + (parseFloat(probeStyle.marginTop) || 0)
-        + (parseFloat(probeStyle.marginBottom) || 0);
-      probe.remove();
-    }
 
     return {
       id: "schedule",
       base: this.rect(module).height - cellMarginals.reduce((a, b) => a + b, 0),
-      more,
+      /* The hidden-event count shares the day heading; it costs no row. */
+      more: 0,
       days,
       ref: { module, cells }
     };
@@ -526,11 +572,16 @@ Module.register("Rail", {
    * ------------------------------------------------------------------ */
 
   apply (model, alloc) {
+    const hidden = new Set(alloc.hidden || []);
+
     for (const block of model.blocks) {
+      /* A block that gave way whole: its wrapper goes, and what is in it with it. */
+      const gone = hidden.has(block.id);
+
       if (block.list && block.ref && Array.isArray(block.ref.rows)) {
-        const n = alloc.lists[block.list] || 0;
+        const n = gone ? 0 : alloc.lists[block.list] || 0;
         block.ref.rows.forEach((row, i) => this.cut(row, i >= n));
-        this.cut(block.ref.module, n === 0);
+        this.cut(block.ref.module, gone || n === 0);
         continue;
       }
 
@@ -538,7 +589,7 @@ Module.register("Rail", {
         let shown = 0;
 
         for (const section of block.sections) {
-          const n = alloc.lists[section.list] || 0;
+          const n = gone ? 0 : alloc.lists[section.list] || 0;
           const total = section.ref.cards.length;
 
           section.ref.cards.forEach((card, i) => this.cut(card, i >= n));
@@ -561,8 +612,11 @@ Module.register("Rail", {
           }
         }
 
-        /* A block that is only its sections goes with them; a standalone one stays. */
-        this.cut(block.ref.module, shown === 0 && !block.standalone);
+        /*
+         * A block that is only its sections goes with them; a standalone one
+         * stays -- unless it was named and gave way whole.
+         */
+        this.cut(block.ref.module, gone || (shown === 0 && !block.standalone));
         continue;
       }
 
@@ -576,8 +630,14 @@ Module.register("Rail", {
 
           this.cut(day.ref.cell, !shown);
           day.ref.events.forEach((event, j) => this.cut(event, shown && j >= keep));
-          this.more(day.ref.body, partial ? tail.more : 0);
+          this.more(day.ref.header, partial ? tail.more : 0);
         });
+        continue;
+      }
+
+      /* A fixed block: the freeze card, the weather. Whole, or not at all. */
+      if (block.ref && block.ref.module) {
+        this.cut(block.ref.module, gone);
       }
     }
   },
@@ -588,13 +648,13 @@ Module.register("Rail", {
     }
   },
 
-  /* The "+ N more" line at the end of a day, or none. */
-  more (body, n) {
-    if (!body) {
+  /* A count in the day heading leaves the vertical budget for real events. */
+  more (header, n) {
+    if (!header) {
       return;
     }
 
-    const existing = body.querySelector(":scope > .rail-more");
+    const existing = header.querySelector(":scope > .rail-more");
 
     if (n <= 0) {
       if (existing) {
@@ -610,17 +670,17 @@ Module.register("Rail", {
         existing.textContent = text;
       }
 
-      if (existing !== body.lastElementChild) {
-        body.appendChild(existing);
+      if (existing !== header.lastElementChild) {
+        header.appendChild(existing);
       }
       return;
     }
 
-    body.appendChild(this.moreLine(n));
+    header.appendChild(this.moreBadge(n));
   },
 
-  moreLine (n) {
-    const line = document.createElement("div");
+  moreBadge (n) {
+    const line = document.createElement("span");
     line.className = "rail-more";
     line.textContent = this.moreText(n);
     return line;
@@ -669,6 +729,7 @@ Module.register("Rail", {
     const summary = JSON.stringify({
       lists: alloc.lists,
       schedule: alloc.schedule,
+      hidden: alloc.hidden,
       sacrificed: alloc.sacrificed,
       fits: alloc.fits
     });
@@ -682,7 +743,7 @@ Module.register("Rail", {
     if (!alloc.fits) {
       if (!this.warnedOverflow) {
         this.warnedOverflow = true;
-        Log.warn(`[Rail] does not fit even at the floor: ${Math.round(alloc.cost)}px into ${Math.round(model.height)}px.`);
+        Log.warn(`[Rail] today does not fit even with everything else gone: ${Math.round(alloc.cost)}px into ${Math.round(model.height)}px.`);
       }
     } else {
       this.warnedOverflow = false;

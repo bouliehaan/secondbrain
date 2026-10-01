@@ -2,8 +2,9 @@
  * NOW PLAYING
  *
  * One chamfered card in the rail, the same shape as the message cards next
- * door: panel fill, 2px left edge, a reversed tag for the label, the station
- * after it in secondary ink, the track as the headline.
+ * door: panel fill, 2px left edge, a lit tag for the label -- the radio is
+ * on, and a lit tag is what the wall says when something is (custom.css) --
+ * the station after it in secondary ink, the track as the headline.
  *
  * The cover art is the one thing on the whole wall drawn in colour. That is
  * deliberate and it is the point: a monochrome display makes a 54px square of
@@ -28,7 +29,7 @@
   clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
 
   border: 0;
-  border-left: 2px solid var(--sb-t, #eeeff0);
+  border-left: 2px solid var(--sb-f, #c9cacc);
   border-radius: 0;
 
   background: var(--sb-p, #0e0e0f) !important;
@@ -143,7 +144,7 @@ html.solar-light .nowplaying-art img {
 
   clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
 
-  background: var(--sb-t, #eeeff0);
+  background: var(--sb-f, #c9cacc);
   color: var(--sb-g, #060607) !important;
 
   font-size: 11px !important;
@@ -201,6 +202,12 @@ html.solar-light .nowplaying-art img {
 }
 
 .nowplaying-meta {
+  display: flex;
+  align-items: baseline;
+
+  gap: 10px;
+
+  min-width: 0;
   margin-top: 2px;
 
   overflow: hidden;
@@ -212,7 +219,55 @@ html.solar-light .nowplaying-art img {
   line-height: 1.22;
 
   white-space: nowrap;
+}
+
+/* The artist, and the album when it earns its place. Gives way first. */
+.nowplaying-detail {
+  min-width: 0;
+  flex: 1 1 auto;
+
+  overflow: hidden;
+
   text-overflow: ellipsis;
+}
+
+/*
+ * When an episode came out: `POSTED 11:04 AM` today, `POSTED Sep 9` before.
+ * At the right-hand end of the line, under the station at the end of the
+ * label row, so the card's two small facts sit in one column. Never
+ * truncated -- the artist beside it is on the cover already; this is
+ * written nowhere else on the wall. Label and time in the register of the
+ * NEXT rows below, so a moment reads the same wherever the card writes one.
+ */
+.nowplaying-released {
+  display: flex;
+  align-items: baseline;
+
+  flex: 0 0 auto;
+
+  gap: 6px;
+
+  margin-left: auto;
+}
+
+.nowplaying-released-label {
+  color: var(--sb-t3, #575859) !important;
+
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.nowplaying-released-time {
+  color: var(--sb-t2, #9d9ea0) !important;
+
+  font-size: 14px !important;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 /******************************************************************************
@@ -419,8 +474,9 @@ html.solar-light .nowplaying-due-tile img {
 /*
  * Paused is rare on a device whose job is to be on air, so it earns a visible
  * difference rather than a subtle one: if the wall says paused, somebody wants
- * to know why the room is quiet. The label tag stays reversed -- it now reads
- * PAUSED -- and everything else drops back.
+ * to know why the room is quiet. The label tag stays lit -- it now reads
+ * PAUSED, and a lit tag is the one thing that must not drop back -- and
+ * everything else does.
  */
 .nowplaying-paused .nowplaying-title,
 .nowplaying-paused .nowplaying-meta,

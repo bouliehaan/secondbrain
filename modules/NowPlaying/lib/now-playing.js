@@ -545,10 +545,11 @@ function resolveNowPlaying (state, options = {}) {
     album: described.album || "",
     /*
      * The artwork URL the server already resolved, when there is one. This is
-     * a URL, not a picture: the backend fetches the bytes -- see samo-client's
-     * artworkFor -- and replaces it with a data URI before the card reaches
-     * the browser. What it no longer has to do is deduce WHICH picture from an
-     * item ref, which it could not do for a relayed stream.
+     * samo's URL, which the browser must never be handed: the backend fetches
+     * the bytes -- see samo-client's artworkFor -- and replaces it with a URL
+     * of its own that serves them, before the card reaches the browser. What
+     * it no longer has to do is deduce WHICH picture from an item ref, which
+     * it could not do for a relayed stream.
      */
     artwork: described.artwork || "",
     context: described.context || "",
@@ -556,6 +557,12 @@ function resolveNowPlaying (state, options = {}) {
     sourceLabel: described.sourceLabel || "",
     source,
     sourceId,
+    /*
+     * What a queue item is, as the device names it -- "episode:<id>",
+     * "track:<id>" -- for the lookups that want more than the item carries. A
+     * tuned channel's item is named in its own now-playing, not here.
+     */
+    itemRef: source === MODE_QUEUE ? text(item?.ref) : "",
     live,
     paused: status === STATUS_PAUSED,
     buffering: status === STATUS_BUFFERING,

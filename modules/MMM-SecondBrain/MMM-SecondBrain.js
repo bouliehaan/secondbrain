@@ -13,10 +13,14 @@ Module.register("MMM-SecondBrain", {
 
     /*
      * Notifications, packages and Transmission each get their own slots, so a
-     * busy inbox cannot crowd out a shipment or an active download.
+     * busy inbox cannot crowd out a shipment or an active download. These are
+     * what the module offers; how many of them the wall has room for is the
+     * rail's decision (modules/Rail), which keeps one card of each kind and
+     * hands out the rest by its ladder -- extra downloads last of all.
      */
     maxItems: 3,
     maxPackageItems: 3,
+    maxDownloadItems: 3,
 
     /*
      * How long a shipment stays on the wall after the last mail that mentioned
@@ -106,6 +110,9 @@ Module.register("MMM-SecondBrain", {
 
         maxPackageItems:
           this.config.maxPackageItems,
+
+        maxDownloadItems:
+          this.config.maxDownloadItems,
 
         packageStaleAfterHours:
           this.config.packageStaleAfterHours,

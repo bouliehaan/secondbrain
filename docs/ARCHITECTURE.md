@@ -104,6 +104,16 @@ timer on top, giving roughly a poll every 1.5s. That is a reliable way to get an
 account throttled or temporarily locked. The floor is enforced in
 `node_helper.js`, not trusted to config.
 
+The browser's config message does not count as a request to poll. MagicMirror
+calls `resume()` on every `show()`, and the frontend shows itself on every update
+that changes a card. Its `resume()` then sends the config again. Until 2026-09-26
+that config started a poll on the spot, so every poll that changed a card
+started the next one straight away. A download's rate changes on every poll. On
+the wall, from midnight to 07:06 that morning, this meant a Gmail and Proton
+login every seven seconds. Now a config inside the interval gets the last
+answer re-sent instead, and the poll timer is only restarted when the interval
+itself changes.
+
 ## Priorities
 
 Higher wins. Ties break toward the more recent item.
@@ -113,8 +123,8 @@ Higher wins. Ties break toward the more recent item.
 | 100 | `voice` | Google Voice — calls, texts, voicemail |
 | 95 | `package` | shipments |
 | 90 | `warning` | Transmission errors |
-| 78 | `email` | Proton unread |
-| 75 | `email` | Gmail important mailbox |
+| 78 | `email` | Proton unread, for 12 h from a person or 30 min from a machine |
+| 75 | `email` | Gmail important mailbox, the same |
 | 45 | `download` | active torrents |
 | 35 | `download` | recently finished |
 
@@ -141,6 +151,27 @@ and sat on the wall until it was read for real.
 
 **Proton** (`pollProton`) — talks to the local Proton Mail Bridge on
 `127.0.0.1:1143`, not to Proton directly. The bridge must be running.
+
+**How long a mail stays.** Unread is necessary but not enough. Every mail card,
+from Proton or from Gmail's wall label, comes down a set time after the mail
+arrived, and that time depends on who sent it. `sortMail` reads the sender, the
+subject and a handful of headers (`Auto-Submitted`, `Precedence`, `List-*`,
+`Feedback-ID`, the marks of SES, SendGrid, Mailgun and Mandrill). A person's mail
+stays 12 hours (`personMailMinutes`). A machine's mail stays 30 minutes
+(`automatedMailMinutes`). That covers confirmations, receipts, reminders, codes,
+invitations and newsletters. Opening a mail still takes it down at the next
+poll. When unsure, the sort calls it a machine, because the two mistakes cost
+different amounts: a person taken for a machine loses the rest of their half
+day, and a machine taken for a person is an appointment confirmation left up
+all day. Each card writes one journal line when it first goes up: the sender's
+domain, what the sort took it for, and when it comes down. The subject is never
+logged. Before 2026-09-26, unread was the only rule, and a Proton appointment
+confirmation stayed on the wall for a day.
+
+Proton fetches only those header fields, never a body. It reads the 25 newest
+unread mails so that expired ones give their places to older live ones. Gmail's
+wall label already fetches whole messages for the preview line, and its headers
+come from those.
 
 **Transmission** (`pollTransmission`) — RPC, including the 409 session-id
 handshake the protocol requires on first contact.
@@ -356,9 +387,14 @@ of the track a relayed station is playing, or failing all of that the station's
 own logo — and the device state carries the URL as `channel.artworkUrl`. The
 wall's only job is to turn that URL into bytes, at `?width=256` for samo's own
 paths and untouched for anything hosted elsewhere. The one lookup that still
-walks the channel's `itemRef` into the catalog is for the album line, which
-exists nowhere else; it only supplies a picture when samo named none, which a
-current samo never does.
+walks the channel's `itemRef` into the catalog is for the album line and, for
+an episode, when the feed published it (`publishedAt`, kept as one ISO instant
+whatever offset the feed wrote), neither of which exists anywhere else; it only
+supplies a picture when samo named none, which a current samo never does. An
+episode cast from a phone gets the same lookup for the date alone. The browser
+decides how to write it — the time when that was today, the date otherwise —
+and redraws the card at midnight so that "today" stays true through an
+episode that crosses it.
 
 Samo spells its own URLs two ways, and both are recognised by the `/api/v1/`
 prefix rather than by origin: a channel item carries a bare path, and a
@@ -386,11 +422,35 @@ long as it stays tuned, and one slow answer from its CDN must not cost the logo
 for the afternoon. A picture samo named that does not arrive is logged, with
 the reason, once per retry.
 
-The bytes are fetched by the node helper and handed to the browser as a data
-URI. Signing an `<img src>` would mean putting a samo credential in a page
-served to the whole LAN — samo has a `stream_token` parameter for exactly that,
-and it is still the wrong trade when this process already holds the token and
-can hand over finished pixels.
+The bytes are fetched by the node helper and served by it, from memory, at
+`/nowplaying/artwork/<hash of the picture>` on MagicMirror's own express app;
+the card carries that URL. Signing an `<img src>` would mean putting a samo
+credential in a page served to the whole LAN — samo has a `stream_token`
+parameter for exactly that, and it is still the wrong trade when this process
+already holds the token and can hand over finished pixels. The id being a
+hash of the picture means the route can only ever answer with something the
+helper already fetched on samo's say-so; nothing on the LAN can name a URL
+and have the helper go and get it.
+
+They used to travel inline instead, as a base64 data URI in the card, and
+that put a half-megabyte ceiling on a picture, since every byte of it rode in
+every notification and sat in the DOM. Two of Jake Channel's shows had no
+artwork on the wall for a fortnight because of what that design believed: a
+cover samo had saved as `.bin` (the feed said `image/jpg`) came back as
+`application/octet-stream`, and the helper trusted the header over the
+bytes; a cover too big for samo's own 5 MB download cap is one samo never
+kept, so its cover route redirects to the feed's CDN — where `?width=` means
+nothing — and the 7.8 MB original tripped the ceiling. Now the helper reads
+the picture's type off its first bytes (JPEG, PNG, GIF, WebP, AVIF, SVG; a
+page with a picture's header is still refused, with the header named in the
+journal), and the ceiling is sixteen megabytes and guards memory alone: the
+store behind the route is bounded by bytes, oldest out, and a cache that
+still remembers a URL the store has let go of treats that as a miss rather
+than send the browser to a 404. In the browser, a picture that fails to load
+becomes no frame on the card and initials in the due row, never a broken
+image. Following a redirect off the box is safe: Node's fetch drops the
+Authorization header at the origin boundary, and the checks pin that down
+against a fake CDN that refuses any request carrying a token.
 
 ### What comes next, and why not the next track
 
@@ -469,9 +529,8 @@ changes, which is the same promise the artwork cache makes.
 
 The helper compares each payload against the last and stays quiet when nothing
 changed. The frontend does the same check, but it has to happen on both sides:
-a card carries its cover inline, and pushing tens of kilobytes of unchanged
-base64 down the socket every ten seconds for the browser to discard is work
-nobody needs done.
+pushing an unchanged card down the socket every ten seconds for the browser to
+discard is work nobody needs done.
 
 ## Freeze Watch
 
@@ -575,13 +634,18 @@ a dead feed kept displaying confident stale information and nothing logged it.
 `WEATHER_UPDATED` broadcast as `FreezeWatch`, for `sunrise` and `sunset` — and
 hands the native clock its ink colours and the next sun event through
 `/tmp/magicmirror-clock-state`, which the clock reads on every tick.
+Light mode starts at sunrise, with a 300 ms transition. Solar timestamps from
+another day use the configured clock fallback until fresh weather arrives;
+yesterday's sunset must not hold the screen dark through the next morning.
 `MMM-CalendarLiveHeader` writes the NOW / NEXT status, the ISO week and day of
 year into the month title, and the ISO week number into each row of the grid.
 `StatusLine` draws the line under the grid and probes the calendar feeds (see
 `docs/MODULES.md`). `Rail` fits the right-hand column: it measures the rail
-after every change and hides whole rows, cards, days and events so the rest
-of today is always listed and nothing is clipped mid-row; the decision is a
-pure function in `modules/Rail/lib/rail.js` (see `docs/MODULES.md`).
+after every change and hides whole rows, cards, days, events and, when it
+comes to it, whole blocks, so the rest of today is always listed whole and
+nothing is clipped mid-row; today is the floor and only the clock never moves
+for it. The decision is a pure function in `modules/Rail/lib/rail.js` (see
+`docs/MODULES.md`).
 `WeatherTheme` is the stock weather module's `themeDir`, in this repo. `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are upstream,
 pinned in `config/third-party-modules.json` and installed from there.
 
@@ -589,4 +653,9 @@ The wall's look is one stylesheet, `config/custom.css`: a `--sb-*` token set
 (black and white chrome, inverted for daylight; colour only in the calendar
 events and the cover art), Rajdhani vendored in `config/fonts/`, and the
 layout geometry. Module stylesheets consume the tokens with the dark
-values as fallbacks and carry no light rules of their own.
+values as fallbacks and carry no light rules of their own. Every label sits
+in the same slanted tag, and the tag is a lamp: unlit (`--sb-c`, a chip a
+shade above the ground) for structure such as section headers, lit
+(`--sb-f`) only for what is happening -- TODAY, NOW, NOW PLAYING, a freeze
+warning, a warning card. The fill is a step down from the ink at night so a
+block of it does not glow on the wall; type stays in the ink.

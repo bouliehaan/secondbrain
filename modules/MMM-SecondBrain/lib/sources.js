@@ -24,6 +24,22 @@ const DEFAULT_STATE_DIR = "/var/lib/magicmirror-secondbrain";
 const DEFAULT_VOICE_DISPLAY_MINUTES = 60;
 
 /*
+ * How long an unread mail stays on the wall, by who sent it.
+ *
+ * Unread used to be the only rule: a mail stayed up until it was opened or a
+ * fortnight had passed, so an appointment confirmation nobody needed to open
+ * sat on the wall for a day and would have sat there for two weeks. How long a
+ * mail is worth a glance depends on what it is. A person writing to you stays
+ * half a day, long enough to be seen when you get home. A machine telling you
+ * something happened -- a confirmation, a receipt, a reminder, a code, a
+ * newsletter -- gets half an hour: a glance, and gone. Opening a mail still
+ * takes it down at once, and an account can set its own `personMailMinutes`
+ * and `automatedMailMinutes`.
+ */
+const DEFAULT_PERSON_MAIL_MINUTES = 12 * 60;
+const DEFAULT_AUTOMATED_MAIL_MINUTES = 30;
+
+/*
  * A package card outlives the mail that announced it, because retailers stop
  * mentioning a shipment once it has been delivered.
  *
@@ -289,6 +305,200 @@ function voiceClassification(from, subject) {
   }
 
   return "Google Voice";
+}
+
+/* ------------------------------------------------------------------ *
+ * Who sent a mail
+ * ------------------------------------------------------------------ */
+
+/*
+ * Headers that software sets and a person writing from a mail client does not,
+ * so any one of them is enough: the List-* fields every mailing list and bulk
+ * sender adds, Gmail's bulk-sender Feedback-ID, and the marks of the delivery
+ * services most confirmations and receipts go out through. Auto-Submitted and
+ * Precedence are read for their values below.
+ */
+const AUTOMATED_HEADERS = {
+  "list-unsubscribe": "List-Unsubscribe",
+  "list-id": "List-Id",
+  "feedback-id": "Feedback-ID",
+  "x-ses-outgoing": "Amazon SES",
+  "x-sg-eid": "SendGrid",
+  "x-mailgun-sid": "Mailgun",
+  "x-mandrill-user": "Mandrill"
+};
+
+/* The header fields sortMail reads, and the only ones fetched for it. */
+const MAIL_SORT_HEADERS = [
+  "auto-submitted",
+  "precedence",
+  ...Object.keys(AUTOMATED_HEADERS)
+];
+
+/* Mailboxes nobody answers. The part before the @, with any +tag or suffix. */
+const AUTOMATED_SENDER =
+  /^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|notifications?|notify|alerts?|mailer-daemon|postmaster|bounces?|newsletters?|news|updates?|digest|reminders?|appointments?|scheduling|bookings?|reservations?|confirm(?:ations?)?|receipts?|billing|invoices?|orders?|shipping|shipment-tracking|tracking|auto-confirm|accounts?|security|verify|verification|info|support|hello|team|marketing|service)(?:[-_.+][^@]*)?$/i;
+
+/*
+ * What software writes in a subject line. Only read when the subject is not a
+ * reply or a forward, so a person answering "Re: your appointment" is still a
+ * person.
+ */
+const AUTOMATED_SUBJECT =
+  /\b(?:confirm(?:ed|ation|ing)?|receipt|invoice|reminder|appointment|booking|booked|reservation|rescheduled|cancell?(?:ed|ation)|your order|order #|shipped|delivered|out for delivery|verif(?:y|ication)|(?:verification|security|confirmation|access|login|sign[- ]?in|one[- ]time|authentication) code|your code|password|new sign[- ]?in|security alert|welcome to|newsletter|invitation|webinar)\b/i;
+
+/*
+ * What a calendar puts at the front of an invitation or an answer to one:
+ * "Invitation:", "Updated invitation with note:", "Accepted:", "Canceled event:".
+ */
+const CALENDAR_SUBJECT =
+  /^\s*(?:accepted|declined|tentative(?:ly accepted)?|updated invitation|invitation|cancell?ed(?: event)?)[^:]{0,20}:/i;
+
+const REPLY_SUBJECT = /^\s*(?:re|fwd?|aw|wg|sv|vs|antw|rif|tr)\s*(?:\[\d+\])?\s*:/i;
+
+/*
+ * Read a header block into a Map of lowercased name to value. Takes either the
+ * requested fields alone, as a HEADER.FIELDS fetch returns them, or a whole
+ * message, in which case only the part before the first blank line is read.
+ */
+function headerFields(raw) {
+  let buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw || ""), "utf8");
+
+  const end = [buffer.indexOf("\r\n\r\n"), buffer.indexOf("\n\n")]
+    .filter((index) => index !== -1)
+    .reduce((first, index) => Math.min(first, index), buffer.length);
+
+  buffer = buffer.subarray(0, end);
+
+  const fields = new Map();
+
+  // Unfold first: a long header continues on lines that start with whitespace.
+  const lines = buffer.toString("utf8").replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/);
+
+  for (const line of lines) {
+    const colon = line.indexOf(":");
+
+    if (colon <= 0) {
+      continue;
+    }
+
+    const name = line.slice(0, colon).trim().toLowerCase();
+
+    if (!fields.has(name)) {
+      fields.set(name, line.slice(colon + 1).trim());
+    }
+  }
+
+  return fields;
+}
+
+/**
+ * Tell a person's mail from a machine's.
+ *
+ * Errs towards the machine, deliberately. The two mistakes do not cost the
+ * same: a person taken for a machine is on the wall for half an hour instead of
+ * half a day, while a machine taken for a person is an appointment confirmation
+ * that stays up all day.
+ *
+ * @param {object} mail
+ * @param {string} mail.from the sender's address
+ * @param {string} mail.subject
+ * @param {Map<string, string>} mail.headers lowercased name to value, as
+ *   headerFields() returns them
+ * @returns {{automated: boolean, reason: string}} and why, for the journal
+ */
+function sortMail({ from = "", subject = "", headers = new Map() } = {}) {
+  const autoSubmitted = headers.get("auto-submitted");
+
+  if (autoSubmitted && !/^\s*no\b/i.test(autoSubmitted)) {
+    return { automated: true, reason: "Auto-Submitted" };
+  }
+
+  const precedence = headers.get("precedence");
+
+  if (precedence && /\b(?:bulk|list|junk|auto[-_]?reply)\b/i.test(precedence)) {
+    return { automated: true, reason: `Precedence: ${precedence.trim().toLowerCase()}` };
+  }
+
+  for (const [name, label] of Object.entries(AUTOMATED_HEADERS)) {
+    if (headers.has(name)) {
+      return { automated: true, reason: label };
+    }
+  }
+
+  const address = String(from || "").trim().toLowerCase();
+  const mailbox = address.includes("@") ? address.slice(0, address.lastIndexOf("@")) : "";
+
+  if (mailbox && AUTOMATED_SENDER.test(mailbox)) {
+    return { automated: true, reason: `sent from ${mailbox}@` };
+  }
+
+  const topic = String(subject || "");
+
+  if (CALENDAR_SUBJECT.test(topic)) {
+    return { automated: true, reason: "a calendar" };
+  }
+
+  if (!REPLY_SUBJECT.test(topic)) {
+    const match = topic.match(AUTOMATED_SUBJECT);
+
+    if (match) {
+      return { automated: true, reason: `subject says "${match[0].toLowerCase()}"` };
+    }
+  }
+
+  return { automated: false, reason: "a person" };
+}
+
+function minutesSetting(value, fallback) {
+  const minutes = Number(value);
+
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : fallback;
+}
+
+/* How long a mail sorted this way stays on the wall, for this account. */
+function mailLifetimeMs(sorting, account = {}) {
+  const minutes = sorting?.automated
+    ? minutesSetting(account.automatedMailMinutes, DEFAULT_AUTOMATED_MAIL_MINUTES)
+    : minutesSetting(account.personMailMinutes, DEFAULT_PERSON_MAIL_MINUTES);
+
+  return minutes * 60000;
+}
+
+/*
+ * Each mail card says once, in the journal, what it was taken for and when it
+ * comes down. The sort is a guess and the wall is the only other place to see
+ * it. The sender's domain and not the subject, so the journal learns no more
+ * about the mail than the sort needed to.
+ */
+const announcedMail = new Map();
+
+function announceMail(log, source, id, from, sorting, expiresAt) {
+  const now = Date.now();
+
+  for (const [key, until] of announcedMail) {
+    if (until <= now) {
+      announcedMail.delete(key);
+    }
+  }
+
+  if (announcedMail.has(id)) {
+    return;
+  }
+
+  announcedMail.set(id, expiresAt);
+
+  const domain = String(from || "").split("@")[1] || "an unknown sender";
+  const until = new Date(expiresAt).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit"
+  });
+
+  log.info?.(
+    `[MMM-SecondBrain] ${source} mail from ${domain} is ` +
+    (sorting.automated ? `automated (${sorting.reason})` : "from a person") +
+    `; on the wall until ${until} unless it is read first.`
+  );
 }
 
 function envelopeIdentity(addresses) {
@@ -937,7 +1147,27 @@ async function extractPackageInfo(message) {
       return null;
     }
 
+    // Safety notices can quote shipping language and example order/tracking
+    // numbers. They are not transactions. Ignore quoted product names so a
+    // real shipment of a book about scams still qualifies; body footers often
+    // contain safety advice too, so only classify the subject's intent here.
+    const subjectIntent = s.replace(/"[^"]*"|“[^”]*”/g, "");
+    if (/\b(?:scams?|phishing|fraud(?:ulent)?)\b/.test(subjectIntent)) {
+      return null;
+    }
+
     const status = deliveryStatus(s, RETAILER_STAGES, UNKNOWN_STATUS);
+    const amazonOrder = findTracking("amazonOrder", `${subject}\n${text}`, compact);
+    const hasShipmentSubject = status !== UNKNOWN_STATUS &&
+      (status !== "Delayed" || /\b(?:order|package|shipment|delivery|delayed|late)\b/.test(s));
+
+    // An Amazon sender is only a candidate, not evidence of a package. Keep
+    // stage announcements without identifiers and identifier-backed updates,
+    // but don't turn newsletters or account/security mail into phantom cards.
+    // "Update on" alone is too broad to establish a delayed shipment.
+    if (!hasShipmentSubject && !amazonOrder && !trackingId) {
+      return null;
+    }
 
     // Amazon quotes the item after a stage prefix, and uses several prefixes for
     // the same stage. A prefix missing from this list costs the card its product
@@ -958,7 +1188,6 @@ async function extractPackageInfo(message) {
       ? titleMatch[1].trim().replace(/^"(.*)"$/s, "$1")
       : "Amazon Package";
 
-    const amazonOrder = findTracking("amazonOrder", `${subject}\n${text}`, compact);
     const orderId = amazonOrder
       ? amazonOrder[1]
       : `unknown-${stableKey("amazon", itemName)}`;
@@ -1161,15 +1390,40 @@ async function pollGmail(configDir, log = console, report = null) {
             continue;
           }
 
+          const messageKey =
+            message.envelope?.messageId || `${importantMailbox}:${message.uid}`;
+          const id = `gmail:${alias}:${messageKey}`;
+
+          /*
+           * Mail here is on the wall because a filter put it here, which says it
+           * is worth seeing -- not for how long. That is the same question for
+           * every mail, wherever it was found.
+           */
+          let expiresAt;
+
+          if (!voiceLabel) {
+            const sorting = sortMail({
+              from: sender.address,
+              subject,
+              headers: headerFields(message.source)
+            });
+
+            expiresAt = timestamp + mailLifetimeMs(sorting, account);
+
+            if (expiresAt <= Date.now()) {
+              continue;
+            }
+
+            announceMail(log, "Gmail", id, sender.address, sorting, expiresAt);
+          }
+
           const voiceContact = voiceLabel
             ? await resolveVoiceContact(configDir, subject, sender.address, log)
             : null;
           const preview = await parsedPreview(message.source, 180);
-          const messageKey =
-            message.envelope?.messageId || `${importantMailbox}:${message.uid}`;
 
           results.push({
-            id: `gmail:${alias}:${messageKey}`,
+            id,
             kind: voiceLabel ? "voice" : "email",
             label: voiceLabel || `Email · ${accountName}`,
             title: voiceLabel
@@ -1177,6 +1431,7 @@ async function pollGmail(configDir, log = console, report = null) {
               : `${cleanText(sender.display, 70)} — ${cleanText(subject, 100)}`,
             detail: stripGoogleVoiceBoilerplate(preview),
             timestamp,
+            ...(expiresAt ? { expiresAt } : {}),
             priority: voiceLabel ? 100 : 75,
             source: accountName
           });
@@ -1323,37 +1578,72 @@ async function pollProton(configDir, log = console, report = null) {
 
       const accountName = account.displayName || account.alias || "Proton Mail";
       const since = new Date(Date.now() - Number(account.maxAgeDays || 14) * 86400000);
+      const resultLimit = Math.max(1, Number(account.maxResults || 8));
 
       let lock;
       try {
         lock = await client.getMailboxLock(mailbox, { readOnly: true });
 
         const uids = await client.search({ seen: false, since }, { uid: true });
+
+        /*
+         * Headers for more than can be shown, because a mail that has run its
+         * time gives its place to an older one that has not: a person's mail
+         * from this morning behind an hour of receipts. Headers are a few
+         * hundred bytes; no body is fetched.
+         */
         const selected = uids
           .sort((a, b) => b - a)
-          .slice(0, Number(account.maxResults || 8));
+          .slice(0, Math.max(25, resultLimit * 3));
 
         if (selected.length > 0) {
           const messages = await client.fetchAll(
             selected,
-            { envelope: true, internalDate: true },
+            { envelope: true, internalDate: true, headers: MAIL_SORT_HEADERS },
             { uid: true }
           );
 
-          for (const message of messages) {
-            results.push({
-              id: `proton:${account.alias || "account"}:${message.uid}`,
+          const cards = [];
+
+          for (const message of messages.sort((a, b) => Number(b.uid) - Number(a.uid))) {
+            const from = envelopeIdentity(message.envelope?.from).address;
+            const subject = message.envelope?.subject || "No subject";
+            const timestamp = messageTimestamp(message);
+            const sorting = sortMail({
+              from,
+              subject,
+              headers: headerFields(message.headers)
+            });
+            const expiresAt = timestamp + mailLifetimeMs(sorting, account);
+
+            if (expiresAt <= Date.now()) {
+              continue;
+            }
+
+            const id = `proton:${account.alias || "account"}:${message.uid}`;
+
+            announceMail(log, "Proton", id, from, sorting, expiresAt);
+
+            cards.push({
+              id,
               kind: "email",
               label: `Proton · ${accountName}`,
               title:
                 `${cleanText(envelopeAddress(message.envelope?.from), 70)} — ` +
-                `${cleanText(message.envelope?.subject || "No subject", 105)}`,
+                `${cleanText(subject, 105)}`,
               detail: `Unread in ${mailbox}`,
-              timestamp: messageTimestamp(message),
+              timestamp,
+              expiresAt,
               priority: 78,
               source: accountName
             });
+
+            if (cards.length >= resultLimit) {
+              break;
+            }
           }
+
+          results.push(...cards);
         }
       } finally {
         if (lock) {
@@ -2011,6 +2301,11 @@ function present(merged, options = {}) {
   const now = Date.now();
 
   const sorted = merged
+    /*
+     * A card that has run its time goes, whichever way it arrived -- including
+     * a source's last answer, replayed over a hang.
+     */
+    .filter((item) => !(Number(item.expiresAt) > 0 && Number(item.expiresAt) <= now))
     .sort((a, b) => {
       const priorityDifference = Number(b.priority || 0) - Number(a.priority || 0);
 
@@ -2040,7 +2335,7 @@ function present(merged, options = {}) {
     3
   );
   const packageLimit = limitFor(options.maxPackageItems, 3);
-  const downloadLimit = limitFor(options.maxDownloadItems, 1);
+  const downloadLimit = limitFor(options.maxDownloadItems, 3);
 
   const selected = [
     ...active
@@ -2057,8 +2352,10 @@ function present(merged, options = {}) {
    * It changes on every poll, and the frontend skips its DOM update by comparing
    * the serialised payload against the last one -- shipping a field that always
    * differs would defeat that guard and make the wall flash once a minute.
+   * expiresAt is the backend's too: the next poll after it is what takes a card
+   * down.
    */
-  return selected.map(({ lastSeenAt, ...item }) => ({
+  return selected.map(({ lastSeenAt, expiresAt, ...item }) => ({
     ...item,
     age: ageText(Number(item.timestamp || 0), now)
   }));
@@ -2117,5 +2414,9 @@ module.exports = {
   stableKey,
   resolveMailbox,
   persistAndMergePackages,
-  pruneStalePackages
+  pruneStalePackages,
+  present,
+  headerFields,
+  sortMail,
+  mailLifetimeMs
 };

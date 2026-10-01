@@ -3,12 +3,13 @@
  *
  * Three sections in the rail -- MESSAGES, INBOUND, TRANSFERS -- each a tagged
  * heading on a hairline and a stack of cards. A section is absent when it has
- * nothing to say.
+ * nothing to say. The heading's tag is unlit, as every section header on the
+ * wall is (custom.css): a heading is structure, not news.
  *
  * A card is a chamfered panel with a 2px left edge: label row on top (what it
  * is, how old it is), the title, a line of detail, and for a transfer a
  * segmented bar. No radius, no shadow. The kind of item does not get a colour;
- * it gets a word in the label.
+ * it gets a word in the label -- and a warning's word is the one lit tag.
  *
  * Tokens are the --sb-* family from custom.css, with the dark values as
  * fallbacks so the module renders sensibly if that file has not loaded.
@@ -66,8 +67,8 @@
 
   clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
 
-  background: var(--sb-t, #eeeff0);
-  color: var(--sb-g, #060607);
+  background: var(--sb-c, #1e1e20);
+  color: var(--sb-t, #eeeff0);
 
   font-size: 13px;
   font-weight: 600;
@@ -125,7 +126,7 @@
   clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
 
   border: 0;
-  border-left: 2px solid var(--sb-t, #eeeff0);
+  border-left: 2px solid var(--sb-f, #c9cacc);
   border-radius: 0;
 
   background: var(--sb-p, #0e0e0f) !important;
@@ -184,13 +185,13 @@
   flex: 0 0 auto;
 }
 
-/* A warning's label is the tag. */
+/* A warning's label is the tag, and it is lit. */
 .secondbrain-warning .secondbrain-label {
   padding: 1px 10px 0 6px;
 
   clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
 
-  background: var(--sb-t, #eeeff0);
+  background: var(--sb-f, #c9cacc);
   color: var(--sb-g, #060607) !important;
 
   font-size: 11px !important;
@@ -254,8 +255,8 @@
 /******************************************************************************
  * TRANSFER PROGRESS
  *
- * A segmented bar: the fill is the ink, the track is the hairline, and the
- * gaps are cut with the panel colour so the segments read as ticks.
+ * A segmented bar: the fill is the wall's fill, the track is the hairline,
+ * and the gaps are cut with the panel colour so the segments read as ticks.
  ******************************************************************************/
 
 .secondbrain-progress {
@@ -277,7 +278,7 @@
 
   border-radius: 0;
 
-  background: var(--sb-t, #eeeff0);
+  background: var(--sb-f, #c9cacc);
 }
 
 .secondbrain-progress::after {

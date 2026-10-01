@@ -139,14 +139,15 @@ place 0755 packaging/bin/secondbrain-server "$ROOT/usr/bin/secondbrain-server"
 place 0755 system/bin/calendar-kiosk "$ROOT/usr/bin/calendar-kiosk"
 place 0755 clock/magicmirror-python-clock.py "$ROOT/usr/bin/magicmirror-python-clock.py"
 
-# The wall's typeface, installed system-wide so the kiosk browser and the
-# native clock draw with the same file. Rajdhani is OFL and not in the
-# archive, so it is vendored; postinst runs fc-cache. custom.css also names
-# these files relatively, for a page served from somewhere without them.
-for f in config/fonts/rajdhani/*.ttf; do
-    place 0644 "$f" "$ROOT/usr/share/fonts/truetype/rajdhani/$(basename "$f")"
+# The page's Rajdhani and the clock's Orbitron are vendored OFL fonts.
+# Install both system-wide; postinst refreshes their fontconfig caches.
+for family in rajdhani orbitron; do
+    for f in config/fonts/"$family"/*.ttf; do
+        place 0644 "$f" "$ROOT/usr/share/fonts/truetype/$family/$(basename "$f")"
+    done
 done
 place 0644 config/fonts/rajdhani/OFL.txt "$ROOT/usr/share/doc/$PKG/licenses/Rajdhani-OFL.txt"
+place 0644 config/fonts/orbitron/OFL.txt "$ROOT/usr/share/doc/$PKG/licenses/Orbitron-OFL.txt"
 
 
 place 0755 system/openbox/autostart "$ROOT/usr/share/$PKG/openbox/autostart"

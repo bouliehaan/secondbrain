@@ -15,6 +15,10 @@
   "maxAgeDays": 14,
   "maxResults": 8,
 
+  "_comment_mail": "How long an unread mail stays on the wall, counted from when it arrived. personMailMinutes is for mail a person wrote. automatedMailMinutes is for mail a machine sent: confirmations, receipts, reminders, codes, invitations, newsletters. Opening a mail takes it down sooner. maxAgeDays is only how far back the unread search looks.",
+  "personMailMinutes": 720,
+  "automatedMailMinutes": 30,
+
   "monitorPackages": true,
   "packageMaxAgeDays": 7,
   "packageScanLimit": 250

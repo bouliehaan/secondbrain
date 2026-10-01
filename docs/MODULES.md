@@ -21,6 +21,19 @@ the station is demoted to the small line above it:
 └─────────────────────────────────────────┘
 ```
 
+A podcast episode says when it came out, at the right-hand end of the third
+line where the station sits at the end of the first: `POSTED 11:04 AM` for
+one posted today, `POSTED Sep 9` for one from before, with the year only when
+it is not this one. The time matters on the day and stops mattering after
+it; a bare time means today everywhere on the wall. The show's name beside
+it gives way first — it is on the cover already — and the release is never
+cut. A feed that never dated its episode gets no line rather than a guess.
+
+```
+│ ▪▪▪  JRE #2214 - Duncan Trussell        │
+│ ▪▪▪  The Joe Rogan Experi…  POSTED Sep 9│
+```
+
 The cover is drawn in colour, as it comes. The wall's chrome is black and
 white and only its content -- calendar events in their calendar's colour, and
 this square -- carries colour, so a cover is the loudest object in the room,
@@ -29,14 +42,15 @@ which is the weight the radio should have.
 Three sources, in decreasing order of how much is knowable:
 
 - **A Samo channel** has a scheduler that chose the item on purpose, so the
-  answer is exact. The album comes from walking the channel's `itemRef` into
-  the catalog.
+  answer is exact. The album, and an episode's release, come from walking the
+  channel's `itemRef` into the catalog.
 - **An internet station** gives whatever it puts in ICY metadata, which ranges
   from a full artist/title pair to its own name on a loop. A station echoing its
   own branding is treated as "no track information" rather than a song called
   NPR — see `isRedundantStationLabel`.
 - **A cast queue** ("play to samo-radio" from the phone) arrives already
-  resolved — except when the thing cast is a station or a channel. Those reach
+  resolved — an episode's release excepted, which the item does not carry and
+  is looked up once — and except when the thing cast is a station or a channel. Those reach
   the device as a one-item queue whose only facts are a name and a stream URL:
   the daemon refreshes live metadata only for a *tuned* source, and the cast
   item carries no picture. So the wall works out the source from the item and
@@ -171,8 +185,14 @@ browser sends its config, so a restarted service picks up where it left off
 without the browser's help — a helper that waited for the browser came back from
 `apt upgrade` idle, and the wall showed the same song for twelve hours. The token
 is only ever used server-side: cover art is fetched by the
-node helper and handed to the browser as a data URI, so no credential reaches
-the kiosk page — which is served to anything on the LAN that asks.
+node helper, which serves the bytes itself at `/nowplaying/artwork/<id>` on
+MagicMirror's own web server, so no credential reaches the kiosk page — which
+is served to anything on the LAN that asks. The helper decides what kind of
+picture it holds from the bytes, not from samo's `Content-Type` (samo serves a
+cover it saved under an extension it did not recognise as
+`application/octet-stream`), and takes a cover at whatever size the feed
+publishes it, because a show whose cover is too big for samo's own download
+cap is redirected to the feed's CDN with no thumbnail on offer.
 
 Verify the display logic and the fetch path with no samo-server and no mirror:
 
@@ -208,7 +228,7 @@ has to be liveable.
 
 Three things stop it becoming wallpaper:
 
-- **It only looks 36 hours ahead.** The wall shows five days of forecast and
+- **It only looks 36 hours ahead.** The wall offers seven days of forecast and
   this alerts on none of them but tonight's. A cold snap on Friday does not need
   a card up since Tuesday.
 - **A low that already happened does not count.** A daily low is reported
@@ -241,7 +261,7 @@ node scripts/check-freeze-watch.js
 
 ```
 CAL 4/4 // GMAIL OK // ░PROTON DOWN░ // TRANSMISSION OK // SAMO OK
-                                       POLLED 15:41:07 (41 S) // NTP LOCK // UP 41 D
+                              POLLED 41 S AGO (TOOK 21 S) // NTP LOCK // UP 41 D
 ```
 
 Every word on it is something the wall already knows or can cheaply ask. The
@@ -249,6 +269,17 @@ mail poll's per-source result comes from `MMM-SecondBrain` and samo's from
 `NowPlaying`, both re-broadcast as module notifications; the helper asks
 `chronyc tracking` whether the clock is locked, reads uptime, and probes each
 calendar feed with a plain GET every fifteen minutes.
+
+`POLLED` is how long ago the mail poll last finished, and it ticks — that one
+segment is rewritten in place every second, so the number on the wall is
+never stale by more than a second. The bracket is how long that poll took,
+kept because a poll that takes four minutes should look different from one
+that takes two seconds (one slow source holds up every text behind it). It
+used to read `POLLED 15:41:07 (41 S)`, the bracket being the duration, which
+reads as an age and then sits at 41 for a minute; it said what it meant and
+was still wrong to look at. A poll more than three intervals overdue is
+hatched: a stalled poll is what lets a text die unseen, and nothing else on
+the wall says so.
 
 The probe is why the module exists. A calendar that starts answering 404 does
 not go blank — the grid keeps drawing whatever it last fetched and nothing
@@ -279,50 +310,76 @@ events a day), and it was the thing cut short.
 
 So after every change to the rail, `Rail` measures what everything would take
 at full height and hides whole items — forecast rows, cards, days, events, the
-rows under the radio card — until it fits. Three promises:
+rows under the radio card, and on a day full enough whole cards and blocks —
+until it fits. Three promises:
 
 - **The rest of today is always listed, whole.** Passed events are already
-  filtered out of the agenda; what is left of today is the floor.
-- **Every card stack keeps a card.** Messages, inbound and transfers each
-  show at least one; a section that has to hold cards back says so in its
-  heading: `MESSAGES 01 / 03`.
-- **Nothing ends mid-row.** A day that only partly fits shows as many whole
-  rows as fit and then `+ 4 MORE`, in the register of an empty day's `CLEAR`.
-  A day with no room for a single row is left off.
+  filtered out of the agenda; what is left of today is the floor of the
+  whole rail. Nothing above it may cost it a row: not a text, not a package,
+  not the radio, not the weather, not a freeze warning. Only the clock never
+  moves for it, because the visible clock is the native overlay and hiding
+  the box it reserves would only slide the rail under its ink.
+- **Every card stack keeps a card** — as long as today allows it. Messages,
+  inbound and transfers each show at least one; a section that has to hold
+  cards back says so in its heading: `MESSAGES 01 / 03`.
+- **Nothing ends mid-row.** A day beyond today that only partly fits shows
+  as many whole rows as fit, with `+ 4 MORE` in its day heading. The count
+  costs no extra row: a separate line used to leave 74px empty even when
+  the next day's heading and first event would fit. A day with no room for
+  a single row is left off. Today is never partial.
 
-What the rest of the space goes to is a ladder, climbed one rung at a time:
+What the rest of the space goes to is a ladder, climbed one rung at a time.
+Today is the floor and tomorrow is the leftover: everything between them
+goes up whole, in order, and the schedule beyond today takes what that
+leaves.
 
 ```
+messages all   every text there is
+forecast all   the week's weather, whole
 upnext 1       what the radio does next
 due 1          the covers of the episodes the channel owes
-schedule 2     tomorrow
-forecast 2     tomorrow's row of the forecast
-messages 2
-inbound 2
+inbound all    every package
 upnext all     the radio's second row
-schedule 3
-forecast 3
-messages 3
-inbound 3
-forecast 5
-transfers all
-schedule all
+transfers all  every download
+schedule all   tomorrow, the day after, and on down
 ```
 
 A rung raises one list to a count. One that does not wholly fit takes the
 whole items that do and closes that list; the walk carries on, so a small
-thing further down can still use what a big one could not. A day's schedule
-and its weather go up together on purpose. The radio's rows and its row of
-covers are lists with a floor of zero: the card they hang under stands
-whatever happens to them, so they are the first things added and never part
-of what gives way.
+thing further down can still use what a big one could not. Texts come before
+everything, because a text is on the wall nowhere else and gone in an hour,
+while tomorrow is on the grid to the left — the order once had tomorrow
+ahead of the second text, and the wall spent its spare room on three rows of
+tomorrow and `+ 4 MORE` while a text that would have fit twice over was held
+back. Tomorrow comes after everything, for the same reason: the order once
+had it on the fourth rung, ahead of the forecast's second row, and on any
+ordinary day — a text, a package, the radio on, seven events tomorrow — the
+wall listed all of tomorrow and cut the week's weather to a row or two. The
+radio's rows and its row of covers are lists with a floor of zero: the card
+they hang under stands whatever happens to them, so they are cheap to add
+and never part of what gives way.
 
-When even the floor does not fit — a twenty-event day with a freeze warning,
-the radio on and all three stacks — things give way in a stated order:
-transfers, then inbound, then the forecast, then today's own rows from the
-end behind `+ N MORE`, and a message last of all, because a text is the one
-thing on the wall that is nowhere else and gone in an hour. Both orders are
-in `config.js` and can be rewritten there.
+The gaps between modules stay exactly 10px. As space opens up, Rail restores
+whole forecast rows, cards and schedule events in the ladder's order. The
+forecast offers seven days, and the agenda offers up to 30 days for Rail to
+choose from. `custom.css` stacks the modules from the top with `flex-start`;
+the schedule fills the remaining height without an auto margin. After fitting
+whole items, Rail distributes the remainder through the visible schedule rows
+(or day cells when there are no events), bringing the content to the bottom
+edge. It clears that expansion before each allocation so incoming cards,
+finished downloads and resizing still get the full natural-height budget.
+The gaps between modules never expand.
+
+When even that does not fit — a twenty-event day with a freeze warning, the
+radio on and all three stacks — everything but today gives way, in a stated
+order: transfers, then inbound, then the forecast, then the radio card whole,
+then the last message, because a text is the one card that is on the wall
+nowhere else and gone in an hour; then the weather, and the freeze warning
+last of all, because when it is up it is the most important thing in the rail
+after the day itself. Both orders are in `config.js` and can be rewritten
+there — except that naming the schedule in the second changes nothing. Today
+is never trimmed, not even behind `+ N MORE`; if today's events alone do not
+fit under the clock, the rail logs that it does not fit rather than hide one.
 
 How it stays honest: the heights are measured, not assumed, from the real
 DOM in a measuring state that is put on and taken off inside one task, so the

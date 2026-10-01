@@ -11,9 +11,10 @@ check.
 - **Deliveries** — package tracking parsed out of shipping mail, plus
   Transmission downloads.
 - **Now playing**, if you run [samo-radio](https://github.com/bouliehaan/samo-radio) —
-  and what comes next: your channel's next booked show, the end of the one
-  on air, the covers of the episodes it owes you in the order it means to
-  play them, the next item in a cast queue, a BBC station's next programme.
+  when the episode on air was posted, and what comes next: your channel's
+  next booked show, the end of the one on air, the covers of the episodes it
+  owes you in the order it means to play them, the next item in a cast queue,
+  a BBC station's next programme.
 - **Freeze warnings**, so you know when to drip the faucets.
 - **A status line** under the calendar: whether each feed and account
   answered, when the last poll ran, whether the clock is locked to NTP.

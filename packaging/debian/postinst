@@ -54,7 +54,7 @@ case "$1" in
         # The vendored typeface. Without a cache refresh the kiosk browser and
         # the clock fall back to whatever sans-serif is around until the next
         # reboot, which looks like the restyle did not ship.
-        fc-cache -f /usr/share/fonts/truetype/rajdhani >/dev/null 2>&1 || true
+        fc-cache -f /usr/share/fonts/truetype/rajdhani /usr/share/fonts/truetype/orbitron >/dev/null 2>&1 || true
 
         deb-systemd-helper unmask magicmirror.service >/dev/null 2>&1 || true
         if deb-systemd-helper --quiet was-enabled magicmirror.service; then

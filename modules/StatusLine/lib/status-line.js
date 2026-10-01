@@ -7,7 +7,8 @@
  * node_helper.js.
  *
  * A segment is { text, bad }. `bad` is drawn hatched: it is the one thing on
- * the line meant to be noticed from across the room.
+ * the line meant to be noticed from across the room. A segment may also carry
+ * a `role`, for the one the browser rewrites in place between notifications.
  *
  * One object, like lib/freeze-watch.js: a global in the browser, a CommonJS
  * export in node.
@@ -19,6 +20,14 @@ const StatusLineLogic = {
   MINUTE_S: 60,
   HOUR_S: 3600,
   DAY_S: 86400,
+
+  /*
+   * The mail poll's floor, used only when the broadcast did not say what the
+   * interval is; and how many intervals may pass since the last poll finished
+   * before the line calls it overdue.
+   */
+  DEFAULT_POLL_INTERVAL_MS: 60 * 1000,
+  OVERDUE_INTERVALS: 3,
 
   /*
    * How a source reads on the wall.
@@ -127,16 +136,28 @@ const StatusLineLogic = {
     return segments;
   },
 
-  pad2(n) {
-    return String(n).padStart(2, "0");
-  },
+  /*
+   * "41 S", "3 M", "2 H", "1 D": how long ago. Exact to the second under a
+   * minute, because that is the range a healthy poll lives in and the number
+   * ticks on the wall; coarse above it, where the size of the number is the
+   * point.
+   */
+  formatAge(ms) {
+    const s = Math.floor(Math.max(0, Number(ms) || 0) / this.SECOND_MS);
 
-  /* "3:41:07 PM" -- the wall reads AM/PM. */
-  formatClock(timestamp) {
-    const d = new Date(timestamp);
-    const hours = d.getHours();
-    const hour12 = hours % 12 === 0 ? 12 : hours % 12;
-    return `${hour12}:${this.pad2(d.getMinutes())}:${this.pad2(d.getSeconds())} ${hours < 12 ? "AM" : "PM"}`;
+    if (s >= this.DAY_S) {
+      return `${Math.floor(s / this.DAY_S)} D`;
+    }
+
+    if (s >= this.HOUR_S) {
+      return `${Math.floor(s / this.HOUR_S)} H`;
+    }
+
+    if (s >= this.MINUTE_S) {
+      return `${Math.floor(s / this.MINUTE_S)} M`;
+    }
+
+    return `${s} S`;
   },
 
   /*
@@ -162,23 +183,43 @@ const StatusLineLogic = {
   },
 
   /*
-   * The right half: the last poll and how long it took, whether the clock is
-   * locked to NTP, and uptime.
+   * The right half: how long ago the mail poll finished and how long it took,
+   * whether the clock is locked to NTP, and uptime.
+   *
+   *   POLLED 41 S AGO (TOOK 21 S)
+   *
+   * The age is measured from `now`, and StatusLine.js rewrites this one
+   * segment every second, so the number on the wall is the number. It used
+   * to read POLLED 3:41:07 PM (41 S), where the bracket was the poll's
+   * duration -- which anyone reading a wall takes for an age, and then
+   * watches sit at 41 for a minute. The duration is still there, because a
+   * poll that takes four minutes should look different from one that takes
+   * two seconds; it just says what it is.
+   *
+   * Overdue -- more than OVERDUE_INTERVALS poll intervals since the last one
+   * finished -- is hatched. A stalled poll is exactly the thing that lets a
+   * text die unseen (they live an hour), and nothing else on the wall says so.
    *
    *   ntp   "lock" | "none" | null   null is "could not ask" and reads NTP --
    *         undefined means the helper has not reported yet: nothing drawn
    */
-  composeRight({ polledAt, pollMs, ntp, uptimeSec } = {}) {
+  composeRight({ polledAt, pollMs, pollIntervalMs, ntp, uptimeSec } = {}, now = Date.now()) {
     const segments = [];
 
     if (Number.isFinite(Number(polledAt)) && Number(polledAt) > 0) {
       const took = Number.isFinite(Number(pollMs))
-        ? ` (${Math.max(1, Math.round(Number(pollMs) / this.SECOND_MS))} S)`
+        ? ` (TOOK ${Math.max(1, Math.round(Number(pollMs) / this.SECOND_MS))} S)`
         : "";
 
+      const age = Math.max(0, Number(now) - Number(polledAt));
+      const interval = Number.isFinite(Number(pollIntervalMs)) && Number(pollIntervalMs) > 0
+        ? Number(pollIntervalMs)
+        : this.DEFAULT_POLL_INTERVAL_MS;
+
       segments.push({
-        text: `POLLED ${this.formatClock(Number(polledAt))}${took}`,
-        bad: false
+        text: `POLLED ${this.formatAge(age)} AGO${took}`,
+        bad: age > interval * this.OVERDUE_INTERVALS,
+        role: "poll"
       });
     }
 

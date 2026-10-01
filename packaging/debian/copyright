@@ -22,3 +22,10 @@ License: OFL-1.1
  This Font Software is licensed under the SIL Open Font License, Version 1.1.
  The full text is installed as /usr/share/doc/secondbrain/licenses/Rajdhani-OFL.txt
  and kept alongside the font files in the source tree.
+
+Files: config/fonts/orbitron/*
+Copyright: 2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron)
+License: OFL-1.1
+ This Font Software is licensed under the SIL Open Font License, Version 1.1.
+ The full text is installed as /usr/share/doc/secondbrain/licenses/Orbitron-OFL.txt
+ and kept alongside the font file in the source tree.

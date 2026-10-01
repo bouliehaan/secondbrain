@@ -2,20 +2,23 @@
  * FREEZE WATCH
  *
  * One chamfered card in the rail, the same shape as the message cards and the
- * radio card next door: panel fill, 2px left edge, a reversed tag for the
+ * radio card next door: panel fill, 2px left edge, a slanted tag for the
  * label. It belongs to the dashboard rather than interrupting it.
  *
  * The escalation from watch to warning is not a colour. There are no colours.
  * A warning is a hazard, and hazard on this wall is hatched: the card takes
- * the 45° stripes, a 4px edge instead of 2px, a larger headline, and a square
- * that breathes on a four-and-a-half second cycle. Nothing full-bleed, and the
- * only moving thing on the card is the square. This card may be up for a
- * fortnight; it has to be liveable.
+ * the 45° stripes, a 4px edge instead of 2px, a larger headline, the label
+ * lights, and a square that breathes on a four-and-a-half second cycle.
+ * Nothing full-bleed, and the only moving thing on the card is the square.
+ * This card may be up for a fortnight; it has to be liveable.
  *
  * What actually escalates, in order of how much it costs the eye:
  *
- *   watch      2px edge, panel fill, 17px headline, square still
- *   warning    4px edge, hatched fill, 19px headline, square breathing
+ *   watch      2px edge, panel fill, 17px headline, unlit tag, square still
+ *   warning    4px edge, hatched fill, 19px headline, lit tag, square breathing
+ *
+ * The tag is a lamp, as every tag on the wall is (custom.css): unlit on a
+ * watch, when the cold is forecast, and lit on a warning, when it is here.
  *
  * Tokens are the --sb-* family from custom.css, with the dark values as
  * fallbacks so the card renders sensibly if that file has not loaded.
@@ -41,7 +44,7 @@
    * one piece that has to read from across the room, and a border cannot be
    * knocked out of alignment by a long headline wrapping.
    */
-  border-left: 2px solid var(--sb-t, #eeeff0);
+  border-left: 2px solid var(--sb-f, #c9cacc);
   border-radius: 0;
 
   background: var(--sb-p, #0e0e0f) !important;
@@ -87,8 +90,8 @@
 
   clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
 
-  background: var(--sb-t, #eeeff0);
-  color: var(--sb-g, #060607) !important;
+  background: var(--sb-c, #1e1e20);
+  color: var(--sb-t, #eeeff0) !important;
 
   font-size: 11px !important;
   font-weight: 600;
@@ -155,7 +158,7 @@
 
   margin-top: -4px;
 
-  background: var(--sb-t, #eeeff0);
+  background: var(--sb-f, #c9cacc);
 }
 
 .freezewatch-detail {
@@ -201,6 +204,12 @@
 
 .freezewatch-warning .freezewatch-headline {
   font-size: 19px !important;
+}
+
+/* The lamp comes on. */
+.freezewatch-warning .freezewatch-label {
+  background: var(--sb-f, #c9cacc);
+  color: var(--sb-g, #060607) !important;
 }
 
 .freezewatch-warning .freezewatch-detail {

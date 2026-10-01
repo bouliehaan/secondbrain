@@ -9,9 +9,9 @@
  *                    pass: the cuts come off and the schedule takes its
  *                    natural height, so every item has its real size. It is
  *                    removed in the same task, before a paint.
- *   .rail-more       the "+ N more" line at the end of a day that is not all
- *                    there. Set like the CLEAR of an empty day: small, tracked,
- *                    faint ink, no edge -- it is a count, not an event.
+ *   .rail-more       the "+ N more" count in a partial day's heading.
+ *                    It shares the heading's line so real events, rather
+ *                    than an overflow label, use the remaining height.
  *
  * Tokens are the --sb-* family from custom.css, with the dark values as
  * fallbacks. There are no light rules here.
@@ -22,10 +22,16 @@
 }
 
 /*
- * The schedule is flex 1 1 0 with its overflow hidden, and its inner boxes
- * are 100% of that. To measure it, all of that becomes auto, and the rail
- * simply runs off the bottom of a region that clips it.
+ * The schedule fills the remaining height at the bottom of the rail, shrinks
+ * with its overflow hidden when the rail is over-full, and its inner boxes
+ * are 100% of that. To measure it, all of that becomes auto and unshrinkable,
+ * and the rail simply runs off the bottom of a region that clips it.
  */
+.region.top.right > .container.rail-measuring {
+  --rail-event-extra: 0px !important;
+  --rail-day-extra: 0px !important;
+}
+
 .region.top.right > .container.rail-measuring > .module.side-agenda,
 .region.top.right > .container.rail-measuring > .module.MMM-CalendarExt3Agenda,
 .region.top.right > .container.rail-measuring > .module.side-agenda > .module-content,
@@ -51,23 +57,22 @@
   border-bottom: 0;
 }
 
-/* Last pass's lines are not part of what a day measures; the probe is. */
-.region.top.right > .container.rail-measuring .rail-more:not(.rail-probe) {
+/* Last pass's counts are not part of what a day measures. */
+.region.top.right > .container.rail-measuring .rail-more {
   display: none !important;
 }
 
-.CX3A .rail-more {
+.CX3A .cellHeaderMain > .rail-more {
   display: block;
 
-  margin: 0;
-  padding: 5px 0 1px;
+  flex: 0 0 auto;
+  margin: 0 0 0 10px;
+  padding: 0;
 
   color: var(--sb-t3, #575859);
 
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: 0.16em;
+  font: inherit;
+  letter-spacing: inherit;
   text-transform: uppercase;
   white-space: nowrap;
 }

@@ -21,7 +21,8 @@ const {
   resolveMailbox,
   persistAndMergePackages,
   pruneStalePackages,
-  cachedItems
+  cachedItems,
+  present
 } = require("../modules/MMM-SecondBrain/lib/sources.js");
 
 let failures = 0;
@@ -97,6 +98,37 @@ async function run() {
     shippedInfo?.title === "Blue Widget, 3-pack",
     `got ${shippedInfo?.title}`
   );
+
+  // Amazon's sender address alone does not make an email a shipment. Safety
+  // advice may even quote a shipping notice and include example identifiers.
+  for (const [subject, body] of [
+    ["Check if a message is really from Amazon", "Verify messages with Alexa for Shopping. Visit amazon.com/scams for scam prevention."],
+    ["Protect yourself from scams", "Learn how to spot fake package delivery messages."],
+    ["An important message from Amazon", "Stay safe: scammers may say your package has shipped."],
+    ["Your package has shipped — beware of scams", "Example order # 114-3941689-1234567. Tracking ID: 1Z999AA10123456784"],
+    ["Avoid order confirmation scams", "Example order # 114-3941689-1234567."],
+    ["Delivery phishing alert", "A fake message may say your package is arriving today."],
+    ["Update on account security", "Review your account settings."],
+    ["Deals picked for you", "Shop our latest offers."],
+    ["Your Amazon verification code", "Your code is 123456."]
+  ]) {
+    const info = await extractPackageInfo(message({
+      from: "store-news@amazon.com",
+      subject,
+      body: plainMime("From: Amazon <store-news@amazon.com>", body)
+    }));
+    check(`Amazon non-shipment mail is ignored: ${subject}`, info === null,
+      `got ${JSON.stringify(info)}`);
+  }
+
+  const safetyFooter = await extractPackageInfo(message({
+    from: "shipment-tracking@amazon.com",
+    subject: 'Shipped: "How to Avoid Scams"',
+    body: plainMime("From: Amazon <shipment-tracking@amazon.com>",
+      "Your package has shipped. Protect yourself from scams: visit your account directly.")
+  }));
+  check("a real shipment with a safety footer and scam-related product title is kept",
+    safetyFooter?.status === "Shipped" && safetyFooter?.title === "How to Avoid Scams");
 
   /* ---------------------------------------------------------------- *
    * A tracking number the mail client wrapped across two lines is still
@@ -706,6 +738,56 @@ async function run() {
   );
 
   fs.rmSync(cacheDir, { recursive: true, force: true });
+
+  /* ---------------------------------------------------------------- *
+   * Downloads get slots of their own, and as many as the config says.
+   * The helper used to forward no download cap at all, so the library's
+   * fallback of one applied and a second torrent never reached the wall.
+   * ---------------------------------------------------------------- */
+
+  const torrent = (id, addedMinutesAgo) => ({
+    id: `transmission:active:${id}`,
+    kind: "download",
+    label: "Downloading",
+    title: `Torrent ${id}`,
+    detail: "19% · 0 B/s · ETA unknown",
+    timestamp: Date.now() - addedMinutesAgo * 60000,
+    priority: 45,
+    progress: 19
+  });
+  const text = (id) => ({
+    id: `voice:${id}`,
+    kind: "voice",
+    label: "Voice message",
+    title: "Me",
+    detail: `test ${id}`,
+    timestamp: Date.now(),
+    priority: 100
+  });
+  const mixed = () => [torrent(1, 30), torrent(2, 20), torrent(3, 10), torrent(4, 5), text(1), text(2)];
+  const downloadsOf = (items) => items.filter((item) => item.kind === "download");
+
+  check(
+    "three downloads are offered when the config asks for three",
+    downloadsOf(present(mixed(), { maxDownloadItems: 3 })).length === 3
+  );
+  check(
+    "and only one when it asks for one",
+    downloadsOf(present(mixed(), { maxDownloadItems: 1 })).length === 1
+  );
+  check(
+    "the default is three, like the other kinds",
+    downloadsOf(present(mixed(), {})).length === 3
+  );
+  check(
+    "the newest torrents are the ones offered",
+    downloadsOf(present(mixed(), { maxDownloadItems: 3 })).map((item) => item.id).join() ===
+      "transmission:active:4,transmission:active:3,transmission:active:2"
+  );
+  check(
+    "downloads take no slot from the texts",
+    present(mixed(), { maxItems: 2, maxDownloadItems: 3 }).filter((item) => item.kind === "voice").length === 2
+  );
 
   console.log(
     `\n${failures === 0 ? "All checks passed." : `${failures} check(s) failed.`}\n`
