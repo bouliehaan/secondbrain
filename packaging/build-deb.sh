@@ -19,6 +19,13 @@ cd "$REPO_ROOT"
 
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
 VERSION="${VERSION#v}"
+# dpkg needs a version that starts with a digit. A checkout with no tags (CI's
+# shallow clone) describes itself as a bare commit hash, so make that a valid
+# pre-release version rather than a failed build.
+case "$VERSION" in
+    [0-9]*) ;;
+    *) VERSION="0.0.0+${VERSION}" ;;
+esac
 ARCHES="${ARCHES:-amd64 arm64 armhf}"
 PKG=secondbrain
 ROOT="build/deb"
