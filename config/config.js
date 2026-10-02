@@ -253,15 +253,15 @@ let config = {
     {
       module: "weather",
       position: "top_right",
-      header: "WEATHER",
+      header: "WEATHER", // @place
       classes: "side-current-weather",
 
       config: {
         weatherProvider: "openmeteo",
         type: "current",
 
-        lat: 40.7128,
-        lon: -74.006,
+        lat: 40.7128, // @lat
+        lon: -74.006, // @lon
 
         units: "imperial",
         roundTemp: true,
@@ -299,8 +299,8 @@ let config = {
         weatherProvider: "openmeteo",
         type: "forecast",
 
-        lat: 40.7128,
-        lon: -74.006,
+        lat: 40.7128, // @lat
+        lon: -74.006, // @lon
 
         units: "imperial",
         roundTemp: true,

@@ -45,6 +45,7 @@ check: deps syntax
 	@node scripts/check-status-line.js  >/dev/null && echo "  status-line  ok"
 	@node scripts/check-rail.js         >/dev/null && echo "  rail         ok"
 	@node scripts/check-example-config.js >/dev/null && echo "  example      ok"
+	@node scripts/check-merge-config.js  >/dev/null && echo "  merge        ok"
 
 ## check-all: check, plus the slow one (~30s; it waits out a real deadline)
 check-all: check
