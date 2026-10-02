@@ -2,6 +2,14 @@
 set -e
 
 case "$1" in
+    remove|purge)
+        # Written by MagicMirror at runtime, not shipped, so dpkg would leave
+        # it behind in a directory it then cannot remove.
+        rm -f /opt/MagicMirror/js/positions.js
+        ;;
+esac
+
+case "$1" in
     purge)
         # Only on purge, never on remove. Both directories hold things that
         # should survive reinstalling the package: /etc/magicmirror-secondbrain

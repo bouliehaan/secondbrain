@@ -17,8 +17,14 @@ set -eu
 
 MM_ROOT="${SECONDBRAIN_MM_ROOT:-/opt/MagicMirror}"
 
+# The package bundles the node it was tested with, because most distributions'
+# own nodejs is older than MagicMirror accepts. SECONDBRAIN_NODE still wins, and
+# a node on PATH is the fallback for a tree run outside the package.
+BUNDLED_NODE=/usr/lib/secondbrain/node/bin/node
 if [ -n "${SECONDBRAIN_NODE:-}" ]; then
     NODE="$SECONDBRAIN_NODE"
+elif [ -x "$BUNDLED_NODE" ]; then
+    NODE="$BUNDLED_NODE"
 else
     NODE="$(command -v node 2>/dev/null || true)"
 fi
@@ -53,4 +59,9 @@ if [ ! -d "$MM_ROOT" ]; then
 fi
 
 cd "$MM_ROOT"
+# `node --run server` runs package.json's "node ./serveronly" through a shell,
+# which finds `node` on PATH -- so without this, the version checked above is
+# not the one that runs, and on a stock Debian it is one MagicMirror refuses.
+PATH="$(dirname "$NODE"):$PATH"
+export PATH
 exec "$NODE" --run server

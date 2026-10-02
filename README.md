@@ -25,35 +25,32 @@ the machine's time is actually synchronised.
 ## Install
 
 ```bash
-curl -fsSLO https://github.com/bouliehaan/secondbrain/releases/latest/download/secondbrain_all.deb
-sudo apt install ./secondbrain_all.deb
+curl -fsSLo /tmp/secondbrain.deb https://github.com/bouliehaan/secondbrain/releases/latest/download/secondbrain_$(dpkg --print-architecture).deb && sudo apt install -y /tmp/secondbrain.deb
 ```
 
-That is the whole install. MagicMirror and the calendar modules are bundled, so
-there is nothing to clone and no build step. The package creates the
-`calendar-display` account the wall runs as, installs and starts the service,
-sets up autologin into a full-screen browser session, and points the system
-clock at NIST.
+That is the whole install. MagicMirror, the calendar modules and the Node
+runtime they need are bundled, so there is nothing to clone, no build step and
+nothing to install first. The package creates the `calendar-display` account
+the wall runs as, writes a starting config with the weather set from your
+timezone, installs and starts the service, sets up autologin into a
+full-screen browser session, points the system clock at NIST, and tells you the
+address the dashboard is answering on.
 
 Reboot, and the display comes up on its own.
 
-Upgrading is the same two commands. `apt remove` leaves your settings and
-credentials alone; `apt purge` deletes them.
+Upgrading is the same line. `apt remove` leaves your settings and credentials
+alone; `apt purge` deletes them.
 
 ## Requirements
 
 | | |
 |---|---|
-| OS | Debian or Ubuntu, x86-64 or arm64 |
+| OS | Debian, Ubuntu or Raspberry Pi OS — x86-64, 64-bit ARM or 32-bit ARM |
 | Display | anything X11 can drive; the box runs headless otherwise |
-| Node | 22.21.1 or newer, excluding the 23.x line |
-| Disk | about 110 MB installed |
+| Disk | about 240 MB installed |
 
-Node is the one to check before you start. Ubuntu's own `nodejs` package is
-older than the minimum, so you will likely want a current build from
-[NodeSource](https://github.com/nodesource/distributions) or a tarball in
-`/opt`. Any node works as long as you point the service at it — see
-[Settings](#settings).
+Node comes with the package: most distributions' own `nodejs` is older than
+MagicMirror accepts. To run a different one, see [Settings](#settings).
 
 ## Add your accounts
 
@@ -61,7 +58,7 @@ Credentials live in `/etc/magicmirror-secondbrain/`, which the installer creates
 and nothing else writes to. Each source is optional — leave a file out and that
 part of the dashboard simply does not appear.
 
-Templates for all of them are in `/usr/share/doc/secondbrain/examples/`.
+Templates for all of them are in `/usr/share/secondbrain/examples/`.
 
 **Mail and texts** (`gmail/accounts/personal.json`) — an app password, not your
 real one. Google Voice texts arrive as mail, which is how they reach the wall.
@@ -103,15 +100,19 @@ anything on your network that asks for it.
 ## Choose what is on the wall
 
 The dashboard layout lives in `/opt/MagicMirror/config/config.js`: which
-calendars to fetch, where each panel sits, what the weather is for. A worked
-example is at `/usr/share/doc/secondbrain/config.example.js` — copy it and edit.
+calendars to fetch, where each panel sits, what the weather is for. The install
+writes it for you — a public holiday calendar, and the weather for your
+timezone's city — so the wall works before you change anything. Add your own
+calendars in its `calendars` list; the comment there shows the shape. If the
+weather city is wrong, change the two `lat`/`lon` pairs and the `header` above
+them.
 
 ```bash
-sudo cp /usr/share/doc/secondbrain/config.example.js \
-        /opt/MagicMirror/config/config.js
-sudo chown calendar-display:calendar-display /opt/MagicMirror/config/config.js
-sudo systemctl restart magicmirror
+sudo nano /opt/MagicMirror/config/config.js
 ```
+
+The original is at `/usr/share/secondbrain/config.example.js` if you want to
+start again.
 
 **Upgrades never touch this file.** It is yours, it is the only copy, and
 private calendar URLs — a Nextcloud share link, a booking-system feed — live
@@ -146,7 +147,7 @@ sudo systemctl daemon-reload
 
 | | |
 |---|---|
-| `SECONDBRAIN_NODE` | which node runs the dashboard, if the one on `PATH` is not the one you want |
+| `SECONDBRAIN_NODE` | a node to run the dashboard with instead of the bundled one |
 | `SECONDBRAIN_MM_ROOT` | where MagicMirror lives (default `/opt/MagicMirror`) |
 | `SECONDBRAIN_CHROMIUM` | which browser to run full-screen |
 | `SECONDBRAIN_TZ` | the display's timezone |
@@ -164,9 +165,9 @@ to be synchronised before it starts, so a machine that cannot reach a time
 server will sit dark on purpose. `chronyc tracking` tells you whether that is
 what is happening.
 
-**The service will not start.** Almost always node. The dashboard needs 22.21.1
-or newer and refuses the 23.x line; the journal names the version it found. Set
-`SECONDBRAIN_NODE` to a suitable one.
+**The service will not start.** The journal says why. If you have pointed
+`SECONDBRAIN_NODE` at your own node, it has to be 22.21.1 or newer and not the
+23.x line; remove the setting to go back to the bundled one.
 
 **Calendars are stale, or Now Playing is stuck on one song.** The server
 restarted and the browser did not reload — see above. Reload it now with
@@ -194,7 +195,7 @@ need no display, accounts or credentials:
 
 ```bash
 make check      # the test suites
-make deb        # dist/secondbrain_all.deb
+make deb        # dist/secondbrain_{amd64,arm64,armhf}.deb
 ```
 
 - [docs/MODULES.md](docs/MODULES.md) — what each panel shows and why

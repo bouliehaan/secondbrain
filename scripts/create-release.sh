@@ -27,7 +27,8 @@ set -euo pipefail
 
 BRANCH="${RELEASE_BRANCH:-master}"
 REPO="${RELEASE_REPO:-bouliehaan/secondbrain}"
-ASSET="secondbrain_all.deb"
+# One package per architecture; the install line picks with dpkg --print-architecture.
+ASSETS_WANTED="secondbrain_amd64.deb secondbrain_arm64.deb secondbrain_armhf.deb"
 
 BUMP="patch"
 VERSION=""
@@ -187,9 +188,11 @@ if command -v gh >/dev/null 2>&1; then
   [ -z "$ASSETS" ] && fail "no release assets for $VERSION.
     https://github.com/$REPO/actions"
 
-  printf '%s\n' "$ASSETS" | grep -q '\.deb$' \
-    || fail "the release has no .deb attached — that is the whole artifact."
-  printf "    ${C_OK}ok${C_OFF} package attached\n"
+  for asset in $ASSETS_WANTED; do
+    printf '%s\n' "$ASSETS" | grep -qx "$asset" \
+      || fail "the release has no $asset — every architecture's package is the artifact."
+  done
+  printf "    ${C_OK}ok${C_OFF} packages attached\n"
 
   IS_DRAFT="$(gh release view "$VERSION" --repo "$REPO" --json isDraft -q .isDraft 2>/dev/null || echo unknown)"
   if [ "$IS_DRAFT" = "true" ]; then
@@ -203,4 +206,4 @@ fi
 
 printf "\n${C_OK}done.${C_OFF}  %s is released\n" "$VERSION"
 echo "  Release:  https://github.com/$REPO/releases/tag/$VERSION"
-echo "  Install:  https://github.com/$REPO/releases/latest/download/$ASSET"
+echo "  Install:  https://github.com/$REPO/releases/latest/download/secondbrain_\$(dpkg --print-architecture).deb"

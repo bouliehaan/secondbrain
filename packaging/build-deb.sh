@@ -5,8 +5,13 @@
 #   VERSION=1.3.0 packaging/build-deb.sh
 #
 # There is no compile step -- everything here is JavaScript, Python and config.
-# The one build action is vendoring MMM-SecondBrain's production dependencies,
-# so installing the package never needs the network.
+# The build actions are vendoring MMM-SecondBrain's production dependencies and
+# bundling a Node runtime, so installing the package never needs the network
+# and never needs a node the distribution does not have.
+#
+# One package per architecture (ARCHES, default amd64 arm64 armhf). They differ
+# only in the bundled node binary: every vendored dependency is plain
+# JavaScript.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,7 +19,7 @@ cd "$REPO_ROOT"
 
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
 VERSION="${VERSION#v}"
-ARCH=all
+ARCHES="${ARCHES:-amd64 arm64 armhf}"
 PKG=secondbrain
 ROOT="build/deb"
 OUT="dist"
@@ -77,7 +82,14 @@ MM_DEST="$ROOT/opt/MagicMirror"
 mkdir -p "$MM_DEST"
 # Everything except config/. The wall's config.js carries the private calendar
 # urls and is the only copy; dpkg must never own that path.
-rsync -a --exclude 'config/' --exclude '.git' "$CACHE/mm/" "$MM_DEST/"
+#
+# Anchored: '/config/' is MagicMirror's own config directory and nothing else.
+# Unanchored, the pattern matched every directory called config at any depth --
+# including node_modules/eslint/lib/config/, which MagicMirror requires at
+# startup -- and every fresh install of 1.1.0 and 1.2.0 crash-looped on
+# "Cannot find module '../config/default-config'". It only worked on a wall
+# whose MagicMirror predated the package.
+rsync -a --exclude '/config/' --exclude '.git' "$CACHE/mm/" "$MM_DEST/"
 place 0644 "$CACHE/mm/LICENSE.md" "$ROOT/usr/share/doc/$PKG/licenses/MagicMirror-LICENSE.md"
 
 say "Bundling pinned third-party modules"
@@ -160,15 +172,30 @@ place 0644 packaging/default-secondbrain "$ROOT/etc/default/secondbrain"
 place 0644 README.md "$ROOT/usr/share/doc/$PKG/README.md"
 place 0644 packaging/debian/copyright "$ROOT/usr/share/doc/$PKG/copyright"
 
-# config.js ships as an example and nothing more. The live one on the wall is
-# the only copy carrying the private calendar urls; installing over it is the
-# outage this package exists to stop repeating.
-place 0644 config/config.js "$ROOT/usr/share/doc/$PKG/config.example.js"
+# The wall's look. Shipped where dpkg owns it, so an upgrade brings the
+# stylesheet with it; the example config points MagicMirror at it with
+# customCss, and a config without that key keeps using config/custom.css. The
+# fonts sit beside it because the stylesheet falls back to them by relative url
+# when the page is opened from a machine without them installed.
+place 0644 config/custom.css "$MM_DEST/css/secondbrain.css"
+for f in config/fonts/rajdhani/*.ttf; do
+    place 0644 "$f" "$MM_DEST/css/fonts/rajdhani/$(basename "$f")"
+done
+
+# The example wall, and what postinst seeds the first install from. Not the
+# repo's config.js -- that is the maintainer's own wall and carries his
+# calendars and location. /usr/share/$PKG rather than only /usr/share/doc,
+# because minimised images (cloud, container) exclude /usr/share/doc and the
+# seed would silently have nothing to copy.
+place 0644 config/config.example.js "$ROOT/usr/share/$PKG/config.example.js"
+place 0644 config/config.example.js "$ROOT/usr/share/doc/$PKG/config.example.js"
+place 0755 packaging/seed-config.py "$ROOT/usr/share/$PKG/seed-config.py"
 # Keep the directory structure. Two of these are both called
 # personal.example.json -- one Gmail, one Proton -- so flattening on basename
 # silently ships one and drops the other. The nesting is also the shape they
 # need once they are filled in under /etc/magicmirror-secondbrain/.
 while IFS= read -r f; do
+    place 0644 "$f" "$ROOT/usr/share/$PKG/examples/${f#config/secondbrain/}"
     place 0644 "$f" "$ROOT/usr/share/doc/$PKG/examples/${f#config/secondbrain/}"
 done < <(find config/secondbrain -name '*.example.json' | sort)
 
@@ -186,32 +213,71 @@ find "$ROOT/opt/MagicMirror" -type d \
     -exec rm -rf {} + 2>/dev/null || true
 echo "    removed"
 
-say "Control files"
-install -d -m 0755 "$ROOT/DEBIAN"
-# Installed-Size is what apt reports as the disk cost before you agree to the
-# install. dpkg-deb does not work it out for a hand-built tree, and without the
-# field apt shows nothing at all. In KiB, excluding DEBIAN/ itself.
-INSTALLED_SIZE="$(du -sk --exclude=DEBIAN "$ROOT" 2>/dev/null | cut -f1 \
-    || du -sk "$ROOT" | cut -f1)"
-sed -e "s/@VERSION@/${VERSION}/" -e "s/@ARCH@/${ARCH}/" \
-    -e "s/@INSTALLED_SIZE@/${INSTALLED_SIZE}/" \
-    packaging/debian/control > "$ROOT/DEBIAN/control"
-for script in postinst prerm postrm; do
-    install -m 0755 "packaging/debian/$script" "$ROOT/DEBIAN/$script"
-done
+say "Bundling Node ${NODE_VERSION:=$(node -p 'require("./config/third-party-modules.json").node.version')}"
+# MagicMirror needs node >=22.21.1. Ubuntu 26.04 ships one; Ubuntu 24.04 (18),
+# Debian 13 and Raspberry Pi OS (20) do not, so depending on the distribution's
+# nodejs made the documented one-line install fail on most of the machines a
+# wall display actually runs on. The official build, checked against its
+# published SHA-256, goes in /usr/lib/$PKG/node and secondbrain-server prefers it.
+NODE_DIST="$(node -p 'require("./config/third-party-modules.json").node.dist')"
+curl -fsSL --retry 3 -o "$CACHE/node-SHASUMS256-${NODE_VERSION}.txt" \
+    "${NODE_DIST}/v${NODE_VERSION}/SHASUMS256.txt"
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+node_arch() {
+    case "$1" in
+        amd64) echo x64 ;;
+        arm64) echo arm64 ;;
+        armhf) echo armv7l ;;
+        *) echo "no node build for $1" >&2; return 1 ;;
+    esac
+}
 
 # Files dpkg must not overwrite on upgrade: everything under /etc that a person
 # is expected to edit.
-cat > "$ROOT/DEBIAN/conffiles" <<'EOF'
-/etc/default/secondbrain
+CONFFILES='/etc/default/secondbrain
 /etc/lightdm/lightdm.conf.d/50-calendar-kiosk.conf
-/etc/chrony/sources.d/secondbrain.sources
-EOF
+/etc/chrony/sources.d/secondbrain.sources'
 
-say "Building"
-# Unversioned filename on purpose, the same as samo-radio: it keeps
-# releases/latest/download/secondbrain_all.deb a URL that never goes stale, so
-# the documented install stays one command forever. The real version is in the
-# control file, which is what dpkg and apt read.
-dpkg-deb --build --root-owner-group "$ROOT" "$OUT/${PKG}_${ARCH}.deb"
+for arch in $ARCHES; do
+    say "Building ${PKG}_${arch}.deb"
+    tarball="node-v${NODE_VERSION}-linux-$(node_arch "$arch").tar.xz"
+    if [ ! -f "$CACHE/$tarball" ]; then
+        curl -fsSL --retry 3 -o "$CACHE/$tarball" "${NODE_DIST}/v${NODE_VERSION}/${tarball}"
+    fi
+    want="$(grep "  ${tarball}\$" "$CACHE/node-SHASUMS256-${NODE_VERSION}.txt" | cut -d' ' -f1)"
+    got="$(sha256 "$CACHE/$tarball")"
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then
+        echo "error: $tarball does not match nodejs.org's SHA-256 (want '$want', got '$got')" >&2
+        rm -f "$CACHE/$tarball"
+        exit 1
+    fi
+
+    tree="build/deb-$arch"
+    rm -rf "$tree"
+    cp -a "$ROOT" "$tree"
+    mkdir -p "$tree/usr/lib/$PKG/node"
+    tar -xJf "$CACHE/$tarball" -C "$tree/usr/lib/$PKG/node" --strip-components=1 \
+        "${tarball%.tar.xz}/bin/node" "${tarball%.tar.xz}/LICENSE"
+    chmod 0755 "$tree/usr/lib/$PKG/node/bin/node"
+
+    install -d -m 0755 "$tree/DEBIAN"
+    # Installed-Size is what apt reports as the disk cost before you agree to
+    # the install. dpkg-deb does not work it out for a hand-built tree, and
+    # without the field apt shows nothing at all. In KiB, excluding DEBIAN/.
+    INSTALLED_SIZE="$(du -sk --exclude=DEBIAN "$tree" 2>/dev/null | cut -f1 \
+        || du -sk "$tree" | cut -f1)"
+    sed -e "s/@VERSION@/${VERSION}/" -e "s/@ARCH@/${arch}/" \
+        -e "s/@INSTALLED_SIZE@/${INSTALLED_SIZE}/" \
+        packaging/debian/control > "$tree/DEBIAN/control"
+    for script in postinst prerm postrm; do
+        install -m 0755 "packaging/debian/$script" "$tree/DEBIAN/$script"
+    done
+    printf '%s\n' "$CONFFILES" > "$tree/DEBIAN/conffiles"
+
+    # Unversioned filename on purpose, the same as samo-radio: it keeps
+    # releases/latest/download/secondbrain_<arch>.deb a URL that never goes
+    # stale, so the documented install stays one command forever. The real
+    # version is in the control file, which is what dpkg and apt read.
+    dpkg-deb --build --root-owner-group "$tree" "$OUT/${PKG}_${arch}.deb"
+done
 ls -l "$OUT"

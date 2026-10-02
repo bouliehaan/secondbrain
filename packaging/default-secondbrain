@@ -1,8 +1,8 @@
 # Settings for the secondbrain wall. Sourced by /usr/bin/secondbrain-server.
 # This is a dpkg conffile: your edits survive upgrades.
 
-# Which node runs MagicMirror. Unset means "whatever is first on PATH", which
-# on a box where nodejs came from apt is /usr/bin/node.
+# Which node runs MagicMirror. Unset means the one bundled with the package,
+# /usr/lib/secondbrain/node/bin/node.
 #
 # This box historically ran a tarball unpacked into /opt. If you still want
 # that one, name it here rather than editing the unit:

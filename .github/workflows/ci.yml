@@ -18,3 +18,20 @@ jobs:
               with:
                   node-version: '22.21.1'
             - run: make check-all
+
+    # Build the package and install it on a clean runner. The release workflow
+    # does the same before publishing; doing it here too means a broken
+    # package shows up on the commit that broke it, not on release day.
+    package:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22.21.1'
+            - name: Build
+              env:
+                  ARCHES: amd64
+              run: packaging/build-deb.sh
+            - name: Install and boot
+              run: packaging/smoke-install.sh dist/secondbrain_amd64.deb

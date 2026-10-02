@@ -54,6 +54,42 @@ case "$1" in
         # The vendored typeface. Without a cache refresh the kiosk browser and
         # the clock fall back to whatever sans-serif is around until the next
         # reboot, which looks like the restyle did not ship.
+        # The wall's own config. dpkg never owns this path -- the private
+        # calendar urls end up in it -- so the package writes it once, from the
+        # example, with the weather pointed at this machine's timezone, and
+        # never again. Without this a fresh install had no config directory at
+        # all and the README's copy step failed on it.
+        if [ ! -d "$MM_ROOT/config" ]; then
+            install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0755 "$MM_ROOT/config"
+        fi
+        if [ ! -e "$MM_ROOT/config/config.js" ]; then
+            if python3 /usr/share/secondbrain/seed-config.py \
+                    /usr/share/secondbrain/config.example.js \
+                    > "$MM_ROOT/config/config.js.new"; then
+                chown "$SERVICE_USER:$SERVICE_USER" "$MM_ROOT/config/config.js.new"
+                chmod 0644 "$MM_ROOT/config/config.js.new"
+                mv "$MM_ROOT/config/config.js.new" "$MM_ROOT/config/config.js"
+            else
+                rm -f "$MM_ROOT/config/config.js.new"
+            fi
+        fi
+
+        # MagicMirror writes js/positions.js into its own tree on every start
+        # (the regions it found in index.html; the page loads it as a script).
+        # The tree is root's and the service is not, so on a fresh install the
+        # write failed, the page got a 404 for a script it cannot run without,
+        # and the wall stayed black. A file the service owns can be rewritten
+        # in a directory it cannot write to.
+        touch "$MM_ROOT/js/positions.js"
+        chown "$SERVICE_USER:$SERVICE_USER" "$MM_ROOT/js/positions.js"
+
+        # Where the README's credential commands write. `install` without -D
+        # does not create parents, so these have to exist already.
+        for dir in gmail gmail/accounts proton proton/accounts; do
+            [ -d "$CRED_DIR/$dir" ] || \
+                install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$CRED_DIR/$dir"
+        done
+
         fc-cache -f /usr/share/fonts/truetype/rajdhani /usr/share/fonts/truetype/orbitron >/dev/null 2>&1 || true
 
         deb-systemd-helper unmask magicmirror.service >/dev/null 2>&1 || true
@@ -76,6 +112,24 @@ case "$1" in
         # calendar-kiosk supervises chromium in a loop, so killing it is the
         # reload.
         pkill -u "$SERVICE_USER" -f magicmirror-kiosk >/dev/null 2>&1 || true
+
+        # Say whether it came up. apt reports success either way, and a
+        # dashboard that cannot start looks like a working install until the
+        # screen stays dark. Only where systemd is running.
+        if [ -d /run/systemd/system ]; then
+            port="$(. /etc/default/secondbrain 2>/dev/null; echo "${SECONDBRAIN_PORT:-43761}")"
+            up=""
+            for _ in $(seq 1 30); do
+                if curl -fsS -o /dev/null "http://127.0.0.1:${port}/"; then up=1; break; fi
+                sleep 1
+            done
+            if [ -n "$up" ]; then
+                echo "secondbrain is running: http://$(hostname):${port}/"
+                echo "Reboot and the display comes up on its own. The wall's settings: $MM_ROOT/config/config.js"
+            else
+                echo "secondbrain has not answered yet. What it said: journalctl -u magicmirror -e" >&2
+            fi
+        fi
         ;;
 esac
 
