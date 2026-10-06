@@ -22,6 +22,16 @@ let config = {
   timeFormat: 12,
   units: "imperial",
 
+  /*
+   * The weather and calendar helpers only start fetching when the page asks
+   * them to, and the page asks once, when it loads. A server restarted under
+   * a running kiosk (apt's needrestart, a crash, systemctl restart) came back
+   * with nothing fetching: the weather sat frozen for nine hours overnight
+   * into 2026-10-01. The page checks the server's start time every 30s and
+   * reloads itself when it changes.
+   */
+  reloadAfterServerRestart: true,
+
   modules: [
     /*
      * Hidden data source for both the month grid and upcoming agenda.
@@ -250,74 +260,49 @@ let config = {
       }
     },
 
+    /*
+     * Weather, from NOAA's National Blend of Models by way of Open-Meteo: the
+     * one free forecast that held up against the thermometers around the wall,
+     * cold valley nights included. Why, and the numbers, are in
+     * modules/Weather/lib/weather.js. Both cards share one fetch.
+     */
     {
-      module: "weather",
+      module: "Weather",
       position: "top_right",
       header: "WEATHER", // @place
       classes: "side-current-weather",
 
       config: {
-        weatherProvider: "openmeteo",
         type: "current",
 
         lat: 40.7128, // @lat
         lon: -74.006, // @lon
 
+        model: "ncep_nbm_conus",
         units: "imperial",
-        roundTemp: true,
-        degreeLabel: false,
-
-        showHumidity: "below",
-        showFeelsLike: true,
-        showWindDirection: true,
-        showSun: true,
-        showPeriod: false,
-
-        appendLocationNameToHeader: false,
-
-        updateInterval: 900000,
-        animationSpeed: 0,
-
-        /*
-         * The card's DOM and its stylesheet live in modules/WeatherTheme, in
-         * this repo. The stock weather module resolves this as a URL from its
-         * own directory, and the browser clamps ".." at the site root, so
-         * three levels up lands on /modules/ whether the module lives at
-         * defaultmodules/weather (2.37) or modules/default/weather (older).
-         */
-        themeDir: "../../../modules/WeatherTheme"
+        updateInterval: 900000
       }
     },
 
     {
-      module: "weather",
+      module: "Weather",
       position: "top_right",
       header: "FORECAST",
       classes: "side-forecast",
 
       config: {
-        weatherProvider: "openmeteo",
         type: "forecast",
 
         lat: 40.7128, // @lat
         lon: -74.006, // @lon
 
+        model: "ncep_nbm_conus",
         units: "imperial",
-        roundTemp: true,
-        degreeLabel: false,
+        updateInterval: 900000,
 
         /* Offer a full week; Rail shows only the whole rows that fit. */
         maxNumberOfDays: 7,
-        showPrecipitationProbability: true,
-        fade: false,
-
-        appendLocationNameToHeader: false,
-
-        updateInterval: 900000,
-        initialLoadDelay: 1000,
-        animationSpeed: 0,
-
-        themeDir: "../../../modules/WeatherTheme"
+        showPrecipitationProbability: true
       }
     },
 

@@ -69,6 +69,14 @@ function fail (message, detail = []) {
   process.exit(1);
 }
 
+/*
+ * The weather cards: this repo's Weather module, and MagicMirror's stock
+ * weather module it replaced -- which is what a wall's live config still says
+ * until the first deploy after the switch, and where its location has to be
+ * read from then.
+ */
+const isWeather = (mod) => mod?.module === "Weather" || mod?.module === "weather";
+
 /**
  * Where a config's weather is for: the current-conditions module's location
  * and header, or the first weather module that has one.
@@ -77,7 +85,7 @@ function fail (message, detail = []) {
  */
 function locationOf (cfg) {
   const weather = (cfg?.modules ?? []).filter((mod) =>
-    mod?.module === "weather" && Number.isFinite(mod?.config?.lat) && Number.isFinite(mod?.config?.lon));
+    isWeather(mod) && Number.isFinite(mod?.config?.lat) && Number.isFinite(mod?.config?.lon));
   const current = weather.find((mod) => mod.config.type === "current") ?? weather[0];
   if (!current) return null;
   return { lat: current.config.lat, lon: current.config.lon, place: current.header };
@@ -181,7 +189,7 @@ if (missing.length > 0) {
 if (marked > 0) {
   const want = locationOf(live);
   const off = (merged.modules ?? []).filter((mod) =>
-    mod?.module === "weather" && (mod.config?.lat !== want.lat || mod.config?.lon !== want.lon));
+    isWeather(mod) && (mod.config?.lat !== want.lat || mod.config?.lon !== want.lon));
   if (off.length > 0) {
     fail(`${off.length} weather module(s) still not at the live location after merging`);
   }

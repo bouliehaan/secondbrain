@@ -1,9 +1,9 @@
 /******************************************************************************
- * WEATHER THEME
+ * WEATHER
  *
- * Styles for the DOM in current.njk and forecast.njk. MagicMirror's weather
- * module loads this file itself (getStyles adds `${themeDir}weather.css`), so
- * it needs no entry in custom.css.
+ * Styles for the DOM Weather.js draws: .wx for the current card, .fc rows for
+ * the forecast. Loaded by the module itself (getStyles), so it needs no entry
+ * in custom.css.
  *
  * Tokens are the --sb-* family from custom.css, with the dark values as
  * fallbacks. MMM-SolarTheme swaps them underneath; there are no light rules
@@ -100,6 +100,16 @@
   text-transform: uppercase;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+ * A reading the helper has not been able to refresh. The number stays -- it is
+ * still the best one there is -- but it reads as old, and the condition line
+ * says how old.
+ */
+.wx-stale .wx-temp,
+.wx-stale .wx-v {
+  color: var(--sb-t2, #9d9ea0);
 }
 
 .wx-sep,

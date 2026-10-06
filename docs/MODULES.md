@@ -238,7 +238,7 @@ Three things stop it becoming wallpaper:
   because a temperature parked on the threshold would otherwise blink it on and
   off all night.
 
-It fetches nothing. The two weather modules already poll open-meteo every
+It fetches nothing. The two weather cards already poll Open-Meteo every
 fifteen minutes and broadcast the result, so `FreezeWatch` reads that and can
 never disagree with the numbers shown two cards further down. Change the
 threshold in `config/config.js`; the common advice for exposed pipes is nearer
@@ -397,13 +397,41 @@ node scripts/check-rail.js
 
 ## The weather card
 
-`WeatherTheme` is not a module. It is a `themeDir` for MagicMirror's stock
-weather module — two nunjucks templates and a stylesheet — so the current
-conditions read numbers-first (the temperature is the biggest thing on the
-card, then FEELS / HUMIDITY / WIND / SUN as labelled values) and the forecast
-is one row per day with the chance of rain as a five-segment bar. It replaces
-`MMT-CalmCurrentWeather`, which only ever existed on the mirror and could not
-be rebuilt from this repo.
+`Weather` draws the two weather cards: the current conditions, numbers-first
+(the temperature is the biggest thing on the card, then FEELS / HUMIDITY / WIND
+/ SUN as labelled values), and the forecast, one row per day with the chance of
+precipitation as a five-segment bar. Both cards share one fetch from
+Open-Meteo, made by the module's node helper.
+
+The forecast is NOAA's National Blend of Models (`model: "ncep_nbm_conus"`),
+chosen against the thermometers around the wall rather than by reputation. A
+mountain wall lives or dies by its model: scored a day ahead against three
+stations near the house for September 2026, the default model (GFS) had the
+highs within about 2° but the overnight lows 3° too warm on the slopes and 8°
+too warm on the valley floor, where cold air pools. The Blend, a 2.5 km blend
+corrected against station readings, held the lows to 2–4°. The lows are what
+`FreezeWatch` acts on. Outside the contiguous US the Blend has no data, and the
+helper falls back to Open-Meteo's `best_match`.
+
+It replaced MagicMirror's stock weather module, themed by `WeatherTheme`, which
+could not choose a model, reported the hours of rain divided by 24 as the
+"chance" of rain, named conditions after an icon (heavy drizzle read
+THUNDERSTORM), and faded the card out of the rail and back on every new reading.
+
+- The helper fetches the moment the server starts, from `config.js` itself, so a
+  restart under a running kiosk does not leave the cards frozen.
+- Every request has a 20-second deadline. A failure keeps the last reading,
+  retries within minutes, and writes one journal line per outage, not one per
+  attempt. Past `staleAfterMinutes` (90) the current card reads "AS OF 7:12 AM"
+  in place of the condition.
+- Each new answer writes one journal line of what the wall is about to show:
+  `[Weather] now 60F sunny | Sat 70/41 1% sunny | Sun 70/39 2% mostly sunny | …`
+- It broadcasts `WEATHER_UPDATED` in the stock module's shape, so `FreezeWatch`
+  and `MMM-SolarTheme` read it unchanged.
+
+```bash
+node scripts/check-weather.js
+```
 
 ## Working on the notification logic
 

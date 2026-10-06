@@ -200,6 +200,18 @@ first; bodies are fetched for survivors only.
 mail, Amazon, then a bare carrier notification — and returns `null` for refunds,
 cancellations and digital receipts.
 
+**Amazon mail is judged by its footer and its identity, never its subject.**
+Amazon's marketing uses delivery language on purpose ("Have your medication
+delivered, just like everything else" went up as a delivered package), so no
+phrase list can tell an advert from a shipment. Two structural rules do it
+instead. Any Amazon mail with an unsubscribe link, a `List-Unsubscribe` header,
+or "Did you find this information helpful?" in either its plain or its HTML
+part is not a shipment. Every other one needs an Amazon order number or a
+carrier tracking number, or it makes no card, however good its subject sounds.
+After a successful scan, legacy `package:amazon:unknown-*` entries from the
+old subject-only parser are discarded so a previously stored advert disappears
+on the next poll.
+
 ### Every status has to be earned
 
 The status shown on a card is read from the subject line, which is a blunt
@@ -535,13 +547,13 @@ discard is work nobody needs done.
 ## Freeze Watch
 
 ```
-  weather (current)  ─┐
+  Weather (current)  ─┐
                       ├─ WEATHER_UPDATED ─► FreezeWatch.js ──► lib/freeze-watch.js
-  weather (forecast) ─┘      (browser)        (merge, render)     (pure: readings → card)
+  Weather (forecast) ─┘      (browser)        (merge, render)     (pure: readings → card)
 ```
 
-No node helper and no fetch of its own. The two stock weather modules already
-poll open-meteo every fifteen minutes and broadcast the result to every module
+No node helper and no fetch of its own. The two weather cards already
+poll Open-Meteo every fifteen minutes and broadcast the result to every module
 on the page, so this one reads that. A second fetch would be a second set of
 numbers, free to disagree with the ones the wall is showing two cards further
 down the same rail.
@@ -599,19 +611,20 @@ a threshold that is a rule of thumb anyway.
 
 ### Two units traps, both already sprung upstream
 
-`WEATHER_UPDATED` is converted to imperial *before it is sent* when
-`config.units === "imperial"`, which it is here — so everything downstream is
-Fahrenheit and no conversion happens in this module.
+`WEATHER_UPDATED` is in the weather cards' units, which on this wall are
+imperial: `modules/Weather` asks Open-Meteo for Fahrenheit, so everything
+downstream is Fahrenheit and no conversion happens in this module.
 
-That conversion is `value * 1.8 + 32` with no null check, so a provider
-reporting no temperature arrives as a confident **32**. There is no way to tell
+The stock weather module this replaced converted with `value * 1.8 + 32` and
+no null check, so a provider reporting no temperature arrived as a confident
+**32**. There is no way to tell
 that from a real 32° reading, and no need to: 32 is above any sane freeze
 threshold, so a missing reading fails safe as "not cold enough to alert" rather
 than as a false alarm. `undefined` becomes `NaN` and is rejected outright.
 
-The second trap is the timestamps. The openmeteo provider builds its dates from
-`timeformat=unixtime`, and `WeatherObject.simpleClone()` flattens them through
-`valueOf()`. A seconds value arriving where milliseconds are expected does not
+The second trap is the timestamps. Open-Meteo answers in epoch *seconds*
+(`timeformat=unixtime`); `modules/Weather` sends milliseconds, as the stock
+module did after `WeatherObject.simpleClone()`. A seconds value arriving where milliseconds are expected does not
 throw — it silently places every forecast low in 1970, where it is neither ahead
 of us nor inside the lookahead window, and the module goes quiet for an entire
 winter with nothing in the log. `toEpochMs` normalises by magnitude.
@@ -646,7 +659,7 @@ comes to it, whole blocks, so the rest of today is always listed whole and
 nothing is clipped mid-row; today is the floor and only the clock never moves
 for it. The decision is a pure function in `modules/Rail/lib/rail.js` (see
 `docs/MODULES.md`).
-`WeatherTheme` is the stock weather module's `themeDir`, in this repo. `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are upstream,
+`Weather` fetches and draws the two weather cards (see `docs/MODULES.md`). `MMM-CalendarExt3` and `MMM-CalendarExt3Agenda` are upstream,
 pinned in `config/third-party-modules.json` and installed from there.
 
 The wall's look is one stylesheet, `config/custom.css`: a `--sb-*` token set

@@ -18,9 +18,9 @@
  * chore to do before bed. A warning means the cold is already here and the
  * faucets should already be running.
  *
- * Everything is Fahrenheit. The wall runs `units: "imperial"`, and the
- * MagicMirror weather module converts its whole broadcast payload to imperial
- * before sending it (see `readWeatherPayload`), so no conversion happens here.
+ * Everything is Fahrenheit. The wall runs `units: "imperial"`, and
+ * modules/Weather asks for Fahrenheit and broadcasts it as it came (see
+ * `readWeatherPayload`), so no conversion happens here.
  */
 
 const FreezeWatchLogic = {
@@ -123,14 +123,14 @@ const FreezeWatchLogic = {
   /*
    * Read a temperature out of a broadcast payload.
    *
-   * One trap worth naming. The weather module converts its payload with
-   * `WeatherUtils.convertTemp(value, "imperial")`, which is `value * 1.8 + 32`
-   * with no null check -- so a provider that reports no temperature at all
-   * arrives here as a confident 32. There is no way to tell that apart from a
-   * real 32F reading, and happily there is no need to: 32 is above any sane
-   * freeze threshold, so a missing reading fails safe as "not cold enough to
-   * alert" rather than as a false alarm. `undefined` becomes NaN and is
-   * rejected here.
+   * One trap worth naming. The stock weather module this used to read
+   * converted with `WeatherUtils.convertTemp(value, "imperial")`, which is
+   * `value * 1.8 + 32` with no null check -- so a provider that reported no
+   * temperature at all arrived here as a confident 32. There is no way to
+   * tell that apart from a real 32F reading, and happily there is no need to:
+   * 32 is above any sane freeze threshold, so a missing reading fails safe as
+   * "not cold enough to alert" rather than as a false alarm. `undefined`
+   * becomes NaN and is rejected here.
    */
   readTemperature (value) {
     const number = Number(value);
@@ -185,7 +185,7 @@ const FreezeWatchLogic = {
   /*
    * The moment a forecast day's low is expected to arrive.
    *
-   * The openmeteo provider reports a daily entry against local midnight, and
+   * The weather cards report a daily entry against local midnight, and
    * the low lands in the small hours after it. Without this offset the wall
    * would still be advising a drip at 6pm on the strength of a low that
    * happened before breakfast.

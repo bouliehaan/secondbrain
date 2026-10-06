@@ -31,7 +31,7 @@ PKG=secondbrain
 ROOT="build/deb"
 OUT="dist"
 
-MODULES=(MMM-SecondBrain NowPlaying FreezeWatch StatusLine Rail WeatherTheme MMM-SolarTheme MMM-CalendarLiveHeader)
+MODULES=(MMM-SecondBrain NowPlaying FreezeWatch StatusLine Rail Weather MMM-SolarTheme MMM-CalendarLiveHeader)
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 

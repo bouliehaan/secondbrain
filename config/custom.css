@@ -32,7 +32,7 @@
  * MMM-SolarTheme from sun position). Nothing below is written twice.
  *
  * Every colour is a --sb-* token. The module stylesheets (FreezeWatch,
- * NowPlaying, MMM-SecondBrain, StatusLine, WeatherTheme) consume the same
+ * NowPlaying, MMM-SecondBrain, StatusLine, Weather) consume the same
  * tokens with the dark values as fallbacks, so they render sensibly even if
  * this file has not loaded, and they carry no light-mode rules of their own.
  *
@@ -406,7 +406,7 @@ html.solar-theme-enabled .CX3A .cell {
 }
 
 .region.top.right > .container > .module.clock,
-.region.top.right > .container > .module.weather,
+.region.top.right > .container > .module.Weather,
 .region.top.right > .container > .module.FreezeWatch,
 .region.top.right > .container > .module.NowPlaying,
 .region.top.right > .container > .module.MMM-SecondBrain {
@@ -1190,12 +1190,12 @@ html.solar-light .region.top.right .clock .date {
 /******************************************************************************
  * WEATHER
  *
- * The DOM comes from modules/WeatherTheme (current.njk, forecast.njk), which
- * also carries the card's own styles. This block only places the two modules
- * in the rail and colours MagicMirror's weather icons.
+ * The DOM comes from modules/Weather, which also carries the cards' own
+ * styles. This block only places the two cards in the rail and colours the
+ * weather icons.
  ******************************************************************************/
 
-.region.top.right .weather {
+.region.top.right .Weather {
   padding: 0 !important;
 
   border: 0;
@@ -1207,13 +1207,13 @@ html.solar-light .region.top.right .clock .date {
   text-align: left !important;
 }
 
-.region.top.right .weather .module-content {
+.region.top.right .Weather .module-content {
   mask-image: none !important;
   -webkit-mask-image: none !important;
 }
 
-.region.top.right .weather .weathericon,
-.region.top.right .weather .wi {
+.region.top.right .Weather .weathericon,
+.region.top.right .Weather .wi {
   color: var(--sb-t2) !important;
 }
 

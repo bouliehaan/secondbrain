@@ -32,7 +32,9 @@ assert.doesNotMatch(text, /REDACTED_PRIVATE_PATH|CHANGEME/, "a placeholder url w
 // merge-config-secrets.js). A real lat/lon here fails the build.
 const STAND_IN = { lat: 40.7128, lon: -74.006 };
 for (const [name, cfg, file] of [["example", example, examplePath], ["config.js", wall, path.join(root, "config/config.js")]]) {
-  for (const mod of cfg.modules.filter((m) => m.module === "weather")) {
+  assert.ok(!cfg.modules.some((m) => m.module === "weather"), `${name}: the stock weather module is replaced by modules/Weather`);
+  assert.equal(cfg.modules.filter((m) => m.module === "Weather").length, 2, `${name}: two Weather cards, current and forecast`);
+  for (const mod of cfg.modules.filter((m) => m.module === "Weather")) {
     assert.equal(mod.config.lat, STAND_IN.lat, `${name}: weather lat must be the stand-in, not a real place`);
     assert.equal(mod.config.lon, STAND_IN.lon, `${name}: weather lon must be the stand-in, not a real place`);
   }
@@ -68,7 +70,7 @@ fs.writeFileSync(tmp, seeded);
 try {
   execFileSync(process.execPath, ["--check", tmp]);
   const cfg = require(tmp);
-  const weather = cfg.modules.filter((m) => m.module === "weather");
+  const weather = cfg.modules.filter((m) => m.module === "Weather");
   for (const w of weather) {
     assert.ok(Number.isFinite(w.config.lat) && Number.isFinite(w.config.lon), "seeded weather has no location");
   }

@@ -54,6 +54,26 @@ function plainMime(headers, text) {
   return `${headers}\nContent-Type: text/plain; charset=utf-8\n\n${text}\n`;
 }
 
+/* A plain part and an HTML part, which is how Amazon and most retailers send. */
+function alternativeMime(headers, text, html) {
+  return [
+    headers,
+    "MIME-Version: 1.0",
+    'Content-Type: multipart/alternative; boundary="alt"',
+    "",
+    "--alt",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    text,
+    "--alt",
+    "Content-Type: text/html; charset=utf-8",
+    "",
+    `<html><body>${html}</body></html>`,
+    "--alt--",
+    ""
+  ].join("\n");
+}
+
 async function run() {
   console.log("\nPackage parser checks\n");
 
@@ -125,10 +145,107 @@ async function run() {
     from: "shipment-tracking@amazon.com",
     subject: 'Shipped: "How to Avoid Scams"',
     body: plainMime("From: Amazon <shipment-tracking@amazon.com>",
-      "Your package has shipped. Protect yourself from scams: visit your account directly.")
+      "Your package has shipped. Order # 114-3941689-1234567\n" +
+      "Protect yourself from scams: visit your account directly.")
   }));
   check("a real shipment with a safety footer and scam-related product title is kept",
     safetyFooter?.status === "Shipped" && safetyFooter?.title === "How to Avoid Scams");
+
+  /* ---------------------------------------------------------------- *
+   * Regression: Amazon's advertising borrows the delivery vocabulary.
+   *
+   * "Have your medication delivered, just like everything else" is an
+   * Amazon Pharmacy advert, and it went up on the wall as a delivered
+   * package. Each gate is checked on its own here, because either one must
+   * be enough to keep it down.
+   * ---------------------------------------------------------------- */
+  const advertSubject = "Have your medication delivered, just like everything else";
+  const unsubscribeFooter =
+    '<p>Prescriptions delivered to your door.</p>' +
+    '<p><a href="https://www.amazon.com/gp/gss/o/x">Unsubscribe</a></p>';
+
+  const asReceived = await extractPackageInfo(message({
+    from: "store-news@amazon.com",
+    name: "Amazon Pharmacy",
+    subject: advertSubject,
+    body: alternativeMime("From: Amazon Pharmacy <store-news@amazon.com>",
+      "Prescriptions delivered to your door.", unsubscribeFooter)
+  }));
+  check("the medication advert is not a delivered package", asReceived === null,
+    `got ${JSON.stringify(asReceived)}`);
+
+  const noIdentity = await extractPackageInfo(message({
+    from: "store-news@amazon.com",
+    subject: advertSubject,
+    body: plainMime("From: Amazon <store-news@amazon.com>",
+      "Prescriptions delivered to your door.")
+  }));
+  check("a delivery word in an Amazon subject is not enough without an order number",
+    noIdentity === null, `got ${JSON.stringify(noIdentity)}`);
+
+  const bareDelivered = await extractPackageInfo(message({
+    from: "shipment-tracking@amazon.com",
+    subject: 'Delivered: "Blue Widget, 3-pack"',
+    body: plainMime("From: Amazon <shipment-tracking@amazon.com>",
+      "Your package was delivered.")
+  }));
+  check("even a perfect delivery subject needs an order or tracking number",
+    bareDelivered === null, `got ${JSON.stringify(bareDelivered)}`);
+
+  for (const [what, body] of [
+    ["an unsubscribe link in the plain part", plainMime("From: Amazon <store-news@amazon.com>",
+      "Order # 114-3941689-1234567 was delivered.\nUnsubscribe: https://www.amazon.com/gp/gss/o/x")],
+    ["an unsubscribe link only in the HTML part", alternativeMime("From: Amazon <store-news@amazon.com>",
+      "Order # 114-3941689-1234567 was delivered.",
+      "<p>Order # 114-3941689-1234567 was delivered.</p><p><a href=\"https://x\">Unsubscribe</a></p>")],
+    ["\"Did you find this information helpful?\"", plainMime("From: Amazon <order-update@amazon.com>",
+      "Order # 114-3941689-1234567 was delivered.\nDid you find this information helpful?\nYes No")],
+    ["the helpful prompt split by markup", alternativeMime("From: Amazon <order-update@amazon.com>",
+      "Order # 114-3941689-1234567 was delivered.",
+      "<p>Order # 114-3941689-1234567</p><td>Did you find this<br>information&nbsp;<b>helpful</b>?</td>")]
+  ]) {
+    const info = await extractPackageInfo(message({
+      from: "store-news@amazon.com",
+      subject: 'Delivered: "Blue Widget, 3-pack"',
+      body
+    }));
+    check(`Amazon mail with ${what} is never a package, order number or not`,
+      info === null, `got ${JSON.stringify(info)}`);
+  }
+
+  const headerUnsubscribe = await extractPackageInfo(message({
+    from: "store-news@amazon.com",
+    subject: 'Delivered: "Blue Widget, 3-pack"',
+    body: plainMime(
+      "From: Amazon <store-news@amazon.com>\n" +
+        "List-Unsubscribe: <https://www.amazon.com/preferences/unsubscribe?id=1>",
+      "Order # 114-3941689-1234567 was delivered."
+    )
+  }));
+  check("Amazon mail with a List-Unsubscribe header is never a package",
+    headerUnsubscribe === null, `got ${JSON.stringify(headerUnsubscribe)}`);
+
+  const hiddenUnsubscribeLink = await extractPackageInfo(message({
+    from: "store-news@amazon.com",
+    subject: 'Delivered: "Blue Widget, 3-pack"',
+    body: alternativeMime("From: Amazon <store-news@amazon.com>",
+      "Order # 114-3941689-1234567 was delivered.",
+      '<p>Order # 114-3941689-1234567 was delivered.</p>' +
+        '<a href="https://www.amazon.com/preferences/opt-out?id=1">Manage preferences</a>')
+  }));
+  check("an Amazon opt-out link is detected even without visible unsubscribe text",
+    hiddenUnsubscribeLink === null, `got ${JSON.stringify(hiddenUnsubscribeLink)}`);
+
+  const htmlOnlyOrder = await extractPackageInfo(message({
+    from: "shipment-tracking@amazon.com",
+    subject: 'Delivered: "Blue Widget, 3-pack"',
+    body: alternativeMime("From: Amazon <shipment-tracking@amazon.com>",
+      "Your package was delivered.",
+      "<p>Your package was delivered.</p><p>Order #<b>114-3941689-1234567</b></p>")
+  }));
+  check("an order number only the HTML part shows still identifies a real delivery",
+    htmlOnlyOrder?.status === "Delivered" && htmlOnlyOrder?.orderId === "114-3941689-1234567",
+    `got ${JSON.stringify(htmlOnlyOrder)}`);
 
   /* ---------------------------------------------------------------- *
    * A tracking number the mail client wrapped across two lines is still
@@ -565,6 +682,28 @@ async function run() {
     "a shipment no mail has mentioned for days is forgotten",
     !afterScan.some((item) => item.id === stuck.id),
     `still present: ${JSON.stringify(afterScan.map((i) => i.id))}`
+  );
+
+  const legacyAmazonAd = {
+    id: "package:amazon:unknown-legacy-ad",
+    kind: "package",
+    title: "Amazon Package",
+    status: "Delivered",
+    orderId: "unknown-legacy-ad",
+    timestamp: Date.now(),
+    lastSeenAt: Date.now()
+  };
+  fs.writeFileSync(
+    path.join(stateDir, "package_state.json"),
+    JSON.stringify([legacyAmazonAd])
+  );
+
+  const afterParserUpgrade = persistAndMergePackages([], stateDir, quiet, true);
+
+  check(
+    "a legacy subject-only Amazon card is cleared after a successful scan",
+    !afterParserUpgrade.some((item) => item.id === legacyAmazonAd.id),
+    `still present: ${JSON.stringify(afterParserUpgrade.map((i) => i.id))}`
   );
 
   /*

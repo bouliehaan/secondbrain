@@ -572,13 +572,22 @@ function resolveMailbox(mailboxes, requested, specialUse = null) {
  * are matched against the compact form. Both are built from the decoded body and
  * never from the raw MIME source, whose base64 attachment blocks are otherwise a
  * rich source of phantom 12- and 15-digit "tracking numbers".
+ *
+ * `html` is the words of the HTML part with the markup taken out. When a
+ * message also has a plain-text part, `text` is that part alone, and senders
+ * routinely leave their footer -- the unsubscribe link above all -- out of it.
+ * `headers` keeps the raw message headers because bulk mail often advertises
+ * its unsubscribe URL there without putting the word in the visible body.
  */
 async function decodeMessage(source) {
   if (!source) {
-    return { text: "", compact: "" };
+    return {
+      text: "", compact: "", html: "", htmlCompact: "", rawHtml: "", headers: new Map()
+    };
   }
 
   try {
+    const headers = headerFields(source);
     const parsed = await simpleParser(source, {
       skipHtmlToText: false,
       skipTextToHtml: true,
@@ -586,10 +595,25 @@ async function decodeMessage(source) {
     });
 
     const text = String(parsed.text || "");
+    const rawHtml = typeof parsed.html === "string" ? parsed.html : "";
+    const html = rawHtml
+      .replace(/<(style|script|head)\b[\s\S]*?<\/\1\s*>/gi, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&(?:nbsp|#160|#xa0);/gi, " ")
+      .replace(/\s+/g, " ");
 
-    return { text, compact: text.replace(/\s+/g, "") };
+    return {
+      text,
+      compact: text.replace(/\s+/g, ""),
+      html,
+      htmlCompact: html.replace(/\s+/g, ""),
+      rawHtml,
+      headers
+    };
   } catch {
-    return { text: "", compact: "" };
+    return {
+      text: "", compact: "", html: "", htmlCompact: "", rawHtml: "", headers: new Map()
+    };
   }
 }
 
@@ -1002,13 +1026,18 @@ function findTracking(key, text, compact) {
 const GENERIC_ORDER_PATTERN =
   /Order\s*(?:(?:number\s+|no\.?\s*|#\s*|:\s*)([A-Za-z0-9-]*\d[A-Za-z0-9-]*)|([A-Za-z0-9-]*\d[A-Za-z0-9-]{3,}))/i;
 
-function detectCarrier(compact, text, subject) {
-  const usps = findTracking("usps", text, compact);
+function detectCarrier(compact, text, subject, html = "", htmlCompact = "") {
+  // HTML-only shipment notices are common. Search the decoded visible HTML as
+  // well as the plain part; never search raw MIME, which includes attachments.
+  const searchableText = `${text}\n${html}`;
+  const searchableCompact = `${compact}|${htmlCompact}`;
+
+  const usps = findTracking("usps", searchableText, searchableCompact);
   if (usps) {
     return { carrier: "USPS", trackingId: usps[1] };
   }
 
-  const ups = findTracking("ups", text, compact);
+  const ups = findTracking("ups", searchableText, searchableCompact);
   if (ups) {
     return { carrier: "UPS", trackingId: ups[1].toUpperCase() };
   }
@@ -1017,8 +1046,10 @@ function detectCarrier(compact, text, subject) {
    * A bare run of 12 or 15 digits is far too weak a signal on its own, so a
    * FedEx number is only accepted when the message actually names FedEx.
    */
-  const mentionsFedex = /fedex/i.test(text) || /fedex/i.test(subject);
-  const fedex = mentionsFedex ? findTracking("fedex", text, compact) : null;
+  const mentionsFedex = /fedex/i.test(searchableText) || /fedex/i.test(subject);
+  const fedex = mentionsFedex
+    ? findTracking("fedex", searchableText, searchableCompact)
+    : null;
   if (fedex) {
     return { carrier: "FedEx", trackingId: fedex[1] };
   }
@@ -1043,6 +1074,43 @@ function storeNameFor(senderDisplayName, sender) {
   return "Store";
 }
 
+/*
+ * What Amazon prints in mail that is not about a parcel.
+ *
+ * Amazon's address and a delivery word in the subject were never evidence of a
+ * shipment, and treating them as enough put a delivered package on the wall
+ * about once a week. The one that finally ended it was an Amazon Pharmacy
+ * advert, "Have your medication delivered, just like everything else". No
+ * phrase list wins that game: Amazon's marketing borrows the delivery
+ * vocabulary on purpose.
+ *
+ * Amazon's own footers are far more reliable than any subject line. Its
+ * marketing carries an unsubscribe link, and the rest of its non-shipping mail
+ * asks "Did you find this information helpful?". Its order, shipping and
+ * delivery notices carry neither, so either one rules a mail out, whatever
+ * the subject says and whatever order number it quotes.
+ */
+const AMAZON_NOT_A_SHIPMENT = [
+  /\bunsubscribe\b/i,
+  /\bdid\s+you\s+find\s+this\s+(?:information\s+)?helpful\b/i
+];
+
+function hasAmazonUnsubscribeSignal({ headers, text, html, rawHtml }) {
+  // Bulk senders commonly put the unsubscribe URL only in this RFC header.
+  if (headers?.has("list-unsubscribe")) {
+    return true;
+  }
+
+  if (AMAZON_NOT_A_SHIPMENT[0].test(text) || AMAZON_NOT_A_SHIPMENT[0].test(html)) {
+    return true;
+  }
+
+  // Also catch a link whose visible label is generic but whose destination is
+  // clearly an unsubscribe/opt-out endpoint.
+  return /<a\b[^>]+href\s*=\s*["'][^"']*(?:unsubscribe|opt[-_]?out|email[-_]?preferences)[^"']*["'][^>]*>/i
+    .test(rawHtml || "");
+}
+
 async function extractPackageInfo(message) {
   const subject = message.envelope?.subject || "";
   const from = message.envelope?.from?.[0];
@@ -1052,12 +1120,13 @@ async function extractPackageInfo(message) {
   const timestamp = messageTimestamp(message);
   const s = subject.toLowerCase();
 
-  const { text, compact } = await decodeMessage(message.source);
+  const { text, compact, html, htmlCompact, rawHtml, headers } =
+    await decodeMessage(message.source);
 
   const etaMatch = text.match(ETA_PATTERN);
   const etaString = etaMatch?.[1]?.trim() || "";
 
-  const { carrier, trackingId } = detectCarrier(compact, text, subject);
+  const { carrier, trackingId } = detectCarrier(compact, text, subject, html, htmlCompact);
 
   const withEta = (detail, status) =>
     etaString && status !== "Delivered" ? `${detail} (ETA: ${etaString})` : detail;
@@ -1156,18 +1225,26 @@ async function extractPackageInfo(message) {
       return null;
     }
 
-    const status = deliveryStatus(s, RETAILER_STAGES, UNKNOWN_STATUS);
-    const amazonOrder = findTracking("amazonOrder", `${subject}\n${text}`, compact);
-    const hasShipmentSubject = status !== UNKNOWN_STATUS &&
-      (status !== "Delayed" || /\b(?:order|package|shipment|delivery|delayed|late)\b/.test(s));
-
-    // An Amazon sender is only a candidate, not evidence of a package. Keep
-    // stage announcements without identifiers and identifier-backed updates,
-    // but don't turn newsletters or account/security mail into phantom cards.
-    // "Update on" alone is too broad to establish a delayed shipment.
-    if (!hasShipmentSubject && !amazonOrder && !trackingId) {
+    if (hasAmazonUnsubscribeSignal({ headers, text, html, rawHtml }) ||
+      AMAZON_NOT_A_SHIPMENT[1].test(text) || AMAZON_NOT_A_SHIPMENT[1].test(html)) {
       return null;
     }
+
+    /*
+     * The subject is the least trustworthy thing in the mail, so it never
+     * makes a card on its own. A shipment has an identity: every real order,
+     * shipping and delivery notice quotes Amazon's order number, and an advert
+     * has nothing to quote.
+     */
+    const amazonText = `${subject}\n${text}\n${html}`;
+    const amazonCompact = `${subject}|${compact}|${htmlCompact}`.replace(/\s+/g, "");
+    const amazonOrder = findTracking("amazonOrder", amazonText, amazonCompact);
+
+    if (!amazonOrder && !trackingId) {
+      return null;
+    }
+
+    const status = deliveryStatus(s, RETAILER_STAGES, UNKNOWN_STATUS);
 
     // Amazon quotes the item after a stage prefix, and uses several prefixes for
     // the same stage. A prefix missing from this list costs the card its product
@@ -1994,10 +2071,20 @@ function persistAndMergePackages(items, stateDir, log, packagesScanned = true) {
     item.kind === "package" ? { ...item, lastSeenAt: now } : item
   );
 
-  const remembered = cached.map((entry) => ({
-    ...entry,
-    lastSeenAt: Number(entry.lastSeenAt) || Number(entry.timestamp) || 0
-  }));
+  const remembered = cached
+    // Before Amazon required a real order/tracking identifier, subject-only
+    // ads were persisted as package:amazon:unknown-* cards. A successful scan
+    // under the new parser proves those entries are no longer backed by a
+    // shipment; remove them immediately instead of waiting for the stale timer.
+    .filter((entry) => !(
+      packagesScanned &&
+      entry.kind === "package" &&
+      String(entry.id || "").startsWith("package:amazon:unknown-")
+    ))
+    .map((entry) => ({
+      ...entry,
+      lastSeenAt: Number(entry.lastSeenAt) || Number(entry.timestamp) || 0
+    }));
 
   const combined = deduplicate([...seenNow, ...remembered]).filter((item) => {
     if (item.kind !== "package") {
