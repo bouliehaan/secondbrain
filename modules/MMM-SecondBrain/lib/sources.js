@@ -969,8 +969,13 @@ async function fetchPackageEmails(client, mailbox, since, options = {}, log = co
   }
 }
 
+/*
+ * A date stays on one line. When the gaps could be newlines, "Arriving
+ * Saturday" followed by a blank line and a "1" put "Saturday 1" on the wall
+ * on 2026-10-23. A weekday on its own is a date too.
+ */
 const ETA_PATTERN =
-  /(?:Arriving|Estimated delivery|Expected delivery|Scheduled delivery|Delivery date).{0,15}?([A-Za-z]+,\s*[A-Za-z]+\s*\d{1,2}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|[A-Za-z]+\s+\d{1,2}|[A-Za-z]+\s+by\s+\d{1,2}\s*[A-Za-z]+)/i;
+  /(?:Arriving|Estimated delivery|Expected delivery|Scheduled delivery|Delivery date).{0,15}?([A-Za-z]+,[^\S\r\n]*[A-Za-z]+[^\S\r\n]*\d{1,2}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|[A-Za-z]+[^\S\r\n]+\d{1,2}|[A-Za-z]+[^\S\r\n]+by[^\S\r\n]+\d{1,2}[^\S\r\n]*[A-Za-z]+|(?:mon|tues|wednes|thurs|fri|satur|sun)day)/i;
 
 /*
  * Each identifier is matched twice, because neither pass alone is sufficient.
@@ -1608,6 +1613,106 @@ async function pollGmail(configDir, log = console, report = null) {
   return results;
 }
 
+/*
+ * Said once per account and label, not on every poll: no wall label is the
+ * ordinary state of an account, not a fault, and the journal only needs to
+ * know why no Proton mail is going up.
+ */
+const missingWallLabels = new Set();
+
+function noteNoWallLabel(log, accountPath, requested) {
+  const key = `${accountPath}\n${requested}`;
+
+  if (missingWallLabels.has(key)) {
+    return;
+  }
+
+  missingWallLabels.add(key);
+  log.info?.(
+    `[MMM-SecondBrain] Proton account ${path.basename(accountPath)} has no ` +
+    `'${requested}' mailbox, so it puts no mail on the wall, only shipments.`
+  );
+}
+
+/* The unread mail in a Proton wall label, as cards. */
+async function fetchProtonWallMail(client, mailbox, account, accountName, log) {
+  const since = new Date(Date.now() - Number(account.maxAgeDays || 14) * 86400000);
+  const resultLimit = Math.max(1, Number(account.maxResults || 8));
+
+  let lock;
+  try {
+    lock = await client.getMailboxLock(mailbox, { readOnly: true });
+
+    const uids = await client.search({ seen: false, since }, { uid: true });
+
+    /*
+     * Headers for more than can be shown, because a mail that has run its
+     * time gives its place to an older one that has not: a person's mail
+     * from this morning behind an hour of receipts. Headers are a few
+     * hundred bytes; no body is fetched.
+     */
+    const selected = uids
+      .sort((a, b) => b - a)
+      .slice(0, Math.max(25, resultLimit * 3));
+
+    const cards = [];
+
+    if (selected.length === 0) {
+      return cards;
+    }
+
+    const messages = await client.fetchAll(
+      selected,
+      { envelope: true, internalDate: true, headers: MAIL_SORT_HEADERS },
+      { uid: true }
+    );
+
+    for (const message of messages.sort((a, b) => Number(b.uid) - Number(a.uid))) {
+      const from = envelopeIdentity(message.envelope?.from).address;
+      const subject = message.envelope?.subject || "No subject";
+      const timestamp = messageTimestamp(message);
+      const sorting = sortMail({
+        from,
+        subject,
+        headers: headerFields(message.headers)
+      });
+      const expiresAt = timestamp + mailLifetimeMs(sorting, account);
+
+      if (expiresAt <= Date.now()) {
+        continue;
+      }
+
+      const id = `proton:${account.alias || "account"}:${message.uid}`;
+
+      announceMail(log, "Proton", id, from, sorting, expiresAt);
+
+      cards.push({
+        id,
+        kind: "email",
+        label: `Proton · ${accountName}`,
+        title:
+          `${cleanText(envelopeAddress(message.envelope?.from), 70)} — ` +
+          `${cleanText(subject, 105)}`,
+        detail: `Unread in ${mailbox}`,
+        timestamp,
+        expiresAt,
+        priority: 78,
+        source: accountName
+      });
+
+      if (cards.length >= resultLimit) {
+        break;
+      }
+    }
+
+    return cards;
+  } finally {
+    if (lock) {
+      lock.release();
+    }
+  }
+}
+
 async function pollProton(configDir, log = console, report = null) {
   const accountsDir = path.join(configDir, "proton", "accounts");
   const results = [];
@@ -1641,94 +1746,38 @@ async function pollProton(configDir, log = console, report = null) {
       await client.connect();
 
       const mailboxes = await client.list();
-      const requestedMailbox = account.mailbox || "All Mail";
+      const accountName = account.displayName || account.alias || "Proton Mail";
 
       /*
-       * Prefer the IMAP special-use All Mail folder. This stays reliable even if
-       * Bridge presents the visible folder name differently.
+       * Shipments are looked for in All Mail, since the package scan takes only
+       * mail with an order or tracking number. `mailbox` is what this setting was
+       * called when the same folder also fed the mail cards.
        */
-      const mailbox = resolveMailbox(mailboxes, requestedMailbox, "\\All");
+      const requestedPackages = account.packageMailbox || account.mailbox || "All Mail";
+      const packageMailbox = resolveMailbox(mailboxes, requestedPackages, "\\All");
 
-      if (!mailbox) {
-        throw new Error(`Proton mailbox '${requestedMailbox}' was not found`);
+      if (!packageMailbox) {
+        throw new Error(`Proton mailbox '${requestedPackages}' was not found`);
       }
 
-      const accountName = account.displayName || account.alias || "Proton Mail";
-      const since = new Date(Date.now() - Number(account.maxAgeDays || 14) * 86400000);
-      const resultLimit = Math.max(1, Number(account.maxResults || 8));
+      /*
+       * Mail cards come only from a label made for the wall, the way Gmail's do,
+       * and never from All Mail. Until 2026-10-23 they came from All Mail, so
+       * every unread mail Proton received went up: in one fortnight 158 cards,
+       * newsletters, receipts and account notices, and not one that anybody
+       * wanted on the wall. Unread is not a reason to be seen. Without the label,
+       * Proton puts shipments on the wall and nothing else.
+       */
+      const requestedWall = account.importantMailbox || "Labels/Wall-Display";
+      const wallMailbox = resolveMailbox(mailboxes, requestedWall);
 
-      let lock;
-      try {
-        lock = await client.getMailboxLock(mailbox, { readOnly: true });
-
-        const uids = await client.search({ seen: false, since }, { uid: true });
-
-        /*
-         * Headers for more than can be shown, because a mail that has run its
-         * time gives its place to an older one that has not: a person's mail
-         * from this morning behind an hour of receipts. Headers are a few
-         * hundred bytes; no body is fetched.
-         */
-        const selected = uids
-          .sort((a, b) => b - a)
-          .slice(0, Math.max(25, resultLimit * 3));
-
-        if (selected.length > 0) {
-          const messages = await client.fetchAll(
-            selected,
-            { envelope: true, internalDate: true, headers: MAIL_SORT_HEADERS },
-            { uid: true }
-          );
-
-          const cards = [];
-
-          for (const message of messages.sort((a, b) => Number(b.uid) - Number(a.uid))) {
-            const from = envelopeIdentity(message.envelope?.from).address;
-            const subject = message.envelope?.subject || "No subject";
-            const timestamp = messageTimestamp(message);
-            const sorting = sortMail({
-              from,
-              subject,
-              headers: headerFields(message.headers)
-            });
-            const expiresAt = timestamp + mailLifetimeMs(sorting, account);
-
-            if (expiresAt <= Date.now()) {
-              continue;
-            }
-
-            const id = `proton:${account.alias || "account"}:${message.uid}`;
-
-            announceMail(log, "Proton", id, from, sorting, expiresAt);
-
-            cards.push({
-              id,
-              kind: "email",
-              label: `Proton · ${accountName}`,
-              title:
-                `${cleanText(envelopeAddress(message.envelope?.from), 70)} — ` +
-                `${cleanText(subject, 105)}`,
-              detail: `Unread in ${mailbox}`,
-              timestamp,
-              expiresAt,
-              priority: 78,
-              source: accountName
-            });
-
-            if (cards.length >= resultLimit) {
-              break;
-            }
-          }
-
-          results.push(...cards);
-        }
-      } finally {
-        if (lock) {
-          lock.release();
-        }
+      if (wallMailbox) {
+        results.push(...await fetchProtonWallMail(client, wallMailbox, account, accountName, log));
+      } else {
+        noteNoWallLabel(log, accountPath, requestedWall);
       }
 
-      await collectPackages(client, mailbox, account, results, log, report);
+      await collectPackages(client, packageMailbox, account, results, log, report);
     } catch (error) {
       tally.failed += 1;
       log.error(

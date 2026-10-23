@@ -11,15 +11,17 @@
   "username": "you@proton.me",
   "password": "PROTON_BRIDGE_PASSWORD_HERE",
 
-  "mailbox": "All Mail",
+  "_comment_wall": "Only unread mail in importantMailbox goes on the wall, the way Gmail's Wall-Display label works. Bridge shows a Proton label called Wall-Display as Labels/Wall-Display. Without that label, Proton puts shipments on the wall and no other mail.",
+  "importantMailbox": "Labels/Wall-Display",
   "maxAgeDays": 14,
   "maxResults": 8,
 
-  "_comment_mail": "How long an unread mail stays on the wall, counted from when it arrived. personMailMinutes is for mail a person wrote. automatedMailMinutes is for mail a machine sent: confirmations, receipts, reminders, codes, invitations, newsletters. Opening a mail takes it down sooner. maxAgeDays is only how far back the unread search looks.",
+  "_comment_mail": "How long an unread mail in importantMailbox stays on the wall, counted from when it arrived. personMailMinutes is for mail a person wrote. automatedMailMinutes is for mail a machine sent: confirmations, receipts, reminders, codes, invitations, newsletters. Opening a mail takes it down sooner. maxAgeDays is only how far back the unread search looks.",
   "personMailMinutes": 720,
   "automatedMailMinutes": 30,
 
   "monitorPackages": true,
+  "packageMailbox": "All Mail",
   "packageMaxAgeDays": 7,
   "packageScanLimit": 250
 }

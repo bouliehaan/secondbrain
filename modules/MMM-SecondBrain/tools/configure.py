@@ -167,8 +167,8 @@ def proton(alias):
     if not password:
         "<REDACTED_SECRET>" SystemExit("Password cannot be empty.")
     mailbox = prompt(
-        "Important-mail mailbox",
-        existing.get("mailbox", "Labels/Wall Display"),
+        "Wall label (only its unread mail goes on the wall)",
+        existing.get("importantMailbox", "Labels/Wall-Display"),
     )
 
     data = {
@@ -181,7 +181,7 @@ def proton(alias):
         "rejectUnauthorized": False,
         "username": username,
         "password": "<REDACTED_SECRET>",
-        "mailbox": mailbox,
+        "importantMailbox": mailbox,
         "maxAgeDays": int(existing.get("maxAgeDays", 14)),
         "maxResults": int(existing.get("maxResults", 8)),
     }

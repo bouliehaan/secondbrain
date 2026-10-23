@@ -372,10 +372,16 @@ function fakeImapServer(folders, seen) {
       return;
     }
 
-    if (command === "UID" && sub === "FETCH") {
+    /*
+     * The package scan fetches by sequence number. Every folder in these
+     * checks numbers its mail from 1 without gaps, so the two are the same.
+     */
+    const byUid = command === "UID" && sub === "FETCH";
+
+    if (byUid || command === "FETCH") {
       seen.fetches.push(line);
 
-      const wanted = uidSet(words[2], messages.map((message) => message.uid));
+      const wanted = uidSet(words[byUid ? 2 : 1], messages.map((message) => message.uid));
       const fields = (line.match(/HEADER\.FIELDS \(([^)]*)\)/i) || [])[1];
       const whole = /BODY\.PEEK\[\]/i.test(line);
 
@@ -466,13 +472,105 @@ function recordingLog() {
  * Proton, end to end
  * ------------------------------------------------------------------ */
 
-async function checkProton() {
-  console.log("\nProton, through a fake Bridge\n");
+function protonAccount(configDir, port, settings = {}) {
+  fs.mkdirSync(path.join(configDir, "proton", "accounts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, "proton", "accounts", "fake.json"),
+    JSON.stringify({
+      alias: "fake",
+      displayName: "you@proton.example",
+      host: "127.0.0.1",
+      port,
+      secure: false,
+      username: "you@proton.example",
+      password: "bridge-password",
+      ...settings
+    })
+  );
+}
+
+/*
+ * The defect of 2026-10-23: the mail cards read All Mail, so every unread
+ * mail Proton received went up on the wall -- 158 in a fortnight, and not
+ * one of them wanted there. Without a wall label, only shipments do.
+ */
+async function checkProtonAllMail() {
+  console.log("\nProton without a wall label, through a fake Bridge\n");
 
   const folders = {
     INBOX: { messages: [] },
     "All Mail": {
       specialUse: "\\All",
+      messages: [
+        mail(1, { name: "Sam", from: "sam@example.net", subject: "Dinner this week", ageMs: 2 * HOUR }),
+        mail(2, {
+          name: "Radio Podcast",
+          from: "bingo@patreon.example",
+          subject: "A new episode is up",
+          ageMs: 10 * MINUTE,
+          headers: "List-Unsubscribe: <https://patreon.example/leave>\r\n"
+        }),
+        mail(3, { name: "Front Desk", from: "noreply@clinic.example", subject: "Appointment Confirmation", ageMs: 5 * MINUTE }),
+        mail(4, {
+          name: "Amazon.com",
+          from: "shipment-tracking@amazon.com",
+          subject: 'Shipped: "Blue Widget, 3-pack"',
+          ageMs: 20 * MINUTE,
+          body: "Your package has shipped.\r\nArriving Saturday\r\nOrder # 114-3941689-1234567"
+        })
+      ]
+    }
+  };
+
+  await withServer(folders, async (port) => {
+    const configDir = temporaryDir("sb-proton-all-");
+    protonAccount(configDir, port);
+
+    const log = recordingLog();
+    const items = await pollProton(configDir, log);
+
+    check(
+      "the poll itself succeeds",
+      log.lines.error.length === 0,
+      log.lines.error.join(" | ")
+    );
+    check(
+      "no unread mail goes up, not from a person, a newsletter or a confirmation",
+      items.every((item) => item.kind !== "email"),
+      items.map((item) => `${item.kind}:${item.title}`).join(", ")
+    );
+    check(
+      "the shipment does",
+      items.length === 1 &&
+        items[0].kind === "package" &&
+        items[0].orderId === "114-3941689-1234567" &&
+        items[0].detail === "Shipped (ETA: Saturday)",
+      JSON.stringify(items)
+    );
+    check(
+      "the journal says once why no mail is going up",
+      log.lines.info.length === 1 &&
+        /no 'Labels\/Wall-Display' mailbox, so it puts no mail on the wall, only shipments/.test(log.lines.info[0]),
+      log.lines.info.join(" | ")
+    );
+
+    await pollProton(configDir, log);
+
+    check(
+      "and not again on the next poll",
+      log.lines.info.length === 1,
+      `${log.lines.info.length} line(s) after two polls`
+    );
+  });
+}
+
+async function checkProton() {
+  console.log("\nProton's wall label, through a fake Bridge\n");
+
+  const folders = {
+    INBOX: { messages: [] },
+    "All Mail": { specialUse: "\\All", messages: [] },
+    "Labels/Wall-Display": {
       messages: [
         mail(1, { name: "Sam", from: "sam@example.net", subject: "Dinner this week", ageMs: 13 * HOUR }),
         mail(2, { name: "Sam", from: "sam@example.net", subject: "Re: your appointment tomorrow", ageMs: 11.5 * HOUR }),
@@ -498,20 +596,7 @@ async function checkProton() {
 
   await withServer(folders, async (port, seen) => {
     const configDir = temporaryDir("sb-proton-");
-    fs.mkdirSync(path.join(configDir, "proton", "accounts"), { recursive: true });
-    fs.writeFileSync(
-      path.join(configDir, "proton", "accounts", "fake.json"),
-      JSON.stringify({
-        alias: "fake",
-        displayName: "you@proton.example",
-        host: "127.0.0.1",
-        port,
-        secure: false,
-        username: "you@proton.example",
-        password: "bridge-password",
-        monitorPackages: false
-      })
-    );
+    protonAccount(configDir, port, { monitorPackages: false });
 
     const log = recordingLog();
     const started = Date.now();
@@ -768,6 +853,7 @@ async function checkPollFloor() {
 async function run() {
   checkSorting();
   checkLifetimes();
+  await checkProtonAllMail();
   await checkProton();
   await checkGmail();
   await checkPollFloor();

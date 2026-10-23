@@ -118,6 +118,24 @@ async function run() {
     shippedInfo?.title === "Blue Widget, 3-pack",
     `got ${shippedInfo?.title}`
   );
+  check(
+    "the arrival date is on the card",
+    shippedInfo?.detail === "Shipped (UPS) (ETA: Tuesday, March 12)",
+    `got ${JSON.stringify(shippedInfo?.detail)}`
+  );
+
+  // What put "Saturday 1" on the wall: the date ends where its line does.
+  const wrappedEta = await extractPackageInfo(message({
+    from: "shipment-tracking@amazon.com",
+    subject: 'Shipped: "Blue Widget, 3-pack"',
+    body: plainMime("From: Amazon <shipment-tracking@amazon.com>",
+      "Your package has shipped.\nArriving Saturday\n \n1 item\nOrder # 114-3941689-1234567")
+  }));
+  check(
+    "an arrival date never runs onto the next line",
+    wrappedEta?.detail === "Shipped (ETA: Saturday)",
+    `got ${JSON.stringify(wrappedEta?.detail)}`
+  );
 
   // Amazon's sender address alone does not make an email a shipment. Safety
   // advice may even quote a shipping notice and include example identifiers.

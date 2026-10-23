@@ -123,7 +123,7 @@ Higher wins. Ties break toward the more recent item.
 | 100 | `voice` | Google Voice — calls, texts, voicemail |
 | 95 | `package` | shipments |
 | 90 | `warning` | Transmission errors |
-| 78 | `email` | Proton unread, for 12 h from a person or 30 min from a machine |
+| 78 | `email` | Proton wall label, for 12 h from a person or 30 min from a machine |
 | 75 | `email` | Gmail important mailbox, the same |
 | 45 | `download` | active torrents |
 | 35 | `download` | recently finished |
@@ -150,10 +150,16 @@ text picked up from the important mailbox previously had no age limit at all
 and sat on the wall until it was read for real.
 
 **Proton** (`pollProton`) — talks to the local Proton Mail Bridge on
-`127.0.0.1:1143`, not to Proton directly. The bridge must be running.
+`127.0.0.1:1143`, not to Proton directly. The bridge must be running. Two
+scans per account: unread mail in a dedicated label (`importantMailbox`,
+default `Labels/Wall-Display`, which is how Bridge shows a Proton label called
+Wall-Display), and package mail in All Mail (`packageMailbox`). With no such
+label, Proton puts shipments on the wall and no other mail, and says so once
+in the journal. Until 2026-10-23 the mail cards read All Mail, so every unread
+mail went up: 158 cards in a fortnight, all newsletters, receipts and notices.
 
 **How long a mail stays.** Unread is necessary but not enough. Every mail card,
-from Proton or from Gmail's wall label, comes down a set time after the mail
+from Proton's wall label or Gmail's, comes down a set time after the mail
 arrived, and that time depends on who sent it. `sortMail` reads the sender, the
 subject and a handful of headers (`Auto-Submitted`, `Precedence`, `List-*`,
 `Feedback-ID`, the marks of SES, SendGrid, Mailgun and Mandrill). A person's mail
@@ -168,8 +174,8 @@ domain, what the sort took it for, and when it comes down. The subject is never
 logged. Before 2026-09-26, unread was the only rule, and a Proton appointment
 confirmation stayed on the wall for a day.
 
-Proton fetches only those header fields, never a body. It reads the 25 newest
-unread mails so that expired ones give their places to older live ones. Gmail's
+Proton's wall label fetches only those header fields, never a body. It reads the
+25 newest unread mails so that expired ones give their places to older live ones. Gmail's
 wall label already fetches whole messages for the preview line, and its headers
 come from those.
 
