@@ -23,12 +23,12 @@ Module.register("MMM-SecondBrain", {
     maxDownloadItems: 3,
 
     /*
-     * How long a shipment stays on the wall after the last mail that mentioned
-     * it. Not the same as how far back the mailbox is scanned: the mail sits in
-     * All Mail for a week, so without this a package that shipped days ago and
-     * went quiet keeps being rebuilt from the same message.
+     * How long a shipment stays on the wall is decided by what the latest mail
+     * about it said -- two hours for Delivered, six for Shipped, a day for a
+     * failed attempt (lib/sources.js, PACKAGE_DISPLAY_HOURS). Setting this caps
+     * every one of those windows; it can shorten them, never lengthen one.
      */
-    packageStaleAfterHours: 36,
+    packageStaleAfterHours: 0,
 
     configDir: "/etc/magicmirror-secondbrain",
     stateDir: "/var/lib/magicmirror-secondbrain"
@@ -430,7 +430,8 @@ Module.register("MMM-SecondBrain", {
       "email",
       "download",
       "warning",
-      "package"
+      "package",
+      "nextcloud"
     ]);
 
     return allowed.has(kind)
@@ -444,7 +445,8 @@ Module.register("MMM-SecondBrain", {
       email: "Mail",
       download: "Transfer",
       warning: "Attention",
-      package: "Inbound"
+      package: "Inbound",
+      nextcloud: "Nextcloud"
     }[kind] || "Message";
   }
 });

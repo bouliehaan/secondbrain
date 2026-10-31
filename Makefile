@@ -13,6 +13,8 @@ syntax:
 	find modules config -name '*.js' -not -path '*/node_modules/*' \
 	    -exec node --check {} \; >/dev/null
 	@bash -n system/bin/calendar-kiosk
+	@bash -n system/backup-report/enable-backup-report
+	@sh -n system/backup-report/secondbrain-backup-receive
 	@sh -n packaging/bin/secondbrain-server
 	@sh -n packaging/debian/postinst
 	@sh -n packaging/debian/prerm
@@ -39,6 +41,8 @@ $(MM_MODULE)/node_modules: $(MM_MODULE)/package-lock.json
 check: deps syntax
 	@node scripts/check-packages.js     >/dev/null && echo "  packages     ok"
 	@node scripts/check-mail.js         >/dev/null && echo "  mail         ok"
+	@node scripts/check-nextcloud.js    >/dev/null && echo "  nextcloud    ok"
+	@node scripts/check-backups.js      >/dev/null && echo "  backups      ok"
 	@node scripts/check-nowplaying.js   >/dev/null && echo "  nowplaying   ok"
 	@node scripts/check-freeze-watch.js >/dev/null && echo "  freeze-watch ok"
 	@node scripts/check-weather.js      >/dev/null && echo "  weather      ok"

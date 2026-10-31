@@ -121,11 +121,17 @@ Higher wins. Ties break toward the more recent item.
 | Priority | Kind | Source |
 |---|---|---|
 | 100 | `voice` | Google Voice — calls, texts, voicemail |
+| 98 | `nextcloud` | Talk, for an hour |
 | 95 | `package` | shipments |
-| 90 | `warning` | Transmission errors |
+| 90 | `warning` | Transmission errors; backup problems and silence, for as long as they last |
+| 85 | `nextcloud` | calendar and task reminders, for 30 min |
+| 80 | `nextcloud` | shares, comment mentions, Deck, announcements, for 12 h |
 | 78 | `email` | Proton wall label, for 12 h from a person or 30 min from a machine |
 | 75 | `email` | Gmail important mailbox, the same |
+| 60 | `nextcloud` | anything else the server says, for 30 min |
 | 45 | `download` | active torrents |
+| 44 | `download` | a backup backlog uploading |
+| 40 | `download` | backup backlogs waiting their turn |
 | 35 | `download` | recently finished |
 
 Each category has its own display limit (`maxItems`, `maxPackageItems`,
@@ -181,6 +187,65 @@ come from those.
 
 **Transmission** (`pollTransmission`) — RPC, including the 409 session-id
 handshake the protocol requires on first contact.
+
+**Nextcloud** (`pollNextcloud`) — the notifications app's OCS endpoint
+(`/ocs/v2.php/apps/notifications/api/v2/notifications`), with the same base
+URL, user and app password as the contacts lookup, from
+`nextcloud-notifications.json`. Reading notifications dismisses nothing; one
+goes when it is dismissed in Nextcloud, and its card goes at the next poll.
+
+How long a notification stays, and where it ranks, comes from the app that
+raised it, never its wording, because Nextcloud translates every subject. Talk
+(`spreed`) gets a text's hour. A person's doing — `files_sharing`, `comments`,
+`deck`, `announcementcenter` and the like — gets a person's mail's 12 hours.
+A `dav` reminder fires when it is time to go and the event is already on the
+rail, so it gets 30 minutes, and so does anything else — including
+`admin_notifications`, which is what `occ notification:generate` and the push
+self-test post as. Until 2026-10-25 that counted as a person, and a test
+notification stayed up for 12 hours. `conversationMinutes`,
+`personMinutes`, `reminderMinutes` and `machineMinutes` override them. Nextcloud's
+own news feed, the welcome and survey prompts, and Nextcloud Mail never go up
+(mail reaches the wall only through a wall label); `ignoreApps` adds more.
+Several notifications about one thing, such as three mentions in one Talk
+conversation, make one card showing the newest. The card id is a digest,
+because an object id can be a Talk room token, which is a public room's join
+link. While the server reports the user as Do Not Disturb, no Nextcloud card
+goes up, and the journal says so once when it starts and once when it ends.
+
+**Backups** (`pollBackups`, `lib/backups.js`) — the only source the wall does
+not fetch. A backup server pushes a JSON report over SSH every few minutes to
+`secondbrain-backup`, an account whose every login sshd forces into
+`system/backup-report/secondbrain-backup-receive`, which caps the size and
+replaces `/var/lib/secondbrain-backup/report/report.json` whole. The poll reads
+that file, keeps only the fields it knows, and cuts every string to length.
+The wall holds no credential for the backup server and opens no port for it;
+`enable-backup-report` sets the account up from an address and a public key
+given on the command line, so neither is in this repo.
+
+Nothing goes up while the backups are caught up, or for a run that finds
+nothing to send. A backup uploading is a Transfers card at any size, even six
+files, whose bar is the whole backlog's progress, not the current run's, so it
+survives the sender splitting a days-long upload into turns. Its rate and ETA
+wait until the backlog has uploaded something, because the sender's last rate
+belongs to the previous backlog. Big backlogs waiting their turn (over 1 GB or
+1,000 files, `showFromGB` and `showFromFiles`) share one card; a few files left
+between runs are not worth one. A backlog that finishes shows nothing: the card
+goes at the next refresh, because a backup that worked is the expected state,
+not news. The backup cards are re-read every 3 seconds (`refreshBackups`, run
+by `node_helper.js`), not once per full poll: the report is a local file, one
+photo uploads in ten or twenty seconds, and a minute-long poll would look
+while nothing was happening. That refresh polls no mailbox: it swaps the backup
+cards into what the last full poll found, publishes only if they changed, and
+leaves the poll time and the status line as that poll left them. A problem the sender reports, or
+pending files with nothing uploaded for 6 hours, is a warning that stays for as
+long as it is true: one card per kind of problem, naming every job that has it,
+so a network outage is one card rather than four. When no report has arrived
+for 20 minutes the wall says so and shows nothing older, because a bar frozen at
+41% reads as an upload in progress. Staleness goes by when the file arrived, on
+the wall's clock, not by the sender's timestamp. `backups.json` changes any of
+these thresholds or the report path; without it the source is on, and off until
+the first report arrives. The status line reads `BACKUP OK`, `BACKUP 3/4` when
+one of four jobs has a problem, or `BACKUP DOWN` when the reports stop.
 
 All mailboxes are opened `readOnly: true`. Without it, fetching sets `\Seen` and
 the mirror marks real mail as read merely by displaying it.
@@ -299,16 +364,26 @@ outliving its *usefulness*, because while the mail is still inside the scan
 window every poll simply rebuilds the card from that same message and refreshes
 its `lastSeenAt`. Expiring the cached entry is futile in that window.
 
-So the rule that actually retires a shipment is a display filter:
-`pruneStalePackages` drops anything whose newest message is older than
-`packageStaleAfterHours` (default 36). `deduplicate` keeps the newest message
-for a shipment, so `timestamp` is the age of the latest news about it — one that
-shipped days ago and has said nothing since has almost certainly arrived.
+So the rule that actually retires a shipment is a display filter.
+`deduplicate` keeps the newest message for a shipment, so `timestamp` is the
+age of the latest news about it and `status` is what that news said, and
+`pruneStalePackages` gives each status its own window (`PACKAGE_DISPLAY_HOURS`):
 
-This is what catches `Shipped` and `Delayed`, which reach none of the other
-rules: they are not `Delivered`, not `Out for delivery`, and not old enough for
-the 10-day ceiling, so before this they sat on the wall for the entire
-`packageMaxAgeDays` window.
+| Latest news | Stays |
+|---|---|
+| Delivered | 2 h |
+| Delivery attempted | 24 h |
+| Out for delivery | 12 h, and never past midnight |
+| Delayed | 12 h |
+| Shipped | 6 h |
+| Ordered, Update | 1 h |
+
+A delivery is a thing to go and fetch. A failed attempt needs somebody to act.
+"Shipped" only says something is coming, and the out-for-delivery mail puts the
+card back up. Until 2026-10-24 every status got the same 36 hours
+(`packageStaleAfterHours`), and Delivered was also kept to midnight, so a parcel
+delivered at nine in the morning was on the wall all day. `packageStaleAfterHours`
+is now only a ceiling: it can shorten these windows, never lengthen one.
 
 **Archiving.** The default package mailbox is All Mail, which by definition
 still holds archived mail, so archiving an order does not remove it from the
@@ -324,6 +399,7 @@ special-use.
 | `config/secondbrain/*.example.json` | credential templates |
 | `/etc/magicmirror-secondbrain/` | the real credentials, on the mirror only |
 | `/etc/magicmirror-secondbrain/samo.json` | samo API token; absent means Now Playing is off |
+| `/etc/magicmirror-secondbrain/nextcloud-notifications.json` | Nextcloud app password; absent means no Nextcloud cards |
 | `/var/lib/magicmirror-secondbrain/` | runtime state, owned by `calendar-display` |
 
 Real credentials are gitignored and never leave the mirror.

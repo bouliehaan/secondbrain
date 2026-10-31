@@ -6,6 +6,11 @@ const crypto = require("node:crypto");
 const { simpleParser } = require("mailparser");
 const { ImapFlow } = require("imapflow");
 const { resolveVoiceContact } = require("./contacts");
+const {
+  DEFAULT_REPORT_PATH: DEFAULT_BACKUP_REPORT_PATH,
+  readReport,
+  backupCards
+} = require("./backups");
 
 /*
  * Package state must live outside the module directory. The mirror service runs
@@ -54,16 +59,6 @@ const PACKAGE_FORGET_AFTER_MS = 6 * 60 * 60 * 1000;
 
 /* A hard ceiling on a package card's life, whatever its status claims. */
 const PACKAGE_MAX_AGE_MS = 10 * 24 * 60 * 60 * 1000;
-
-/*
- * How long a shipment stays on the wall after the last thing anyone said about
- * it. This has to be a *display* rule, not a state one: the mail that created
- * the card is still sitting in All Mail for `packageMaxAgeDays`, so expiring the
- * cached entry would only make the next poll rebuild it from the same message.
- * Bounding the state file stops a card outliving its mail; this is what stops it
- * outliving its usefulness.
- */
-const PACKAGE_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
 
 /*
  * How long one source may take before the poll gives up waiting on it.
@@ -471,33 +466,47 @@ function mailLifetimeMs(sorting, account = {}) {
  * it. The sender's domain and not the subject, so the journal learns no more
  * about the mail than the sort needed to.
  */
-const announcedMail = new Map();
+const announced = new Map();
 
-function announceMail(log, source, id, from, sorting, expiresAt) {
+/*
+ * Write `verdict` to the journal the first time a card goes up, with when it
+ * comes down. Nextcloud notifications use this too, naming the app rather
+ * than the sender.
+ */
+function announceNotice(log, id, verdict, expiresAt, unless = "read") {
   const now = Date.now();
 
-  for (const [key, until] of announcedMail) {
+  for (const [key, until] of announced) {
     if (until <= now) {
-      announcedMail.delete(key);
+      announced.delete(key);
     }
   }
 
-  if (announcedMail.has(id)) {
+  if (announced.has(id)) {
     return;
   }
 
-  announcedMail.set(id, expiresAt);
+  announced.set(id, expiresAt);
 
-  const domain = String(from || "").split("@")[1] || "an unknown sender";
   const until = new Date(expiresAt).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit"
   });
 
   log.info?.(
-    `[MMM-SecondBrain] ${source} mail from ${domain} is ` +
-    (sorting.automated ? `automated (${sorting.reason})` : "from a person") +
-    `; on the wall until ${until} unless it is read first.`
+    `[MMM-SecondBrain] ${verdict}; on the wall until ${until} unless it is ${unless} first.`
+  );
+}
+
+function announceMail(log, source, id, from, sorting, expiresAt) {
+  const domain = String(from || "").split("@")[1] || "an unknown sender";
+
+  announceNotice(
+    log,
+    id,
+    `${source} mail from ${domain} is ` +
+      (sorting.automated ? `automated (${sorting.reason})` : "from a person"),
+    expiresAt
   );
 }
 
@@ -1992,6 +2001,312 @@ async function pollTransmission(configDir, log = console) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Off-site backups (lib/backups.js)
+ * ------------------------------------------------------------------ */
+
+let lastBackupSummary = null;
+
+/*
+ * On by default: the source reads one file, and until the backup server has
+ * pushed a report there is no file and the source is off. backups.json is
+ * only for moving the file or the thresholds.
+ */
+async function pollBackups(configDir, log = console) {
+  const configPath = path.join(configDir, "backups.json");
+  const config = fs.existsSync(configPath) ? readJson(configPath) : {};
+
+  if (config.enabled === false) {
+    noteHealth("Backup", { tried: 0, failed: 0 });
+    return [];
+  }
+
+  let received;
+
+  try {
+    received = readReport(config.reportPath || DEFAULT_BACKUP_REPORT_PATH);
+  } catch (error) {
+    noteHealth("Backup", { tried: 1, failed: 1 });
+    log.error(`[MMM-SecondBrain] Backup report unreadable: ${error.message}`);
+    return [];
+  }
+
+  if (!received) {
+    noteHealth("Backup", { tried: 0, failed: 0 });
+    return [];
+  }
+
+  const { items, health, summary } = backupCards(received, config);
+
+  noteHealth("Backup", health);
+
+  // Once per change, not once a poll: the journal shows when each state began.
+  if (summary !== lastBackupSummary) {
+    lastBackupSummary = summary;
+    log.info?.(`[MMM-SecondBrain] Backups: ${summary}.`);
+  }
+
+  return items;
+}
+
+/* ------------------------------------------------------------------ *
+ * Nextcloud notifications
+ * ------------------------------------------------------------------ */
+
+/*
+ * What a Nextcloud notification is, by the app that raised it, and so how long
+ * it is worth a glance and where it ranks. The app is structure, not wording:
+ * Nextcloud translates every subject, so phrases would break with the language.
+ *
+ * A Talk message is somebody talking to you now, the way a text is, and gets a
+ * text's hour. Something a person did that involves you -- a share, a mention
+ * in a comment, a Deck card, an announcement -- gets the half day a person's
+ * mail gets. A calendar reminder fires when it is already time to go, and the
+ * event itself is on the rail, so it gets half an hour; so does anything else,
+ * which is the server telling you something happened.
+ */
+const NEXTCLOUD_SORTS = {
+  conversation: { minutes: DEFAULT_VOICE_DISPLAY_MINUTES, priority: 98, setting: "conversationMinutes" },
+  reminder: { minutes: 30, priority: 85, setting: "reminderMinutes" },
+  person: { minutes: DEFAULT_PERSON_MAIL_MINUTES, priority: 80, setting: "personMinutes" },
+  machine: { minutes: DEFAULT_AUTOMATED_MAIL_MINUTES, priority: 60, setting: "machineMinutes" }
+};
+
+/* What the journal calls each sort. */
+const NEXTCLOUD_VERDICTS = {
+  conversation: "a conversation",
+  reminder: "a reminder",
+  person: "from a person",
+  machine: "from the server"
+};
+
+/*
+ * An app not listed here is the server talking. That includes
+ * admin_notifications, which is what `occ notification:generate` and the push
+ * self-test post as -- scripts and tests, not people. It was filed as a person
+ * until 2026-10-25, and a test notification sat on the wall for twelve hours.
+ */
+const NEXTCLOUD_APP_SORT = {
+  spreed: "conversation",
+  dav: "reminder",
+  tasks: "reminder",
+  comments: "person",
+  files_sharing: "person",
+  federatedfilesharing: "person",
+  deck: "person",
+  announcementcenter: "person",
+  polls: "person",
+  forms: "person"
+};
+
+const NEXTCLOUD_APP_NAMES = {
+  spreed: "Talk",
+  dav: "Calendar",
+  tasks: "Tasks",
+  comments: "Comment",
+  files_sharing: "Share",
+  federatedfilesharing: "Share",
+  deck: "Deck",
+  announcementcenter: "Announcement",
+  polls: "Poll",
+  forms: "Form",
+  updatenotification: "Update"
+};
+
+/*
+ * Never on the wall, however new. Nextcloud's own news feed and its welcome and
+ * survey prompts are adverts for Nextcloud. Nextcloud Mail announces new mail,
+ * and mail reaches the wall only through a wall label. A config can name more
+ * in `ignoreApps`.
+ */
+const NEXTCLOUD_NEVER = new Set([
+  "nextcloud_announcements",
+  "firstrunwizard",
+  "survey_client",
+  "mail"
+]);
+
+/* A rich subject with its {placeholders} filled in, for a notifier that left the plain one empty. */
+function nextcloudRichText(rich, parameters) {
+  return String(rich || "").replace(
+    /\{([^{}]+)\}/g,
+    (match, key) => parameters?.[key]?.name ?? match
+  );
+}
+
+/*
+ * The notifications that belong on the wall, as cards.
+ *
+ * One card per thing, not per notification: a Talk conversation that mentions
+ * you three times is one card showing the latest. The card's id is a digest,
+ * because an object id can be a Talk room token, and a public room's token is
+ * its join link -- and the page is served to anything on the network.
+ */
+function nextcloudCards(notifications, config = {}, log = console) {
+  const now = Date.now();
+  const accountName = config.displayName || "Nextcloud";
+  const ignored = new Set(Array.isArray(config.ignoreApps) ? config.ignoreApps : []);
+  const byObject = new Map();
+
+  for (const notification of Array.isArray(notifications) ? notifications : []) {
+    const app = String(notification?.app || "");
+
+    if (!app || NEXTCLOUD_NEVER.has(app) || ignored.has(app)) {
+      continue;
+    }
+
+    const timestamp = Date.parse(notification.datetime);
+
+    if (!Number.isFinite(timestamp)) {
+      continue;
+    }
+
+    const sortName = NEXTCLOUD_APP_SORT[app] || "machine";
+    const sort = NEXTCLOUD_SORTS[sortName];
+    const expiresAt = timestamp + minutesSetting(config[sort.setting], sort.minutes) * 60000;
+
+    if (expiresAt <= now) {
+      continue;
+    }
+
+    const objectKey = notification.object_type && notification.object_id
+      ? `${notification.object_type}:${notification.object_id}`
+      : `notification:${notification.notification_id}`;
+    const id = `nextcloud:${stableKey(config.baseUrl, config.username, app, objectKey)}`;
+
+    if (byObject.has(id) && byObject.get(id).timestamp >= timestamp) {
+      continue;
+    }
+
+    const subject =
+      notification.subject ||
+      nextcloudRichText(notification.subjectRich, notification.subjectRichParameters);
+    const message =
+      notification.message ||
+      nextcloudRichText(notification.messageRich, notification.messageRichParameters);
+    const appName = NEXTCLOUD_APP_NAMES[app];
+
+    byObject.set(id, {
+      id,
+      kind: "nextcloud",
+      label: appName ? `${appName} · ${accountName}` : accountName,
+      title: cleanText(subject || "Notification", 110),
+      detail: cleanText(message, 180),
+      timestamp,
+      expiresAt,
+      priority: sort.priority,
+      source: accountName,
+      app,
+      sortName
+    });
+  }
+
+  return [...byObject.values()].map(({ app, sortName, ...card }) => {
+    announceNotice(
+      log,
+      card.id,
+      `Nextcloud ${app} notification is ${NEXTCLOUD_VERDICTS[sortName]}`,
+      card.expiresAt,
+      "dismissed"
+    );
+
+    return card;
+  });
+}
+
+/*
+ * Do Not Disturb is said once when it starts and once when it ends: while it is
+ * on the wall shows no Nextcloud notifications at all, and the journal should
+ * say why they are missing.
+ */
+let nextcloudDoNotDisturb = false;
+
+function noteDoNotDisturb(log, on) {
+  if (on === nextcloudDoNotDisturb) {
+    return;
+  }
+
+  nextcloudDoNotDisturb = on;
+  log.info?.(
+    on
+      ? "[MMM-SecondBrain] Nextcloud is on Do Not Disturb; its notifications stay off the wall until it is not."
+      : "[MMM-SecondBrain] Nextcloud is off Do Not Disturb; its notifications are back on the wall."
+  );
+}
+
+async function pollNextcloud(configDir, log = console) {
+  const configPath = path.join(configDir, "nextcloud-notifications.json");
+
+  if (!fs.existsSync(configPath)) {
+    noteHealth("Nextcloud", { tried: 0, failed: 0 });
+    return [];
+  }
+
+  const config = readJson(configPath);
+
+  if (config.enabled === false || !config.baseUrl || !config.username || !config.password) {
+    noteHealth("Nextcloud", { tried: 0, failed: 0 });
+    return [];
+  }
+
+  noteHealth("Nextcloud", { tried: 1, failed: 0 });
+
+  const baseUrl = String(config.baseUrl).trim().replace(/\/+$/, "");
+
+  try {
+    /*
+     * Reading notifications dismisses nothing. They go when they are dismissed
+     * in Nextcloud, on the phone or the web, and the next poll takes the card
+     * down with them.
+     */
+    const response = await fetch(
+      `${baseUrl}/ocs/v2.php/apps/notifications/api/v2/notifications?format=json`,
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${config.username}:${config.password}`).toString("base64")}`,
+          "OCS-APIRequest": "true",
+          Accept: "application/json"
+        },
+        signal: AbortSignal.timeout(Math.max(5000, Number(config.timeoutMs || 15000)))
+      }
+    );
+
+    // No app on the server can raise a notification at all.
+    if (response.status === 204) {
+      return [];
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status}` +
+        (response.status === 404 ? " (is the Notifications app enabled?)" : "")
+      );
+    }
+
+    const body = await response.json();
+
+    /*
+     * Nextcloud's own clients show nothing while you are on Do Not Disturb, and
+     * neither does the wall. The header only comes from a server running the
+     * user-status app; without it, nothing is held back.
+     */
+    const doNotDisturb =
+      String(response.headers.get("x-nextcloud-user-status") || "").toLowerCase() === "dnd";
+
+    noteDoNotDisturb(log, doNotDisturb);
+
+    if (doNotDisturb) {
+      return [];
+    }
+
+    return nextcloudCards(body?.ocs?.data, { ...config, baseUrl }, log);
+  } catch (error) {
+    noteHealth("Nextcloud", { tried: 1, failed: 1 });
+    log.error(`[MMM-SecondBrain] Nextcloud notifications failed: ${error.message}`);
+    return [];
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Aggregation
  * ------------------------------------------------------------------ */
 
@@ -2196,13 +2511,52 @@ const isTransmissionItem = (item) => {
 const isPackageItem = (item) => item?.kind === "package";
 
 /*
- * Drop packages that have stopped being interesting: anything nothing has said
- * anything new about in a day and a half, anything delivered before today,
- * anything that was out for delivery on an earlier day (it has almost certainly
- * arrived), and bare "Ordered" entries with no identifier once a real shipment
- * is already on the board.
+ * How long a shipment stays on the wall after the latest news about it, by what
+ * that news was.
+ *
+ * This has to be a *display* rule, not a state one: the mail that made the card
+ * is still in All Mail for `packageMaxAgeDays`, so expiring the cached entry
+ * would only have the next poll rebuild it from the same message. Bounding the
+ * state file stops a card outliving its mail; this is what stops it outliving
+ * its use.
+ *
+ * Until 2026-10-24 one window covered every stage -- 36 hours from the last
+ * mail, with Delivered and Out for delivery also kept to the end of their day --
+ * so a parcel delivered at nine in the morning was news until midnight, and a
+ * "Shipped" mail stayed up for a day and a half while the parcel sat on a
+ * truck. How long news of a shipment is worth a glance depends on what the
+ * news is. A delivery is a thing to go and fetch: two hours. A failed attempt
+ * needs somebody to arrange redelivery or go and collect it, so it keeps a day.
+ * A parcel on the van is news until it arrives, and a delay until the plans
+ * around it change. "Shipped" says only that something is coming, and the next
+ * mail -- out for delivery -- puts the card back up. An order confirmation
+ * tells you what you did yourself.
  */
-function pruneStalePackages(items, staleAfterMs = PACKAGE_STALE_AFTER_MS) {
+const PACKAGE_DISPLAY_HOURS = {
+  Delivered: 2,
+  "Delivery attempted": 24,
+  "Out for delivery": 12,
+  Delayed: 12,
+  Shipped: 6,
+  Ordered: 1,
+  [UNKNOWN_STATUS]: 1
+};
+
+/* A status the table does not know is taken as saying nothing. */
+function packageDisplayMs(status) {
+  return (
+    PACKAGE_DISPLAY_HOURS[status] ?? PACKAGE_DISPLAY_HOURS[UNKNOWN_STATUS]
+  ) * 3600000;
+}
+
+/*
+ * Drop packages that have stopped being interesting: anything whose latest news
+ * is older than its status's window above (or than `ceilingMs`, which can only
+ * shorten one), anything delivered or out for delivery on an earlier day (it has
+ * almost certainly arrived), and bare "Ordered" entries with no identifier once
+ * a real shipment is already on the board.
+ */
+function pruneStalePackages(items, ceilingMs = Infinity) {
   const now = Date.now();
 
   const todayStart = new Date();
@@ -2223,12 +2577,12 @@ function pruneStalePackages(items, staleAfterMs = PACKAGE_STALE_AFTER_MS) {
 
     /*
      * `deduplicate` keeps the newest message for a shipment, so timestamp is the
-     * age of the latest news about it. A shipment stops being news long before
-     * its mail leaves the scan window: one that shipped days ago and has said
-     * nothing since has almost certainly arrived, whatever status it got stuck
-     * on -- "Shipped" and "Delayed" never reach any of the rules below.
+     * age of the latest news about it, and status is what that news said. A
+     * shipment stops being news long before its mail leaves the scan window.
      */
-    if (now - Number(item.timestamp || 0) > staleAfterMs) {
+    const windowMs = Math.min(packageDisplayMs(item.status), ceilingMs);
+
+    if (now - Number(item.timestamp || 0) > windowMs) {
       return false;
     }
 
@@ -2341,7 +2695,9 @@ async function pollAll(configDir, options = {}, log = console) {
   const outcomes = await Promise.all([
     withDeadline("Gmail", pollGmail(configDir, log, packageScan), timeoutMs),
     withDeadline("Proton", pollProton(configDir, log, packageScan), timeoutMs),
-    withDeadline("Transmission", pollTransmission(configDir, log), timeoutMs)
+    withDeadline("Transmission", pollTransmission(configDir, log), timeoutMs),
+    withDeadline("Nextcloud", pollNextcloud(configDir, log), timeoutMs),
+    withDeadline("Backup", pollBackups(configDir, log), timeoutMs)
   ]);
 
   const items = [];
@@ -2422,10 +2778,50 @@ async function pollAll(configDir, options = {}, log = console) {
     })
   };
 
-  return present(
-    persistAndMergePackages(items, options.stateDir, log, packageScan.scanned),
-    options
-  );
+  lastMerged = persistAndMergePackages(items, options.stateDir, log, packageScan.scanned);
+
+  return present(lastMerged, options);
+}
+
+/*
+ * Everything the last full poll put together, before it was sorted and cut to
+ * the display limits. refreshBackups swaps the backup cards in this list
+ * without polling anything else.
+ */
+let lastMerged = null;
+
+/*
+ * Re-read the backup report alone and say what the wall should now show.
+ *
+ * A full poll is once a minute at the fastest, because Gmail and Proton are
+ * logged into on every one. The backup report is a local file, and a single
+ * photo goes up in ten or twenty seconds: from one poll to the next the wall
+ * would never look while it was uploading. So the card has its own, cheaper
+ * turn. It reuses what the last full poll found for everything else and takes
+ * nothing from the network.
+ *
+ * @param {string} configDir
+ * @param {object} [options] the display options pollAll takes
+ * @param {object} [log]
+ * @returns {Promise<object[]|null>} display-ready items, or null before the
+ *   first full poll has said what the rest of the wall looks like
+ */
+async function refreshBackups(configDir, options = {}, log = console) {
+  const backups = await pollBackups(configDir, log);
+
+  // Read after the await: a full poll may have finished while the file was read.
+  if (!lastMerged) {
+    return null;
+  }
+
+  rememberSourceItems("Backup", backups);
+
+  lastMerged = [
+    ...lastMerged.filter((item) => !String(item.id || "").startsWith("backup:")),
+    ...backups
+  ];
+
+  return present(lastMerged, options);
 }
 
 /*
@@ -2452,12 +2848,17 @@ function present(merged, options = {}) {
       return Number(b.timestamp || 0) - Number(a.timestamp || 0);
     });
 
-  const staleAfterMs =
+  /*
+   * `packageStaleAfterHours` used to be the one window every shipment got. It is
+   * now only a ceiling on the per-status windows, so a config that still sets it
+   * can shorten them and never lengthen one.
+   */
+  const ceilingMs =
     Number(options.packageStaleAfterHours) > 0
       ? Number(options.packageStaleAfterHours) * 3600000
-      : PACKAGE_STALE_AFTER_MS;
+      : Infinity;
 
-  const active = pruneStalePackages(sorted, staleAfterMs);
+  const active = pruneStalePackages(sorted, ceilingMs);
 
   /*
    * Notifications, packages and Transmission each get their own limit, so a
@@ -2543,7 +2944,11 @@ module.exports = {
   pollGmail,
   pollProton,
   pollTransmission,
+  pollNextcloud,
+  pollBackups,
+  refreshBackups,
   // Exported for scripts/dev-poll.js and the checks in scripts/check-packages.js
+  nextcloudCards,
   extractPackageInfo,
   deduplicate,
   detectCarrier,

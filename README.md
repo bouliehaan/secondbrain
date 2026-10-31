@@ -6,8 +6,8 @@ weather, and a column of the things you would otherwise pull out a phone to
 check.
 
 - **Calendar and weather**, from as many feeds as you care to add.
-- **Messages and mail** — Google Voice texts and the mail you actually want
-  interrupted for, without marking anything read.
+- **Messages and mail** — Google Voice texts, Nextcloud notifications and the
+  mail you actually want interrupted for, without marking anything read.
 - **Deliveries** — package tracking parsed out of shipping mail, plus
   Transmission downloads.
 - **Now playing**, if you run [samo-radio](https://github.com/bouliehaan/samo-radio) —
@@ -85,6 +85,50 @@ Composer needs its `ucs` id under `schedules` — see
 
 **Downloads** (`transmission.json`) and **contacts**
 (`nextcloud-contacts.json`) follow the same shape as their templates.
+
+**Nextcloud notifications** (`nextcloud-notifications.json`) take the same
+fields as the contacts file, so if you already have that one, a copy works:
+
+```bash
+sudo install -m 600 -o calendar-display -g calendar-display \
+  /etc/magicmirror-secondbrain/nextcloud-contacts.json \
+  /etc/magicmirror-secondbrain/nextcloud-notifications.json
+```
+
+A Talk message stays up for an hour, a share or a mention for half a day, and a
+calendar reminder or a server notice for half an hour. Dismissing a
+notification in Nextcloud takes its card down; the wall never dismisses
+anything itself. Nextcloud's own announcements, its welcome prompts and
+Nextcloud Mail never go up, and nothing does while you are on Do Not Disturb.
+
+**Off-site backups** can be pushed to the wall by the machine that runs them:
+what it is uploading and how far along, what is waiting its turn, and anything
+that is wrong. The wall holds no credentials for that machine. The machine
+logs in over SSH to an account here that can do one thing: replace one report
+file. Set the account up with the backup server's address and public key:
+
+```bash
+sudo /usr/share/secondbrain/backup-report/enable-backup-report \
+  --from <backup server address> --key '<its ssh public key>'
+```
+
+It prints this wall's host key for the backup server's `known_hosts`. The
+backup server then sends a small JSON report every few minutes (the format is
+at the top of
+[lib/backups.js](modules/MMM-SecondBrain/lib/backups.js)):
+
+```bash
+ssh -i <key> -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+  secondbrain-backup@<wall address> < report.json
+```
+
+Nothing shows while the backups are caught up; the status line says
+`BACKUP OK`. An upload gets a progress bar while it runs and nothing once it
+is done, a problem stays up until it is fixed, and if the reports stop for 20
+minutes the wall says so.
+[backups.example.json](config/secondbrain/backups.example.json) lists the
+thresholds, for changing them. Undo it all with `--remove`. No restart is
+needed for this one.
 
 Restart after adding any of them:
 

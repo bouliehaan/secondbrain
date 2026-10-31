@@ -158,6 +158,11 @@ place 0755 packaging/bin/secondbrain-server "$ROOT/usr/bin/secondbrain-server"
 place 0755 system/bin/calendar-kiosk "$ROOT/usr/bin/calendar-kiosk"
 place 0755 clock/magicmirror-python-clock.py "$ROOT/usr/bin/magicmirror-python-clock.py"
 
+# Off for every install until someone runs the setup with a backup server's key
+# and address; see the comment at the top of enable-backup-report.
+place 0755 system/backup-report/enable-backup-report "$ROOT/usr/share/$PKG/backup-report/enable-backup-report"
+place 0755 system/backup-report/secondbrain-backup-receive "$ROOT/usr/share/$PKG/backup-report/secondbrain-backup-receive"
+
 # The page's Rajdhani and the clock's Orbitron are vendored OFL fonts.
 # Install both system-wide; postinst refreshes their fontconfig caches.
 for family in rajdhani orbitron; do

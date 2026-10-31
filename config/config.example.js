@@ -389,12 +389,11 @@ let config = {
         maxDownloadItems: 3,
 
         /*
-         * How long a shipment stays on the wall after the last mail about it.
-         * The mail itself lingers in All Mail for a week, so this -- not the
-         * scan window -- is what decides when a package card goes away. Lower
-         * it if shipments outstay their welcome.
+         * How long a shipment stays up depends on what the latest mail about
+         * it said: two hours for Delivered, six for Shipped, a day for a
+         * failed attempt. `packageStaleAfterHours: N` would cap all of them;
+         * it can shorten a window, never lengthen one.
          */
-        packageStaleAfterHours: 36,
 
         configDir: "/etc/magicmirror-secondbrain",
         stateDir: "/var/lib/magicmirror-secondbrain"

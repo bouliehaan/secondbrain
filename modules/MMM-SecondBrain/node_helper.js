@@ -1,7 +1,7 @@
 "use strict";
 
 const NodeHelper = require("node_helper");
-const { pollAll, cachedItems, getLastPollStatus } = require("./lib/sources");
+const { pollAll, refreshBackups, cachedItems, getLastPollStatus } = require("./lib/sources");
 
 /*
  * Every poll opens a fresh IMAP session per account. Polling faster than this
@@ -9,6 +9,13 @@ const { pollAll, cachedItems, getLastPollStatus } = require("./lib/sources");
  * so the floor is enforced here rather than trusted to config.
  */
 const MINIMUM_POLL_INTERVAL_MS = 60 * 1000;
+
+/*
+ * The backup card reads a local file, not an account, so it is not held to
+ * that floor. A photo uploads in ten or twenty seconds; looking once a
+ * minute would miss it.
+ */
+const BACKUP_REFRESH_MS = 3 * 1000;
 
 // MAGICMIRROR-GV-SANITIZER-V1
 const GOOGLE_VOICE_GAP =
@@ -86,12 +93,14 @@ module.exports = NodeHelper.create({
       maxItems: 3,
       maxPackageItems: 3,
       maxDownloadItems: 3,
-      packageStaleAfterHours: 36,
+      packageStaleAfterHours: 0,
       pollIntervalMs: MINIMUM_POLL_INTERVAL_MS
     };
 
     this.timer = null;
     this.timerIntervalMs = null;
+    this.backupTimer = null;
+    this.refreshingBackups = false;
     this.polling = false;
     this.lastPollAt = 0;
     this.published = false;
@@ -158,6 +167,11 @@ module.exports = NodeHelper.create({
       clearInterval(this.timer);
       this.timer = null;
     }
+
+    if (this.backupTimer) {
+      clearInterval(this.backupTimer);
+      this.backupTimer = null;
+    }
   },
 
   socketNotificationReceived(notification, payload) {
@@ -205,12 +219,13 @@ module.exports = NodeHelper.create({
         ),
 
         /*
-         * How long a shipment stays on the wall after the last mail about it.
-         * Zero or absent falls back to the library default.
+         * How long a shipment stays up depends on its status (lib/sources.js,
+         * PACKAGE_DISPLAY_HOURS). This is only a ceiling on those windows; zero
+         * or absent means none.
          */
         packageStaleAfterHours: Math.max(
           0,
-          Number(payload?.packageStaleAfterHours ?? 36)
+          Number(payload?.packageStaleAfterHours ?? 0)
         ),
 
         pollIntervalMs: Math.max(
@@ -338,6 +353,85 @@ module.exports = NodeHelper.create({
       () => this.pollNow(),
       this.config.pollIntervalMs
     );
+
+    // Once, whatever the poll interval does: it does not depend on the config.
+    if (!this.backupTimer) {
+      this.backupTimer = setInterval(
+        () => this.refreshBackupsNow(),
+        BACKUP_REFRESH_MS
+      );
+    }
+  },
+
+  pollOptions() {
+    return {
+      maxItems: this.config.maxItems,
+      maxPackageItems: this.config.maxPackageItems,
+      maxDownloadItems: this.config.maxDownloadItems,
+      packageStaleAfterHours: this.config.packageStaleAfterHours,
+      stateDir: this.config.stateDir
+    };
+  },
+
+  activeWebhooks() {
+    // Clean up expired webhooks
+    const now = Date.now();
+    for (const [id, item] of this.webhookItems.entries()) {
+      if (item.expiresAt && now > item.expiresAt) {
+        this.webhookItems.delete(id);
+      }
+    }
+
+    return Array.from(this.webhookItems.values()).map(item => {
+      // Strip expiresAt before sending to frontend
+      const { expiresAt, ...rest } = item;
+      return rest;
+    });
+  },
+
+  /*
+   * Between full polls: look at the backup report again and, only if the
+   * backup cards changed, put the new wall up. Nothing else is polled, and the
+   * poll time and status stay those of the last full poll, so the status line
+   * does not claim a fresh poll that did not happen.
+   */
+  async refreshBackupsNow() {
+    if (this.refreshingBackups || !this.lastUpdate) {
+      return;
+    }
+
+    this.refreshingBackups = true;
+
+    try {
+      const items = await refreshBackups(
+        this.config.configDir,
+        this.pollOptions(),
+        console
+      );
+
+      if (!items) {
+        return;
+      }
+
+      const finalItems = [...this.activeWebhooks(), ...items];
+
+      if (JSON.stringify(finalItems) === JSON.stringify(this.lastUpdate.items)) {
+        return;
+      }
+
+      this.lastUpdate = { ...this.lastUpdate, items: finalItems };
+
+      this._sendSanitizedSocketNotification(
+        "SECOND_BRAIN_UPDATE",
+        this.lastUpdate
+      );
+    } catch (error) {
+      console.error(
+        `[MMM-SecondBrain] Backup refresh failed: ${error.message}`
+      );
+    } finally {
+      this.refreshingBackups = false;
+    }
   },
 
   async pollNow() {
@@ -351,31 +445,11 @@ module.exports = NodeHelper.create({
     try {
       const items = await pollAll(
         this.config.configDir,
-        {
-          maxItems: this.config.maxItems,
-          maxPackageItems: this.config.maxPackageItems,
-          maxDownloadItems: this.config.maxDownloadItems,
-          packageStaleAfterHours: this.config.packageStaleAfterHours,
-          stateDir: this.config.stateDir
-        },
+        this.pollOptions(),
         console
       );
 
-      // Clean up expired webhooks
-      const now = Date.now();
-      for (const [id, item] of this.webhookItems.entries()) {
-        if (item.expiresAt && now > item.expiresAt) {
-          this.webhookItems.delete(id);
-        }
-      }
-
-      const activeWebhooks = Array.from(this.webhookItems.values()).map(item => {
-        // Strip expiresAt before sending to frontend
-        const { expiresAt, ...rest } = item;
-        return rest;
-      });
-
-      const finalItems = [...activeWebhooks, ...items];
+      const finalItems = [...this.activeWebhooks(), ...items];
 
       /*
        * The elapsed time is here because its absence cost an afternoon: a poll

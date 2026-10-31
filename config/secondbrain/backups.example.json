@@ -1,0 +1,9 @@
+{
+  "_comment": "Optional. The backup source is on without this file and reads the report enable-backup-report sets up; copy this to backups.json only to move the report or change when things show. Every value here is the default.",
+  "enabled": true,
+  "reportPath": "/var/lib/secondbrain-backup/report/report.json",
+  "staleAfterMinutes": 20,
+  "showFromGB": 1,
+  "showFromFiles": 1000,
+  "stalledAfterHours": 6
+}

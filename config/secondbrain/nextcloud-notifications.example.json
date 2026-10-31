@@ -1,0 +1,10 @@
+{
+  "_comment": "Puts Nextcloud notifications on the wall: Talk, shares, mentions, calendar reminders. The same shape as nextcloud-contacts.json, so a copy of that file works as it is. Reading notifications dismisses nothing.",
+  "enabled": true,
+  "baseUrl": "https://cloud.example.com",
+  "username": "NEXTCLOUD_USER",
+  "password": "NEXTCLOUD_APP_PASSWORD_HERE",
+  "displayName": "Nextcloud",
+  "ignoreApps": [],
+  "timeoutMs": 15000
+}

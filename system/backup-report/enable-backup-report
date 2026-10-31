@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+#
+# Lets one backup server push its status to this wall, and nothing else.
+#
+#   sudo ./enable-backup-report --from <sender address> --key '<sender public key>'
+#   sudo ./enable-backup-report --remove
+#
+# --if-changed  do nothing (and leave sshd alone) when it is already set up exactly so;
+#               for deploy scripts that run it every time
+# --from  the address the backup server connects from: an IP, a CIDR range, or a
+#         comma-separated list of either (sshd's from= syntax)
+# --key   the backup server's SSH public key, one line, or a file holding it
+# --reader  the account MagicMirror runs as (default: the magicmirror unit's User=)
+#
+# What it sets up:
+#   - an account, secondbrain-backup, with no password and no shell to speak of;
+#     it can log in only with that key, only from that address
+#   - sshd forces every login of that account to run secondbrain-backup-receive,
+#     which writes stdin to /var/lib/secondbrain-backup/report/report.json and
+#     nothing else: no shell, no tty, no forwarding of any kind. The key's
+#     authorized_keys line says the same, so either one alone still holds.
+#   - the report folder belongs to that account and is readable by the reader's
+#     group, so MagicMirror can read the report and the account can touch
+#     nothing of MagicMirror's
+#   - authorized_keys is root's, so the account cannot widen its own key
+#
+# The traffic is SSH, so it is encrypted, the wall knows it is talking to the
+# backup server (its key), and the backup server knows it is talking to the
+# wall (this machine's host key, printed at the end for its known_hosts).
+# Nothing new listens: it uses the sshd that is already here.
+#
+# Safe to run again, for a new key or address.
+
+set -euo pipefail
+
+ACCOUNT=secondbrain-backup
+HOME_DIR=/var/lib/$ACCOUNT
+REPORT_DIR=$HOME_DIR/report
+RECEIVER=/usr/local/lib/$ACCOUNT/receive
+SSHD_DROPIN=/etc/ssh/sshd_config.d/$ACCOUNT.conf
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+die() { echo "enable-backup-report: $*" >&2; exit 1; }
+say() { echo "== $*"; }
+
+FROM='' KEY='' READER='' REMOVE=0 IF_CHANGED=0
+while (( $# )); do
+  case $1 in
+    --from) FROM=${2:-}; shift 2 ;;
+    --key) KEY=${2:-}; shift 2 ;;
+    --reader) READER=${2:-}; shift 2 ;;
+    --remove) REMOVE=1; shift ;;
+    --if-changed) IF_CHANGED=1; shift ;;
+    -h|--help) sed -n '2,/^set -euo/{/^#/s/^# \{0,1\}//p}' "$0"; exit 0 ;;
+    *) die "unknown option: $1 (see --help)" ;;
+  esac
+done
+
+(( EUID == 0 )) || die "run it with sudo"
+
+reload_sshd() {
+  sshd -t || die "sshd rejects its config; nothing was reloaded"
+  if systemctl is-active --quiet ssh.service; then
+    systemctl reload ssh.service
+  elif systemctl is-active --quiet sshd.service; then
+    systemctl reload sshd.service
+  fi
+}
+
+if (( REMOVE )); then
+  say "removing the backup report account"
+  rm -f "$SSHD_DROPIN"
+  reload_sshd
+  if id "$ACCOUNT" &>/dev/null; then
+    pkill -u "$ACCOUNT" 2>/dev/null || true
+    userdel "$ACCOUNT"
+  fi
+  rm -rf "$HOME_DIR" "$(dirname "$RECEIVER")"
+  echo "done. The wall stops showing backups once its last report goes stale."
+  exit 0
+fi
+
+[[ -n $FROM ]] || die "--from is required: the address the backup server connects from"
+[[ -n $KEY ]] || die "--key is required: the backup server's public key"
+
+# sshd's from= takes patterns; allow what an address, a range or a list needs and
+# nothing that could close the quote and add an option.
+from_re='^[0-9A-Fa-f.:/,*?]+$'
+[[ $FROM =~ $from_re ]] || die "--from must be IP addresses or CIDR ranges, comma-separated"
+
+[[ -f $KEY ]] && KEY=$(<"$KEY")
+KEY=$(tr -d '\r' <<<"$KEY" | sed -n '/[^[:space:]]/{p;q}')
+key_re='^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/=]+( [^"]*)?$'
+[[ $KEY =~ $key_re ]] \
+  || die "--key must be one public key line (ssh-ed25519 AAAA... comment), with no options in front"
+ssh-keygen -l -f <(echo "$KEY") >/dev/null 2>&1 || die "--key is not a valid public key"
+
+if [[ -z $READER ]]; then
+  READER=$(systemctl show -p User --value magicmirror.service 2>/dev/null || true)
+fi
+[[ -n $READER ]] || die "cannot tell which account MagicMirror runs as; pass --reader <account>"
+id "$READER" &>/dev/null || die "no such account: $READER"
+READER_GROUP=$(id -gn "$READER")
+
+[[ -x $HERE/secondbrain-backup-receive ]] || die "secondbrain-backup-receive must sit next to this script"
+
+AUTHORIZED="restrict,from=\"$FROM\",command=\"$RECEIVER $REPORT_DIR\" $KEY"
+dropin() {
+  cat <<EOF
+# Written by enable-backup-report. The backup server's account can only hand
+# the wall a status report; the same limits are on its key in authorized_keys.
+Match User $ACCOUNT
+    AuthenticationMethods publickey
+    ForceCommand $RECEIVER $REPORT_DIR
+    PermitTTY no
+    AllowTcpForwarding no
+    AllowStreamLocalForwarding no
+    AllowAgentForwarding no
+    X11Forwarding no
+    PermitTunnel no
+    PermitUserRC no
+    GatewayPorts no
+EOF
+}
+
+if (( IF_CHANGED )) && id "$ACCOUNT" &>/dev/null &&
+   [[ $(cat "$HOME_DIR/.ssh/authorized_keys" 2>/dev/null) == "$AUTHORIZED" ]] &&
+   [[ $(cat "$SSHD_DROPIN" 2>/dev/null) == "$(dropin)" ]] &&
+   [[ $(stat -c %G "$REPORT_DIR" 2>/dev/null) == "$READER_GROUP" ]] &&
+   cmp -s "$HERE/secondbrain-backup-receive" "$RECEIVER"; then
+  echo "backup report: already set up, nothing to change"
+  exit 0
+fi
+
+say "checking sshd will let the account in"
+grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config \
+  || die "/etc/ssh/sshd_config does not include sshd_config.d/; add the Match block by hand"
+if sshd -T 2>/dev/null | grep -qiE '^(allowusers|allowgroups) '; then
+  die "sshd limits logins with AllowUsers/AllowGroups; add $ACCOUNT there first, then run this again"
+fi
+
+say "the account"
+if ! id "$ACCOUNT" &>/dev/null; then
+  useradd --system --user-group --home-dir "$HOME_DIR" --no-create-home \
+    --shell /bin/sh --comment "pushes backup status to the wall" "$ACCOUNT"
+fi
+# No password at all ('*'), rather than a locked one ('!'): sshd refuses key logins
+# to locked accounts on some systems.
+usermod -p '*' "$ACCOUNT"
+id "$ACCOUNT"
+
+say "folders"
+install -d -o root -g root -m 0755 "$HOME_DIR" "$HOME_DIR/.ssh"
+install -d -o "$ACCOUNT" -g "$READER_GROUP" -m 2750 "$REPORT_DIR"
+install -D -o root -g root -m 0755 "$HERE/secondbrain-backup-receive" "$RECEIVER"
+ls -ld "$HOME_DIR" "$HOME_DIR/.ssh" "$REPORT_DIR" "$RECEIVER"
+
+say "the key"
+printf '%s\n' "$AUTHORIZED" >"$HOME_DIR/.ssh/authorized_keys.new"
+chown root:root "$HOME_DIR/.ssh/authorized_keys.new"
+chmod 0644 "$HOME_DIR/.ssh/authorized_keys.new"
+mv -f "$HOME_DIR/.ssh/authorized_keys.new" "$HOME_DIR/.ssh/authorized_keys"
+ssh-keygen -l -f "$HOME_DIR/.ssh/authorized_keys"
+
+say "sshd"
+dropin >"$SSHD_DROPIN.new"
+chmod 0644 "$SSHD_DROPIN.new"
+mv -f "$SSHD_DROPIN.new" "$SSHD_DROPIN"
+reload_sshd
+
+# Prove the block applies to this account only. An unclosed Match in a drop-in
+# would otherwise force the receiver on every login to this machine.
+probe_addr=${FROM%%[,/]*}
+probe_addr=${probe_addr//[*?]/1}
+forced_for() { sshd -T -C "user=$1,host=probe,addr=$probe_addr" 2>/dev/null | awk '$1 == "forcecommand" { print $2 }'; }
+[[ $(forced_for "$ACCOUNT") == "$RECEIVER" ]] || die "sshd does not force the receiver for $ACCOUNT; check $SSHD_DROPIN"
+# sshd -T says "none" for an account with no forced command.
+case $(forced_for root) in
+  "" | none) ;;
+  *) rm -f "$SSHD_DROPIN"; reload_sshd; die "the Match block leaked onto other accounts; removed it" ;;
+esac
+echo "forced for $ACCOUNT only"
+
+say "done"
+echo "Reports from $FROM signed with that key now replace $REPORT_DIR/report.json."
+for f in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ecdsa_key.pub; do
+  if [[ -f $f ]]; then
+    echo "The sender checks it reached this wall with this host key in its known_hosts:"
+    echo "  <this wall's address> $(cut -d' ' -f1,2 "$f")"
+    break
+  fi
+done

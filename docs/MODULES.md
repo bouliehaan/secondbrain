@@ -441,6 +441,22 @@ Verify the package parser with no mail account and no mirror:
 node scripts/check-packages.js
 ```
 
+Verify the Nextcloud notifications source against a fake Nextcloud on
+loopback — which apps go up, for how long, Do Not Disturb, and what the server's
+errors look like:
+
+```bash
+node scripts/check-nextcloud.js
+```
+
+Verify the backup source — what a report becomes on the wall, what the
+sanitizer throws away, and the receiver script sshd runs — with no backup
+server:
+
+```bash
+node scripts/check-backups.js
+```
+
 Verify that one sick source cannot take the wall down with it. This stands up a
 fake IMAP server and a fake Nextcloud on loopback, so it also needs no account
 and no mirror. Allow about half a minute — it waits out a real deadline:
@@ -459,7 +475,7 @@ node scripts/dev-poll.js /path/to/config/dir --twice
 that churn mean duplicate cards and unbounded state growth.
 
 `/path/to/config/dir` needs real credentials (`gmail/`, `proton/`,
-`transmission.json`). On the mirror that is `/etc/magicmirror-secondbrain`.
+`transmission.json`, `nextcloud-notifications.json`). On the mirror that is `/etc/magicmirror-secondbrain`.
 `config/secondbrain/` here holds templates only; the real files are gitignored.
 
 ## History

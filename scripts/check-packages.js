@@ -425,8 +425,7 @@ async function run() {
       id: "package:amazon:114-1", kind: "package", title: "BuddyZone",
       status: "Delivery attempted", timestamp: yesterday, lastSeenAt: yesterday,
       orderId: "114-1", priority: 95
-    }],
-    36 * 60 * 60 * 1000
+    }]
   );
 
   check(
@@ -793,8 +792,7 @@ async function run() {
       shipmentAged(3 * 24),
       shipmentAged(4, "Shipped"),
       shipmentAged(8, "Delayed")
-    ],
-    36 * 3600000
+    ]
   );
 
   const survived = board.map((item) => item.title);
@@ -819,14 +817,80 @@ async function run() {
 
   check(
     "a Delayed shipment is aged out on the same rule",
-    pruneStalePackages([shipmentAged(5 * 24, "Delayed")], 36 * 3600000).length === 0,
+    pruneStalePackages([shipmentAged(5 * 24, "Delayed")]).length === 0,
     "a stale Delayed card survived"
   );
 
   check(
-    "the stale window is configurable",
-    pruneStalePackages([shipmentAged(2 * 24)], 7 * 24 * 3600000).length === 1,
-    "a longer window did not keep the card"
+    "packageStaleAfterHours can shorten a window",
+    pruneStalePackages([shipmentAged(4)], 2 * 3600000).length === 0,
+    "a two-hour ceiling kept a four-hour-old Shipped card"
+  );
+
+  check(
+    "but never lengthen one",
+    pruneStalePackages([shipmentAged(2 * 24)], 7 * 24 * 3600000).length === 0,
+    "a week-long ceiling kept a Shipped card for two days"
+  );
+
+  /* ---------------------------------------------------------------- *
+   * Regression: how long a shipment stays depends on what it last said.
+   *
+   * One 36-hour window covered every stage until 2026-10-24, and Delivered
+   * and Out for delivery were also kept to midnight -- so a parcel delivered
+   * at nine in the morning sat on the wall all day. Each status now has its
+   * own window, measured from the latest news about the shipment.
+   * ---------------------------------------------------------------- */
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+
+  const newsAged = (hours, status, orderId = `114-0000000-${status.length}${hours}`) => ({
+    id: `package:amazon:${orderId}`,
+    kind: "package",
+    status,
+    title: `${status} ${hours}h ago`,
+    orderId,
+    timestamp: Date.now() - hours * 3600000
+  });
+  const survivesWith = (item) => pruneStalePackages([item]).length === 1;
+
+  const windows = [
+    ["Delivered", 1.5, 2.5],
+    ["Out for delivery", 11, 13],
+    ["Delivery attempted", 23, 25],
+    ["Delayed", 11, 13],
+    ["Shipped", 5, 7],
+    ["Ordered", 0.5, 1.5],
+    ["Update", 0.5, 1.5]
+  ];
+
+  for (const [status, inside, outside] of windows) {
+    /*
+     * Delivered and Out for delivery also leave at midnight, so the check that
+     * one survives only means something once the day is that old.
+     */
+    const hoursToday = (Date.now() - midnight.getTime()) / 3600000;
+    const sameDayOnly = status === "Delivered" || status === "Out for delivery";
+
+    if (!sameDayOnly || hoursToday > inside) {
+      check(
+        `${status} news ${inside}h old is still on the wall`,
+        survivesWith(newsAged(inside, status)),
+        "dropped inside its window"
+      );
+    }
+
+    check(
+      `${status} news ${outside}h old has left the wall`,
+      !survivesWith(newsAged(outside, status)),
+      "kept past its window"
+    );
+  }
+
+  check(
+    "a status nobody knows gets the shortest window",
+    !survivesWith(newsAged(2, "Mystery")),
+    "an unknown status outlived Update's hour"
   );
 
   /* ---------------------------------------------------------------- *

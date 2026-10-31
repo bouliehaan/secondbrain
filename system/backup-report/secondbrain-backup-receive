@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# The one command the wall's backup-report account can run. sshd forces it on
+# every login (see enable-backup-report next to this file), whatever the
+# sender asked for.
+#
+# It takes one report on stdin and makes it the report MMM-SecondBrain reads,
+# whole or not at all. It never looks inside: the wall's poll parses it and
+# treats every field as untrusted (modules/MMM-SecondBrain/lib/backups.js).
+# All this does is cap the size and replace the file atomically, so the poll
+# never reads half a report.
+
+set -eu
+
+dir=${1:-/var/lib/secondbrain-backup/report}
+max=65536
+
+tmp=$(mktemp "$dir/.incoming.XXXXXX")
+trap 'rm -f "$tmp"' EXIT HUP INT TERM
+
+head -c $((max + 1)) >"$tmp"
+size=$(wc -c <"$tmp")
+
+if [ "$size" -eq 0 ] || [ "$size" -gt "$max" ]; then
+  echo "refused: $size bytes" >&2
+  exit 1
+fi
+
+# mktemp makes it 0600; the wall reads it through the directory's group.
+chmod 0640 "$tmp"
+mv -f "$tmp" "$dir/report.json"
+trap - EXIT HUP INT TERM

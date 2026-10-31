@@ -215,7 +215,8 @@
 
 /* A person's name is a name; a shipment's title is what is in the box. */
 .secondbrain-voice .secondbrain-title,
-.secondbrain-email .secondbrain-title {
+.secondbrain-email .secondbrain-title,
+.secondbrain-nextcloud .secondbrain-title {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
