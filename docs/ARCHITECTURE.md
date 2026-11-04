@@ -120,7 +120,7 @@ Higher wins. Ties break toward the more recent item.
 
 | Priority | Kind | Source |
 |---|---|---|
-| 100 | `voice` | Google Voice — calls, texts, voicemail |
+| 100 | `voice` | Google Voice — calls, texts, voicemail; ito texts from a person, for 2 h |
 | 98 | `nextcloud` | Talk, for an hour |
 | 95 | `package` | shipments |
 | 90 | `warning` | Transmission errors; backup problems and silence, for as long as they last |
@@ -128,6 +128,7 @@ Higher wins. Ties break toward the more recent item.
 | 80 | `nextcloud` | shares, comment mentions, Deck, announcements, for 12 h |
 | 78 | `email` | Proton wall label, for 12 h from a person or 30 min from a machine |
 | 75 | `email` | Gmail important mailbox, the same |
+| 70 | `voice` | ito texts from a short code or a named sender, for 30 min |
 | 60 | `nextcloud` | anything else the server says, for 30 min |
 | 45 | `download` | active torrents |
 | 44 | `download` | a backup backlog uploading |
@@ -246,6 +247,25 @@ the wall's clock, not by the sender's timestamp. `backups.json` changes any of
 these thresholds or the report path; without it the source is on, and off until
 the first report arrives. The status line reads `BACKUP OK`, `BACKUP 3/4` when
 one of four jobs has a problem, or `BACKUP DOWN` when the reports stop.
+
+**ito** (`pollIto`, `lib/ito.js`) — texts from an Android phone running
+[ito](https://github.com/bouliehaan/ito), and the other source the wall does
+not fetch. The phone POSTs its whole list of unanswered conversations to
+`/secondbrain/ito` on the wall's own port whenever it changes and every ten
+minutes: who, how many, when, and the ito group, never the text itself. A
+report replaces the last one, so a text read or answered on the phone or the
+Mac is simply missing from the next report and its card goes. Each report is
+signed with HMAC-SHA256 under a 32-byte key that `enable-ito` writes to
+`ito.json` and prints for the phone; the route refuses anything unsigned, more
+than five minutes off the wall's clock, or no newer than the last report it
+took, answers 403 with the reason, and reads the key on every report, so
+setting it up needs no restart. The report is kept in memory only: after a
+restart the cards are back with the phone's next report. Accepting one swaps
+the ito cards into what the last full poll found and publishes at once
+(`refreshIto`, the same swap the backup refresh does), so a text never costs a
+mailbox login. A person's text stays two hours from when it arrived
+(`textMinutes`), a short code's or a named sender's half an hour
+(`machineMinutes`).
 
 All mailboxes are opened `readOnly: true`. Without it, fetching sets `\Seen` and
 the mirror marks real mail as read merely by displaying it.

@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# Lets ito's phone put "text from X" on the wall.
+#
+#   sudo ./enable-ito              make the key (or keep the one there is) and print
+#                                  the line to paste into ito on the Mac
+#   sudo ./enable-ito --new-key    replace the key; the phone needs the new line
+#   sudo ./enable-ito --remove     forget the key; the wall takes no more reports
+#
+# --reader  the account MagicMirror runs as (default: the magicmirror unit's User=)
+# --address the address to print for the phone, if the one this finds is wrong
+# --config-dir  somewhere other than /etc/magicmirror-secondbrain (the checks use it)
+#
+# What it sets up: one file, /etc/magicmirror-secondbrain/ito.json, holding 32
+# random bytes that only this wall and the phone know. The phone signs every
+# report with them (modules/MMM-SecondBrain/lib/ito.js has the format), and the
+# wall takes no report that is not signed with them. A report says who texted,
+# how many and when, never what the text says.
+#
+# Nothing new listens: reports arrive at /secondbrain/ito on the port the wall
+# is already served on. No restart either; the wall reads the key per report.
+#
+# Safe to run again: without --new-key it prints the same line, so the phone
+# keeps working.
+
+set -euo pipefail
+
+CONFIG_DIR=/etc/magicmirror-secondbrain
+
+die() { echo "enable-ito: $*" >&2; exit 1; }
+say() { echo "== $*"; }
+
+READER='' ADDRESS='' REMOVE=0 NEW_KEY=0 OWN_DIR=0
+while (( $# )); do
+  case $1 in
+    --reader) READER=${2:-}; shift 2 ;;
+    --address) ADDRESS=${2:-}; shift 2 ;;
+    --config-dir) CONFIG_DIR=${2:-}; OWN_DIR=1; shift 2 ;;
+    --new-key) NEW_KEY=1; shift ;;
+    --remove) REMOVE=1; shift ;;
+    -h|--help) sed -n '2,/^set -euo/{/^#/s/^# \{0,1\}//p}' "$0"; exit 0 ;;
+    *) die "unknown option: $1 (see --help)" ;;
+  esac
+done
+CONFIG=$CONFIG_DIR/ito.json
+
+(( EUID == 0 || OWN_DIR )) || die "run it with sudo"
+
+if (( REMOVE )); then
+  rm -f "$CONFIG"
+  echo "done. The wall takes no more reports from ito; its texts leave the wall at once."
+  exit 0
+fi
+
+if [[ -z $READER ]]; then
+  READER=$(systemctl show -p User --value magicmirror.service 2>/dev/null || true)
+fi
+[[ -n $READER ]] || die "cannot tell which account MagicMirror runs as; pass --reader <account>"
+id "$READER" &>/dev/null || die "no such account: $READER"
+READER_GROUP=$(id -gn "$READER")
+
+[[ -d $CONFIG_DIR ]] || die "$CONFIG_DIR is missing; is secondbrain installed?"
+
+# The key is kept, and the rest of the file with it (textMinutes and the like),
+# unless asked for a new one. python3 rather than sed: it is JSON.
+say "the key"
+umask 077
+tmp=$(mktemp "$CONFIG_DIR/.ito.json.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+python3 - "$CONFIG" "$NEW_KEY" >"$tmp" <<'PY'
+import base64, json, os, re, sys
+path, new_key = sys.argv[1], sys.argv[2] == "1"
+config = {}
+if os.path.exists(path):
+    with open(path) as f:
+        config = json.load(f)
+    if not isinstance(config, dict):
+        config = {}
+key = str(config.get("key", ""))
+if new_key or not re.fullmatch(r"[A-Za-z0-9_-]{43}", key):
+    key = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
+config["key"] = key
+config.pop("enabled", None)
+print(json.dumps(config, indent=2))
+PY
+chown "$READER:$READER_GROUP" "$tmp"
+chmod 0600 "$tmp"
+mv -f "$tmp" "$CONFIG"
+trap - EXIT
+ls -l "$CONFIG"
+
+if [[ -z $ADDRESS ]]; then
+  # The address this machine reaches the LAN from; hostname -I if there is no route.
+  ADDRESS=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true)
+  [[ -n $ADDRESS ]] || ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}')
+  [[ -n $ADDRESS ]] || ADDRESS=$(hostname)
+fi
+PORT=$(. /etc/default/secondbrain 2>/dev/null; echo "${SECONDBRAIN_PORT:-43761}")
+KEY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["key"])' "$CONFIG")
+
+say "done"
+cat <<EOF
+In ito on the Mac: settings, // wall, paste this line and press set.
+
+  http://$ADDRESS:$PORT $KEY
+
+The Mac hands it to the phone, and from then on the phone tells the wall by
+itself, Mac on or off. Keep the line to yourself: with it, anything on your
+network can put a text card on the wall. If it gets out, run this again with
+--new-key and paste the new line.
+EOF

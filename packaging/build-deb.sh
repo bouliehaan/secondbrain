@@ -163,6 +163,9 @@ place 0755 clock/magicmirror-python-clock.py "$ROOT/usr/bin/magicmirror-python-c
 place 0755 system/backup-report/enable-backup-report "$ROOT/usr/share/$PKG/backup-report/enable-backup-report"
 place 0755 system/backup-report/secondbrain-backup-receive "$ROOT/usr/share/$PKG/backup-report/secondbrain-backup-receive"
 
+# Off until someone runs it; it makes the key ito's phone signs its texts with.
+place 0755 system/ito/enable-ito "$ROOT/usr/share/$PKG/ito/enable-ito"
+
 # The page's Rajdhani and the clock's Orbitron are vendored OFL fonts.
 # Install both system-wide; postinst refreshes their fontconfig caches.
 for family in rajdhani orbitron; do

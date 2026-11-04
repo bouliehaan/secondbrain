@@ -1,0 +1,6 @@
+{
+  "_comment": "Puts 'text from X' on the wall from ito's phone. Do not copy this by hand: sudo /usr/share/secondbrain/ito/enable-ito writes ito.json with a real key and prints the line to paste into ito on the Mac. Add the other two fields to that file only to change how long a card stays; these are the defaults. A card also goes as soon as the text is read or answered, on the phone or the Mac.",
+  "key": "WRITTEN_BY_ENABLE_ITO",
+  "textMinutes": 120,
+  "machineMinutes": 30
+}

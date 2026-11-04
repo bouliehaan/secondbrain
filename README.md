@@ -8,6 +8,8 @@ check.
 - **Calendar and weather**, from as many feeds as you care to add.
 - **Messages and mail** — Google Voice texts, Nextcloud notifications and the
   mail you actually want interrupted for, without marking anything read.
+- **Texts from your phone** — "Text · Mom" from [ito](https://github.com/bouliehaan/ito)'s
+  phone, for two hours or until you read or answer it. Who, never what.
 - **Deliveries** — package tracking parsed out of shipping mail, plus
   Transmission downloads.
 - **Now playing**, if you run [samo-radio](https://github.com/bouliehaan/samo-radio) —
@@ -129,6 +131,26 @@ minutes the wall says so.
 [backups.example.json](config/secondbrain/backups.example.json) lists the
 thresholds, for changing them. Undo it all with `--remove`. No restart is
 needed for this one.
+
+**Texts from your phone** come from [ito](https://github.com/bouliehaan/ito):
+its phone pushes who has texted you and not been answered. The wall gets a
+name, a count and a time, never what the text says. Make the key on the
+wall:
+
+```bash
+sudo /usr/share/secondbrain/ito/enable-ito
+```
+
+It prints one line, `http://<this wall>:43761 <key>`. Paste it into ito on
+the Mac (settings, `// wall`), which hands it to the phone; from then on the
+phone tells the wall itself, whether or not the Mac is on. A person's text
+stays up two hours, a short code's half an hour, and a card goes the moment
+the text is read or answered on the phone or the Mac. Every report is signed
+with that key and nothing else on the network can put a card up, so keep the
+line to yourself; `--new-key` replaces it and `--remove` turns this off. No
+restart is needed for this one either. To change the two windows, add
+`textMinutes` or `machineMinutes` to `ito.json`
+([ito.example.json](config/secondbrain/ito.example.json)).
 
 Restart after adding any of them:
 

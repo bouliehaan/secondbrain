@@ -1,7 +1,8 @@
 "use strict";
 
 const NodeHelper = require("node_helper");
-const { pollAll, refreshBackups, cachedItems, getLastPollStatus } = require("./lib/sources");
+const { pollAll, refreshBackups, refreshIto, cachedItems, getLastPollStatus } = require("./lib/sources");
+const ito = require("./lib/ito");
 
 /*
  * Every poll opens a fresh IMAP session per account. Polling faster than this
@@ -108,6 +109,45 @@ module.exports = NodeHelper.create({
     this.webhookItems = new Map();
 
     if (this.expressApp) {
+      /*
+       * ito's phone reports its unread texts here; lib/ito.js says what is in
+       * a report and how it is signed. Read raw, because the signature is over
+       * the exact bytes, and never more than a report could be.
+       */
+      this.expressApp.post("/secondbrain/ito", (req, res) => {
+        const chunks = [];
+        let size = 0;
+
+        req.on("data", (chunk) => {
+          size += chunk.length;
+
+          if (size <= ito.MAX_BODY_BYTES) {
+            chunks.push(chunk);
+          }
+        });
+
+        req.on("error", () => {});
+
+        req.on("end", () => {
+          const outcome = size > ito.MAX_BODY_BYTES
+            ? { status: 413, body: { error: "size" } }
+            : ito.receive(this.config.configDir, req.headers, Buffer.concat(chunks));
+
+          if (outcome.status !== 200) {
+            console.warn(
+              `[MMM-SecondBrain] Refused a report on /secondbrain/ito from ` +
+              `${req.socket?.remoteAddress || "?"}: ${outcome.status} ${outcome.body?.error}.`
+            );
+          }
+
+          res.status(outcome.status).json(outcome.body);
+
+          if (outcome.accepted) {
+            this.refreshItoNow();
+          }
+        });
+      });
+
       this.expressApp.post("/secondbrain/webhook", (req, res) => {
         const handlePayload = (payload) => {
           const { id, title, detail, kind, ttl } = payload || {};
@@ -431,6 +471,46 @@ module.exports = NodeHelper.create({
       );
     } finally {
       this.refreshingBackups = false;
+    }
+  },
+
+  /*
+   * The phone has just sent a report: put it up now, without polling a
+   * mailbox. Before the first full poll there is nothing to swap it into, and
+   * that poll reads the report itself.
+   */
+  refreshItoNow() {
+    if (!this.lastUpdate) {
+      return;
+    }
+
+    try {
+      const items = refreshIto(
+        this.config.configDir,
+        this.pollOptions(),
+        console
+      );
+
+      if (!items) {
+        return;
+      }
+
+      const finalItems = [...this.activeWebhooks(), ...items];
+
+      if (JSON.stringify(finalItems) === JSON.stringify(this.lastUpdate.items)) {
+        return;
+      }
+
+      this.lastUpdate = { ...this.lastUpdate, items: finalItems };
+
+      this._sendSanitizedSocketNotification(
+        "SECOND_BRAIN_UPDATE",
+        this.lastUpdate
+      );
+    } catch (error) {
+      console.error(
+        `[MMM-SecondBrain] Text refresh failed: ${error.message}`
+      );
     }
   },
 

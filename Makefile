@@ -15,6 +15,7 @@ syntax:
 	@bash -n system/bin/calendar-kiosk
 	@bash -n system/backup-report/enable-backup-report
 	@sh -n system/backup-report/secondbrain-backup-receive
+	@bash -n system/ito/enable-ito
 	@sh -n packaging/bin/secondbrain-server
 	@sh -n packaging/debian/postinst
 	@sh -n packaging/debian/prerm
@@ -43,6 +44,7 @@ check: deps syntax
 	@node scripts/check-mail.js         >/dev/null && echo "  mail         ok"
 	@node scripts/check-nextcloud.js    >/dev/null && echo "  nextcloud    ok"
 	@node scripts/check-backups.js      >/dev/null && echo "  backups      ok"
+	@node scripts/check-ito.js          >/dev/null && echo "  ito          ok"
 	@node scripts/check-nowplaying.js   >/dev/null && echo "  nowplaying   ok"
 	@node scripts/check-freeze-watch.js >/dev/null && echo "  freeze-watch ok"
 	@node scripts/check-weather.js      >/dev/null && echo "  weather      ok"

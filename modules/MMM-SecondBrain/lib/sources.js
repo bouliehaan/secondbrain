@@ -11,6 +11,7 @@ const {
   readReport,
   backupCards
 } = require("./backups");
+const { currentCards: itoCards } = require("./ito");
 
 /*
  * Package state must live outside the module directory. The mirror service runs
@@ -2049,6 +2050,34 @@ async function pollBackups(configDir, log = console) {
 }
 
 /* ------------------------------------------------------------------ *
+ * ito: texts, pushed by the phone (lib/ito.js)
+ * ------------------------------------------------------------------ */
+
+/*
+ * The phone's last report, as cards. Nothing is fetched: the report arrived
+ * on its own at /secondbrain/ito and lib/ito.js kept it. Each card writes one
+ * journal line when it first goes up, saying only what kind of sender it is;
+ * who texted is on the wall, not in the journal.
+ */
+function pollIto(configDir, log = console) {
+  const cards = itoCards(configDir);
+
+  for (const card of cards) {
+    announceNotice(
+      log,
+      card.id,
+      card.priority >= 100
+        ? "A text from a person"
+        : "A text from a short code or a service",
+      card.expiresAt,
+      "read or answered"
+    );
+  }
+
+  return cards;
+}
+
+/* ------------------------------------------------------------------ *
  * Nextcloud notifications
  * ------------------------------------------------------------------ */
 
@@ -2753,6 +2782,9 @@ async function pollAll(configDir, options = {}, log = console) {
     items.push(...outcome.items);
   }
 
+  // In memory, so no deadline: it cannot hang.
+  items.push(...pollIto(configDir, log));
+
   lastPollStatus = {
     at: Date.now(),
     ms: Date.now() - startedAt,
@@ -2819,6 +2851,28 @@ async function refreshBackups(configDir, options = {}, log = console) {
   lastMerged = [
     ...lastMerged.filter((item) => !String(item.id || "").startsWith("backup:")),
     ...backups
+  ];
+
+  return present(lastMerged, options);
+}
+
+/*
+ * Put the phone's latest report on the wall without polling anything else:
+ * the same swap refreshBackups does, for the ito cards. A text should be on
+ * the wall the moment the phone says so, and a mailbox login per text is
+ * exactly what the 60s floor is there to prevent.
+ *
+ * @returns {object[]|null} display-ready items, or null before the first
+ *   full poll
+ */
+function refreshIto(configDir, options = {}, log = console) {
+  if (!lastMerged) {
+    return null;
+  }
+
+  lastMerged = [
+    ...lastMerged.filter((item) => !String(item.id || "").startsWith("ito:")),
+    ...pollIto(configDir, log)
   ];
 
   return present(lastMerged, options);
@@ -2947,6 +3001,8 @@ module.exports = {
   pollNextcloud,
   pollBackups,
   refreshBackups,
+  pollIto,
+  refreshIto,
   // Exported for scripts/dev-poll.js and the checks in scripts/check-packages.js
   nextcloudCards,
   extractPackageInfo,

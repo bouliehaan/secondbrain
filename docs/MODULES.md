@@ -457,6 +457,14 @@ server:
 node scripts/check-backups.js
 ```
 
+Verify the ito source — the signature, the clock and replay checks, what a
+report becomes on the wall, the route through the real node_helper over a real
+socket, and enable-ito — with no phone:
+
+```bash
+node scripts/check-ito.js
+```
+
 Verify that one sick source cannot take the wall down with it. This stands up a
 fake IMAP server and a fake Nextcloud on loopback, so it also needs no account
 and no mirror. Allow about half a minute — it waits out a real deadline:
