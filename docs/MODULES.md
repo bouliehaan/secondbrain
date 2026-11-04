@@ -457,6 +457,14 @@ server:
 node scripts/check-backups.js
 ```
 
+Verify the webhook route — the token, what a request becomes on the wall, and
+that a card goes up without a single IMAP login — through the real node_helper,
+over a real socket:
+
+```bash
+node scripts/check-webhook.js
+```
+
 Verify that one sick source cannot take the wall down with it. This stands up a
 fake IMAP server and a fake Nextcloud on loopback, so it also needs no account
 and no mirror. Allow about half a minute — it waits out a real deadline:

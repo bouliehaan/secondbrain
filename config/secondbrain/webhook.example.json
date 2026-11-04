@@ -1,0 +1,4 @@
+{
+  "_comment": "Lets your own scripts put cards on the wall with POST /secondbrain/webhook (see the README). The route answers the whole LAN, so it takes nothing without this file, and only requests sending 'Authorization: Bearer <token>'. Do not copy this placeholder: make the file with a real token, as the README shows (openssl rand -hex 32). It is read on every request, so no restart.",
+  "token": "REPLACE WITH THE OUTPUT OF: openssl rand -hex 32"
+}
