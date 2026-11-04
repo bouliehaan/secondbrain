@@ -152,6 +152,47 @@ restart is needed for this one either. To change the two windows, add
 `textMinutes` or `machineMinutes` to `ito.json`
 ([ito.example.json](config/secondbrain/ito.example.json)).
 
+**Cards from your own scripts** — a cron job, Home Assistant, a NAS's alert
+hook: anything that can make an HTTP request can put a card on the wall and
+take it down again. The route answers the whole LAN, like the page, so it
+takes nothing until there is a token, and then only requests that carry it.
+Make one (the `$(…)` is meant to run):
+
+```bash
+sudo install -m 600 -o calendar-display -g calendar-display /dev/stdin \
+  /etc/magicmirror-secondbrain/webhook.json <<JSON
+{ "token": "$(openssl rand -hex 32)" }
+JSON
+sudo cat /etc/magicmirror-secondbrain/webhook.json
+```
+
+Then, with that token:
+
+```bash
+curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"id": "garage", "title": "Garage door open", "detail": "since 9:40 PM", "ttl": 3600}' \
+  http://<wall address>:43761/secondbrain/webhook
+```
+
+```bash
+curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+  http://<wall address>:43761/secondbrain/webhook/garage
+```
+
+`id` is the only field it needs; posting the same id again replaces that card.
+`kind` is `warning` (the hatched card, and the default), `email`, `voice`,
+`package`, `download` or `nextcloud`. `ttl` is seconds until the card comes
+down by itself; without one it stays until deleted, or until the wall
+restarts — cards are held in memory. A card goes up within a second and costs
+no mailbox login, so a script can post as often as it likes; reposting a card
+unchanged only renews its `ttl`. A wrong or missing token gets a `401`, and a
+wall without `webhook.json` answers `404 {"error": "off"}`; the journal says
+which. The token is read on every request, so no restart, and deleting the file
+turns the route off. It crosses the LAN in the clear, as everything the wall
+serves does: it keeps a guest's phone or a smart plug from writing on the wall,
+not someone already capturing your network's traffic. The format is at the top
+of [lib/webhook.js](modules/MMM-SecondBrain/lib/webhook.js).
+
 Restart after adding any of them:
 
 ```bash

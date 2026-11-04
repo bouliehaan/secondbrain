@@ -114,6 +114,18 @@ login every seven seconds. Now a config inside the interval gets the last
 answer re-sent instead, and the poll timer is only restarted when the interval
 itself changes.
 
+Nothing pushed to the wall polls either. `POST /secondbrain/webhook` and its
+`DELETE` used to call `pollNow()` to get the card up at once, so every request
+was a full set of mailbox logins and a script posting every few seconds walked
+straight past the floor. Now the route swaps the webhook cards into what the
+last full poll published (`refreshWebhooksNow`), sends that only if it
+changed, and leaves the poll time and status as the poll left them, the way the
+backup refresh does. Before the first full poll there is nothing to swap into,
+and that poll picks the cards up. `check-webhook.js` counts IMAP logins across
+a run of posts and deletes and fails on one. The route needs the token in
+`webhook.json`, because like the page it answers the whole LAN; see
+`lib/webhook.js`.
+
 ## Priorities
 
 Higher wins. Ties break toward the more recent item.

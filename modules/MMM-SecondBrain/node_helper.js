@@ -3,6 +3,7 @@
 const NodeHelper = require("node_helper");
 const { pollAll, refreshBackups, refreshIto, cachedItems, getLastPollStatus } = require("./lib/sources");
 const ito = require("./lib/ito");
+const webhook = require("./lib/webhook");
 
 /*
  * Every poll opens a fresh IMAP session per account. Polling faster than this
@@ -45,6 +46,53 @@ function stripGoogleVoiceBoilerplate (value) {
       ""
     )
     .trim();
+}
+
+/*
+ * A webhook's body, parsed. MagicMirror installs no body parser, so this
+ * normally reads the stream itself, never holding more than `limit`; if
+ * another module's parser got there first, the stream is spent and what it
+ * held is req.body -- waiting for its 'end' would hang the request.
+ */
+function readJsonBody (req, limit, done) {
+  const parse = (value) => {
+    if (typeof value !== "string" && !Buffer.isBuffer(value)) {
+      return done(null, value);
+    }
+
+    try {
+      return done(null, JSON.parse(value.toString()));
+    } catch {
+      return done({ status: 400, body: { error: "not JSON" } });
+    }
+  };
+
+  if (req.readableEnded) {
+    parse(req.body);
+    return;
+  }
+
+  const chunks = [];
+  let size = 0;
+
+  req.on("data", (chunk) => {
+    size += chunk.length;
+
+    if (size <= limit) {
+      chunks.push(chunk);
+    }
+  });
+
+  req.on("error", () => {});
+
+  req.on("end", () => {
+    if (size > limit) {
+      done({ status: 413, body: { error: "size" } });
+      return;
+    }
+
+    parse(Buffer.concat(chunks));
+  });
 }
 
 function sanitizeSecondBrainPayload (value) {
@@ -107,6 +155,7 @@ module.exports = NodeHelper.create({
     this.published = false;
     this.lastUpdate = null;
     this.webhookItems = new Map();
+    this.lastWebhookRefusal = null;
 
     if (this.expressApp) {
       /*
@@ -148,58 +197,88 @@ module.exports = NodeHelper.create({
         });
       });
 
+      /*
+       * Cards from scripts on the LAN; lib/webhook.js says what a request
+       * looks like and why it needs a token. A card goes up by swapping it
+       * into the last full poll (refreshWebhooksNow), never by polling: these
+       * used to call pollNow(), so every request was a login to every mailbox,
+       * past the 60s floor.
+       */
       this.expressApp.post("/secondbrain/webhook", (req, res) => {
-        const handlePayload = (payload) => {
-          const { id, title, detail, kind, ttl } = payload || {};
-          
-          if (!id) {
-            return res.status(400).json({ error: "Missing 'id' in payload" });
-          }
+        const refused = webhook.authorize(this.config.configDir, req.headers);
 
-          const expiresAt = typeof ttl === "number" ? Date.now() + ttl * 1000 : null;
-
-          this.webhookItems.set(id, {
-            id: `webhook:${id}`,
-            kind: kind || "warning",
-            label: "Webhook",
-            title: title || "Alert",
-            detail: detail || "",
-            timestamp: Date.now(),
-            expiresAt
-          });
-
-          // Trigger a poll to instantly show the new item
-          this.pollNow();
-          res.json({ success: true, id });
-        };
-
-        if (req.body && Object.keys(req.body).length > 0) {
-          let body = req.body;
-          if (typeof body === 'string') {
-              try { body = JSON.parse(body); } catch(e) {}
-          }
-          handlePayload(body);
-        } else {
-          let data = "";
-          req.on("data", chunk => { data += chunk; });
-          req.on("end", () => {
-              let parsed = {};
-              try { parsed = JSON.parse(data); } catch(e) {}
-              handlePayload(parsed);
-          });
+        if (refused) {
+          req.resume();
+          this.noteWebhookRefusal(req, refused);
+          this.answerWebhook(res, refused);
+          return;
         }
+
+        readJsonBody(req, webhook.MAX_BODY_BYTES, (error, payload) => {
+          const card = error ? null : webhook.cardFrom(
+            payload,
+            this.webhookItems.get(webhook.cardKey(payload?.id)) || null
+          );
+
+          if (error || card.error) {
+            this.answerWebhook(res, error || { status: 400, body: { error: card.error } });
+            return;
+          }
+
+          this.webhookItems.set(card.key, card.item);
+          res.json({ success: true, id: card.key });
+          this.refreshWebhooksNow();
+        });
       });
 
       this.expressApp.delete("/secondbrain/webhook/:id", (req, res) => {
-        const { id } = req.params;
-        if (this.webhookItems.has(id)) {
-          this.webhookItems.delete(id);
-          this.pollNow();
-          return res.json({ success: true, deleted: true });
+        const refused = webhook.authorize(this.config.configDir, req.headers);
+
+        if (refused) {
+          this.noteWebhookRefusal(req, refused);
+          this.answerWebhook(res, refused);
+          return;
         }
-        res.status(404).json({ error: "Not found" });
+
+        const key = webhook.cardKey(req.params.id);
+
+        if (!this.webhookItems.has(key)) {
+          res.status(404).json({ error: "Not found" });
+          return;
+        }
+
+        this.webhookItems.delete(key);
+        res.json({ success: true, deleted: true });
+        this.refreshWebhooksNow();
       });
     }
+  },
+
+  answerWebhook(res, outcome) {
+    if (outcome.status === 401) {
+      res.setHeader("WWW-Authenticate", "Bearer");
+    }
+
+    res.status(outcome.status).json(outcome.body);
+  },
+
+  /*
+   * Say why a request was turned away -- a script that stopped working when
+   * the token became required should find out from the journal -- but only
+   * when that changes: one posting every few seconds would otherwise bury
+   * everything else.
+   */
+  noteWebhookRefusal(req, outcome) {
+    const line =
+      `[MMM-SecondBrain] Refused ${req.method} ${req.originalUrl || req.url} from ` +
+      `${req.socket?.remoteAddress || "?"}: ${outcome.status}, ${outcome.reason}.`;
+
+    if (line === this.lastWebhookRefusal) {
+      return;
+    }
+
+    this.lastWebhookRefusal = line;
+    console.warn(line);
   },
 
   stop() {
@@ -427,6 +506,37 @@ module.exports = NodeHelper.create({
       const { expiresAt, ...rest } = item;
       return rest;
     });
+  },
+
+  /*
+   * A webhook card has just gone up or come down: put the wall up again
+   * without polling. Everything else on it is what the last full poll found,
+   * with the poll time and status that poll left, so the status line does not
+   * claim a poll that did not happen; only the webhook cards are swapped, in
+   * the place a poll puts them. Before the first full poll there is nothing
+   * to swap them into, and that poll picks them up itself.
+   */
+  refreshWebhooksNow() {
+    if (!this.lastUpdate) {
+      return;
+    }
+
+    const others = this.lastUpdate.items.filter(
+      (item) => !String(item?.id || "").startsWith(webhook.ID_PREFIX)
+    );
+
+    const finalItems = [...this.activeWebhooks(), ...others];
+
+    if (JSON.stringify(finalItems) === JSON.stringify(this.lastUpdate.items)) {
+      return;
+    }
+
+    this.lastUpdate = { ...this.lastUpdate, items: finalItems };
+
+    this._sendSanitizedSocketNotification(
+      "SECOND_BRAIN_UPDATE",
+      this.lastUpdate
+    );
   },
 
   /*
