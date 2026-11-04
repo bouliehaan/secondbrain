@@ -89,12 +89,35 @@ mv -f "$tmp" "$CONFIG"
 trap - EXIT
 ls -l "$CONFIG"
 
+# The addresses the phone could reach this wall at: global IPv4 on a real network
+# interface. Not the route to the internet: on a wall whose traffic goes out through
+# a VPN that is the tunnel's address (Proton's is 10.2.0.2), which the phone on the
+# Wi-Fi cannot reach. Tunnels are /32 or named for what they are, and so are
+# container bridges.
+lan_addresses() {
+  ip -4 -o addr show scope global 2>/dev/null | awk '
+    { name = $2; split($4, a, "/") }
+    name ~ /^(lo|wg|tun|tap|tailscale|docker|br-|veth|virbr|lxc|cni|flannel|zt|proton|pvpn|ipv6leak|nordlynx|mullvad)/ { next }
+    a[2] == "32" { next }
+    { print a[1] }'
+}
+
+# A home network's range first: that is where the phone is.
+pick_address() {
+  local pattern found
+  for pattern in '^192\.168\.' '^10\.' '^172\.(1[6-9]|2[0-9]|3[01])\.' '.'; do
+    found=$(grep -E "$pattern" <<<"$1" | head -n1 || true)
+    if [[ -n $found ]]; then echo "$found"; return; fi
+  done
+}
+
+CANDIDATES=$(lan_addresses || true)
 if [[ -z $ADDRESS ]]; then
-  # The address this machine reaches the LAN from; hostname -I if there is no route.
-  ADDRESS=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true)
+  ADDRESS=$(pick_address "$CANDIDATES")
   [[ -n $ADDRESS ]] || ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}')
   [[ -n $ADDRESS ]] || ADDRESS=$(hostname)
 fi
+OTHERS=$(grep -vxF -e "$ADDRESS" <<<"$CANDIDATES" | tr '\n' ' ' | sed 's/ *$//' || true)
 PORT=$(. /etc/default/secondbrain 2>/dev/null; echo "${SECONDBRAIN_PORT:-43761}")
 KEY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["key"])' "$CONFIG")
 
@@ -109,3 +132,8 @@ itself, Mac on or off. Keep the line to yourself: with it, anything on your
 network can put a text card on the wall. If it gets out, run this again with
 --new-key and paste the new line.
 EOF
+if [[ -n $OTHERS ]]; then
+  echo
+  echo "This wall also answers at: $OTHERS. If the phone reaches it at one of those"
+  echo "instead, run this again with --address <that one>. The key stays the same."
+fi

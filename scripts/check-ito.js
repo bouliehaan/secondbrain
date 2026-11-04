@@ -388,6 +388,31 @@ function enableChecks() {
 
   run("--remove");
   check("--remove forgets it", !fs.existsSync(file));
+
+  /*
+   * A wall whose traffic goes out through a VPN, as the first real one does:
+   * the route to the internet is the tunnel's address, which the phone on the
+   * Wi-Fi cannot reach. The line has to name the wall's address at home.
+   */
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "secondbrain-ito-bin-"));
+  const ipLines = [
+    "5: proton0    inet 10.2.0.2/32 scope global proton0       valid_lft forever preferred_lft forever",
+    "4: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0       valid_lft forever preferred_lft forever",
+    "2: eth0    inet 192.168.1.10/24 brd 192.168.1.255 scope global dynamic eth0       valid_lft 80000sec preferred_lft 80000sec",
+    "3: wlan0    inet 192.168.50.7/24 brd 192.168.50.255 scope global dynamic wlan0       valid_lft 80000sec preferred_lft 80000sec"
+  ];
+  fs.writeFileSync(path.join(bin, "ip"), `#!/bin/sh\ncat <<'OUT'\n${ipLines.join("\n")}\nOUT\n`, { mode: 0o755 });
+  const behindVpn = execFileSync("bash", [script, "--config-dir", dir, "--reader", reader], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }
+  });
+  check(
+    "behind a VPN it prints the home network's address, not the tunnel's",
+    behindVpn.includes("http://192.168.1.10:43761 ") && !behindVpn.includes("10.2.0.2") && !behindVpn.includes("172.17.0.1"),
+    behindVpn
+  );
+  check("and names the wall's other real address, in case the phone is there", behindVpn.includes("also answers at: 192.168.50.7."), behindVpn);
 }
 
 (async () => {
