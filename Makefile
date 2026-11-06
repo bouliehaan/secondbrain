@@ -47,6 +47,7 @@ check: deps syntax
 	@node scripts/check-ito.js          >/dev/null && echo "  ito          ok"
 	@node scripts/check-nowplaying.js   >/dev/null && echo "  nowplaying   ok"
 	@node scripts/check-freeze-watch.js >/dev/null && echo "  freeze-watch ok"
+	@node scripts/check-holidays.js     >/dev/null && echo "  holidays     ok"
 	@node scripts/check-weather.js      >/dev/null && echo "  weather      ok"
 	@node scripts/check-solar-theme.js  >/dev/null && echo "  solar-theme  ok"
 	@node scripts/check-status-line.js  >/dev/null && echo "  status-line  ok"

@@ -45,7 +45,7 @@ for (const [name, cfg, file] of [["example", example, examplePath], ["config.js"
 // Private calendars live in the public file as placeholders only.
 for (const cal of wall.modules.find((m) => m.module === "calendar").config.calendars) {
   const host = new URL(cal.url).hostname;
-  assert.ok(/REDACTED_PRIVATE_PATH/.test(cal.url) || ["www.officeholidays.com", "raw.githubusercontent.com"].includes(host),
+  assert.ok(/REDACTED_PRIVATE_PATH/.test(cal.url) || ["127.0.0.1", "raw.githubusercontent.com"].includes(host),
     `config.js: calendar "${cal.name}" points at ${host} without being redacted`);
 }
 for (const marker of ["// @lat", "// @lon", "// @place"]) {

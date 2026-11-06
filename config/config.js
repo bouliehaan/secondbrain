@@ -34,6 +34,16 @@ let config = {
 
   modules: [
     /*
+     * Serves the "holidays" and "fun" calendars below from the wall's own
+     * server. Every date is computed from its rule, so neither feed can hang
+     * the way officeholidays.com did from 2026-11-04, and neither runs out of
+     * years. No position, nothing drawn.
+     */
+    {
+      module: "Holidays"
+    },
+
+    /*
      * Hidden data source for both the month grid and upcoming agenda.
      * With no position assigned, it runs without displaying its own list.
      */
@@ -76,7 +86,21 @@ let config = {
             name: "holidays",
             color: "#C4AD86",   /* sand */
             symbol: [],
-            url: "https://www.officeholidays.com/ics-fed/usa"
+            url: "http://127.0.0.1:43761/holidays/us-federal.ics"   /* modules/Holidays; the port is the one above */
+          },
+
+          /*
+           * Pokémon Day, National Siblings Day, Easter, Lunar New Year: about
+           * 260 a year, on most days of it. Something that shows up nearly
+           * every day is routine as far as colour goes, so this gets the faint
+           * ink, a step below personal's grey, and the sand stays for the
+           * federal days off.
+           */
+          {
+            name: "fun",
+            color: "#575859",   /* faint ink */
+            symbol: [],
+            url: "http://127.0.0.1:43761/holidays/fun-days.ics"   /* modules/Holidays */
           },
 
           {
@@ -174,9 +198,26 @@ let config = {
         showMore: true,
         skipDuplicated: true,
 
+        /*
+         * Fun days go to the bottom of their cell, under your own events, so a
+         * crowded day hides Nacho Day behind "+N more" instead of an event of
+         * yours. CX3 stacks a week by span and then by start time, after this
+         * runs, and every all-day event starts at midnight, which puts it on
+         * top. Starting a single fun day at 23:59 keeps it in its own cell and
+         * sorts it after anything timed. Not 23:59:59.999: that is where the
+         * week ends, and a Sunday fun day starting there would drop out of the
+         * week. A copy, because CX3 mutates the events it keeps between
+         * renders. The schedule has its own config and is untouched.
+         */
+        eventTransformer: (ev) => {
+          if (ev.calendarName !== "fun" || !ev.isFullday || ev.isMultiday) return ev;
+          return { ...ev, startDate: new Date(ev.startDate).setHours(23, 59, 0, 0) };
+        },
+
         calendarSet: [
           "personal",
           "holidays",
+          "fun",
           "ufc",
           "appointments"
         ],
@@ -442,6 +483,7 @@ let config = {
         calendarSet: [
           "personal",
           "holidays",
+          "fun",
           "ufc",
           "appointments"
         ],

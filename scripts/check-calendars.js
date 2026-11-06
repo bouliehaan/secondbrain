@@ -185,11 +185,21 @@ function localTime (at) {
  * occurrences whose VEVENT starts months ago. Both are why this uses
  * MagicMirror's own ics parser rather than reading DTSTART digits.
  *
+ * All-day events are the exception. DTSTART;VALUE=DATE:20261106 is a date,
+ * not an instant. node-ical puts it at midnight in *this* process's timezone,
+ * and this process runs on the box's UTC, not the wall's Denver time. Read
+ * through the wall's timezone, every holiday showed up the evening before,
+ * at 5:00 PM. Its date is the one written in the feed.
+ *
  * @param {string} text the raw ics
- * @returns {{at: Date, summary: string, recurring: boolean}[]} today's events
+ * @returns {{at: Date, summary: string, recurring: boolean, allDay: boolean}[]} today's events
  */
 function eventsToday (text) {
   const today = localDate(Date.now());
+  const isAllDay = (event, start) => start?.dateOnly === true || event.datetype === "date";
+  const pad = (n) => String(n).padStart(2, "0");
+  const writtenDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const dateOf = (event, at) => (isAllDay(event, event.start) ? writtenDate(new Date(at)) : localDate(at));
 
   // A window either side of now, so an occurrence cannot fall off a timezone
   // edge. Occurrences are filtered to the local date afterwards.
@@ -216,16 +226,16 @@ function eventsToday (text) {
       }
 
       for (const occurrence of occurrences) {
-        if (localDate(occurrence) !== today) continue;
+        if (dateOf(event, occurrence) !== today) continue;
         if (excluded.has(localDate(occurrence))) continue;
-        found.push({ at: new Date(occurrence), summary, recurring: true });
+        found.push({ at: new Date(occurrence), summary, recurring: true, allDay: isAllDay(event, event.start) });
       }
 
       continue;
     }
 
-    if (event.start && localDate(event.start) === today) {
-      found.push({ at: new Date(event.start), summary, recurring: false });
+    if (event.start && dateOf(event, event.start) === today) {
+      found.push({ at: new Date(event.start), summary, recurring: false, allDay: isAllDay(event, event.start) });
     }
   }
 
@@ -334,11 +344,12 @@ async function main () {
       console.log("  nothing");
     } else {
       today
-        .sort((a, b) => a.at - b.at)
+        .sort((a, b) => (b.allDay - a.allDay) || (a.at - b.at))
         .forEach((event) => {
           const mark = event.recurring ? " (recurring)" : "";
+          const when = event.allDay ? "all day" : localTime(event.at);
           console.log(
-            `  ${localTime(event.at).padStart(8)}  ${event.calendar.padEnd(13)} ${event.summary}${mark}`
+            `  ${when.padStart(8)}  ${event.calendar.padEnd(13)} ${event.summary}${mark}`
           );
         });
     }
@@ -369,11 +380,25 @@ async function main () {
     }
   }
 
-  const recentErrors = journal(["--since", "-1h"]).filter((line) => line.includes("Calendar Error"));
+  // Only the running server's errors describe the wall now. deploy.sh restarts
+  // magicmirror right before this runs, so an error from the process it
+  // replaced is history: printed as such, never as the current state.
+  const hourOfErrors = journal(["--since", "-1h"]).filter((line) => line.includes("Calendar Error"));
+  const sinceStart = (line) => {
+    const when = new Date(line.split(" ")[0]);
+    return !lastStart || Number.isNaN(when.getTime()) || when >= lastStart;
+  };
+  const currentErrors = hourOfErrors.filter(sinceStart);
+  const earlierErrors = hourOfErrors.filter((line) => !sinceStart(line));
 
-  if (recentErrors.length > 0) {
-    console.log(`\n${recentErrors.length} calendar error(s) in the last hour, most recent:`);
-    console.log(`  ${maskUrls(recentErrors.at(-1))}`);
+  if (currentErrors.length > 0) {
+    console.log(`\n${currentErrors.length} calendar error(s) since the server started, most recent:`);
+    console.log(`  ${maskUrls(currentErrors.at(-1))}`);
+  }
+
+  if (earlierErrors.length > 0) {
+    console.log(`\n${earlierErrors.length} calendar error(s) earlier in the hour, before this server started, most recent:`);
+    console.log(`  ${maskUrls(earlierErrors.at(-1))}`);
   }
 
   // -------------------------------------------------------------------------
