@@ -19,7 +19,7 @@ const Module = require("node:module");
 const { execFileSync } = require("node:child_process");
 
 const ito = require("../modules/MMM-SecondBrain/lib/ito.js");
-const { pollAll, refreshIto } = require("../modules/MMM-SecondBrain/lib/sources.js");
+const { pollAll, refreshIto, present } = require("../modules/MMM-SecondBrain/lib/sources.js");
 
 let failures = 0;
 
@@ -166,22 +166,46 @@ console.log("\nito texts\n");
       text({ id: "sam", from: "Sam", n: 3, at: now - 100 * minute, group: "trip" }),
       text({ id: "old", from: "Alex", at: now - 121 * minute }),
       text({ id: "code", from: "72975", at: now - 10 * minute, person: false }),
-      text({ id: "oldcode", from: "72975", at: now - 31 * minute, person: false })
+      text({ id: "oldcode", from: "72975", at: now - 121 * minute, person: false })
     ]
   });
   const cards = ito.itoCards(report, {}, now);
   const byId = Object.fromEntries(cards.map((card) => [card.id, card]));
 
   check("a person's text stays two hours", byId["ito:mom"] && !byId["ito:old"], Object.keys(byId).join());
-  check("a short code's stays half an hour", byId["ito:code"] && !byId["ito:oldcode"], Object.keys(byId).join());
+  check("a short code's stays two hours too", byId["ito:code"] && !byId["ito:oldcode"], Object.keys(byId).join());
   check("the card says who, as a text", byId["ito:mom"]?.title === "Mom" && byId["ito:mom"]?.kind === "voice" && byId["ito:mom"]?.label === "Text");
   check("one text needs no detail", byId["ito:mom"]?.detail === "", JSON.stringify(byId["ito:mom"]?.detail));
   check("several, in a group, say so", byId["ito:sam"]?.detail === "3 texts in trip", JSON.stringify(byId["ito:sam"]?.detail));
-  check("a person ranks with Google Voice, a short code below mail", byId["ito:mom"]?.priority === 100 && byId["ito:code"]?.priority < 75);
+  check("a person ranks with Google Voice, a short code above mail, Nextcloud and warnings but below Talk", byId["ito:mom"]?.priority === 100 && byId["ito:code"]?.priority > 90 && byId["ito:code"]?.priority < 98);
   check("each card comes down two hours after its text", byId["ito:mom"]?.expiresAt === now - 5 * minute + 120 * minute);
 
-  const longer = ito.itoCards(report, { textMinutes: 180, machineMinutes: 60 }, now).map((card) => card.id);
+  const longer = ito.itoCards(report, { textMinutes: 180, machineMinutes: 180 }, now).map((card) => card.id);
   check("textMinutes and machineMinutes change the windows", longer.includes("ito:old") && longer.includes("ito:oldcode"), longer.join());
+}
+
+{
+  /*
+   * 2026-11-21: an office texted to cancel an appointment, and the Messages
+   * section was already full of mail and Nextcloud cards, one of them a
+   * shipping notice from the day before. A text from a business must still
+   * make the cut, and go first. present() reads the real clock.
+   */
+  const t = Date.now();
+  const office = ito.itoCards(ito.sanitizeReport({
+    v: 1,
+    texts: [text({ id: "office", from: "Dental Office", at: t - 3 * minute, person: false })]
+  }), {}, t);
+  const crowd = [
+    { id: "nc:share", kind: "nextcloud", title: "a share", priority: 80, timestamp: t - minute },
+    { id: "nc:reminder", kind: "nextcloud", title: "a reminder", priority: 85, timestamp: t - minute },
+    { id: "mail:shipped", kind: "email", title: "Your order has shipped", priority: 78, timestamp: t - 20 * 60 * minute },
+    { id: "mail:person", kind: "email", title: "a person", priority: 78, timestamp: t - 2 * minute },
+    { id: "warn:backup", kind: "warning", title: "backups", priority: 90, timestamp: t - minute }
+  ];
+  const shown = present([...crowd, ...office], { maxItems: 3 }).map((item) => item.id);
+
+  check("a text from a business tops a full Messages section", shown[0] === "ito:office" && shown.length === 3, shown.join());
 }
 
 /* ------------------------------------------------------------------ *

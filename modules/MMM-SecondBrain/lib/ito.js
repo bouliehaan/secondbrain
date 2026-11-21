@@ -65,11 +65,13 @@ const SIGNATURE_CONTEXT = "ito-wall/1";
 /*
  * "An hour or two": a text is somebody wanting you, and a wall is where you
  * look when you are not holding the phone. Two hours, unless it is read or
- * answered first. A short code is a machine -- a code you asked for, a
- * pharmacy reminder -- and gets the half hour a machine's mail gets.
+ * answered first. A text from a short code or a business name gets the same
+ * two hours: that is how an office cancels an appointment ("your 3 PM is
+ * cancelled"), and half an hour was easy to miss. A code you asked for is
+ * read on the phone within the minute, and a read text leaves the wall then.
  */
 const DEFAULT_TEXT_MINUTES = 120;
-const DEFAULT_MACHINE_MINUTES = 30;
+const DEFAULT_MACHINE_MINUTES = 120;
 
 /*
  * Five minutes either way. Both ends keep network time; this only has to
@@ -86,8 +88,14 @@ const MAX_SKEW_MS = 5 * 60 * 1000;
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEXTS = 50;
 
+/*
+ * Any text outranks everything else under Messages except Talk: mail, Nextcloud
+ * reminders and shares, backup and Transmission warnings. Until 2026-11-21 a
+ * text from a business ranked 70, below mail, so on a full wall an office's
+ * cancellation lost its place to yesterday's shipping notice.
+ */
 const PRIORITY_PERSON = 100;
-const PRIORITY_MACHINE = 70;
+const PRIORITY_MACHINE = 96;
 
 /*
  * The last report accepted, and when, on the wall's clock. In memory only: a

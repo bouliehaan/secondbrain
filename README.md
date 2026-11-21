@@ -144,7 +144,7 @@ sudo /usr/share/secondbrain/ito/enable-ito
 It prints one line, `http://<this wall>:43761 <key>`. Paste it into ito on
 the Mac (settings, `// wall`), which hands it to the phone; from then on the
 phone tells the wall itself, whether or not the Mac is on. A person's text
-stays up two hours, a short code's half an hour, and a card goes the moment
+stays up two hours, ahead of any mail or notification, and goes the moment
 the text is read or answered on the phone or the Mac. Every report is signed
 with that key and nothing else on the network can put a card up, so keep the
 line to yourself; `--new-key` replaces it and `--remove` turns this off. No

@@ -134,13 +134,13 @@ Higher wins. Ties break toward the more recent item.
 |---|---|---|
 | 100 | `voice` | Google Voice — calls, texts, voicemail; ito texts from a person, for 2 h |
 | 98 | `nextcloud` | Talk, for an hour |
+| 96 | `voice` | ito texts from a short code or a named sender, for 2 h |
 | 95 | `package` | shipments |
 | 90 | `warning` | Transmission errors; backup problems and silence, for as long as they last |
 | 85 | `nextcloud` | calendar and task reminders, for 30 min |
 | 80 | `nextcloud` | shares, comment mentions, Deck, announcements, for 12 h |
 | 78 | `email` | Proton wall label, for 12 h from a person or 30 min from a machine |
 | 75 | `email` | Gmail important mailbox, the same |
-| 70 | `voice` | ito texts from a short code or a named sender, for 30 min |
 | 60 | `nextcloud` | anything else the server says, for 30 min |
 | 45 | `download` | active torrents |
 | 44 | `download` | a backup backlog uploading |
@@ -276,8 +276,11 @@ restart the cards are back with the phone's next report. Accepting one swaps
 the ito cards into what the last full poll found and publishes at once
 (`refreshIto`, the same swap the backup refresh does), so a text never costs a
 mailbox login. A person's text stays two hours from when it arrived
-(`textMinutes`), a short code's or a named sender's half an hour
-(`machineMinutes`).
+(`textMinutes`), and so does a short code's or a named sender's
+(`machineMinutes`), ranked above every mail, notification and warning, below
+only a person's text and Talk. Until 2026-11-21 that was half an hour at 70,
+below mail, and an office's appointment cancellation lost its place on a full
+wall to a day-old shipping notice.
 
 All mailboxes are opened `readOnly: true`. Without it, fetching sets `\Seen` and
 the mirror marks real mail as read merely by displaying it.
