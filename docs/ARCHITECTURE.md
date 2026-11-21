@@ -138,10 +138,12 @@ Higher wins. Ties break toward the more recent item.
 | 95 | `package` | shipments |
 | 90 | `warning` | Transmission errors; backup problems and silence, for as long as they last |
 | 85 | `nextcloud` | calendar and task reminders, for 30 min |
+| 85 | `warning` | a backup holding a big delete for your OK, while the sender reports it |
 | 80 | `nextcloud` | shares, comment mentions, Deck, announcements, for 12 h |
 | 78 | `email` | Proton wall label, for 12 h from a person or 30 min from a machine |
 | 75 | `email` | Gmail important mailbox, the same |
 | 60 | `nextcloud` | anything else the server says, for 30 min |
+| 60 | `warning` | other backup notices (skipped files, moved to trash, a check), while reported |
 | 45 | `download` | active torrents |
 | 44 | `download` | a backup backlog uploading |
 | 40 | `download` | backup backlogs waiting their turn |
@@ -235,6 +237,20 @@ The wall holds no credential for the backup server and opens no port for it;
 `enable-backup-report` sets the account up from an address and a public key
 given on the command line, so neither is in this repo.
 
+More than one sender can report. By default the wall reads two files: cloud's,
+above, and `/var/lib/protonmusic/report/report.json`, which this machine's
+music sync (proton-music, not in this repo) writes locally. `reportPaths` in
+`backups.json` replaces that list (`[{ "path": ..., "name": ... }]` or plain
+paths); the older `reportPath` still moves only the first. Each file is read,
+judged for staleness and sanitized on its own, then their jobs are shown
+together, so one outage on both machines is still one card. A file never
+written is no sender yet, not a problem; one that is there but can't be read
+counts as a failure and shows no card. A sender gone silent gets its own card
+("No word from the music backup"); cloud's keeps its old id and title, and with
+the music report absent the wall shows exactly what it did with one report.
+Jobs on different machines upload at the same time, so each running job gets
+its own Transfers card.
+
 Nothing goes up while the backups are caught up, or for a run that finds
 nothing to send. A backup uploading is a Transfers card at any size, even six
 files, whose bar is the whole backlog's progress, not the current run's, so it
@@ -259,6 +275,14 @@ the wall's clock, not by the sender's timestamp. `backups.json` changes any of
 these thresholds or the report path; without it the source is on, and off until
 the first report arrives. The status line reads `BACKUP OK`, `BACKUP 3/4` when
 one of four jobs has a problem, or `BACKUP DOWN` when the reports stop.
+
+A job can also carry `notices`: what the sender wants seen that isn't a
+failure. `held` (a big delete waiting for an OK), `skipped` (files it can't
+back up), `trashed` (a big delete moved to Drive's trash), `checked` (what a
+check fixed) and `listing` (it can't see everything); other kinds are dropped,
+as are repeats and any past four per job. Each is a quieter warning card, shown
+for as long as the sender keeps it in its report, even beside a problem on the
+same job, and none counts against the status line.
 
 **ito** (`pollIto`, `lib/ito.js`) — texts from an Android phone running
 [ito](https://github.com/bouliehaan/ito), and the other source the wall does

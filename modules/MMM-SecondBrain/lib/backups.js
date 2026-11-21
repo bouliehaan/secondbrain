@@ -25,12 +25,25 @@
  *       "rate": 4200000,                      bytes per second of the last chunk
  *       "lastSuccess": "...",                 last run that left nothing pending
  *       "lastProgress": "...",                last time anything was uploaded
- *       "problem":  { "kind": "signed-out", "since": "...", "hint": "..." }
+ *       "problem":  { "kind": "signed-out", "since": "...", "hint": "..." },
+ *       "notices":  [{ "kind": "held", "since": "...", "hint": "..." }]
  *     }]
  *   }
  *
  * A problem's kind is signed-out, unreachable, source-missing, failing or
  * stalled; anything else reads as failing.
+ *
+ * Notices are what a sender wants seen that isn't a failure: files it has to
+ * skip, a big delete it moved to Drive's trash or is holding for an OK, what
+ * a check fixed. The sender decides how long each stays (it drops them from
+ * its report); the wall shows each as a quieter warning while it is there.
+ * Unknown kinds are dropped.
+ *
+ * More than one sender can report: cloud's proton-backup pushes its report
+ * here over SSH, and this machine's music sync (proton-music) writes its own
+ * locally. Each file is read, judged for staleness and sanitized on its own,
+ * then their jobs are shown together, so one network outage is still one
+ * card. A file that has never been written is no sender yet, not a problem.
  *
  * `done` is the backlog being worked through: what has gone up since the job
  * last had nothing pending. The sender resets it when the backlog clears. So
@@ -62,6 +75,16 @@ const fs = require("node:fs");
 const DEFAULT_REPORT_PATH = "/var/lib/secondbrain-backup/report/report.json";
 
 /*
+ * Every report the wall reads, unless backups.json says otherwise with
+ * "reportPaths": [{ "path": "...", "name": "..." }, ...] (or plain paths).
+ * The older single "reportPath" still replaces the first one.
+ */
+const DEFAULT_REPORT_SOURCES = [
+  { path: DEFAULT_REPORT_PATH, name: "the backup server" },
+  { path: "/var/lib/protonmusic/report/report.json", name: "the music backup" }
+];
+
+/*
  * The sender reports every five minutes. Four missed reports in a row is a
  * dead sender, a dead network or a dead receiver, and any of those means the
  * wall no longer knows whether the backups work.
@@ -85,6 +108,7 @@ const DEFAULT_STALLED_HOURS = 6;
 
 const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_JOBS = 12;
+const MAX_NOTICES = 4;
 
 const PROBLEM_LABELS = {
   "signed-out": "Backup signed out",
@@ -92,6 +116,14 @@ const PROBLEM_LABELS = {
   "source-missing": "Backup source missing",
   failing: "Backup failing",
   stalled: "Backup stalled"
+};
+
+const NOTICE_LABELS = {
+  held: "Backup waiting for your OK",
+  skipped: "Backup skipping files",
+  trashed: "Backup moved files to trash",
+  checked: "Backup check",
+  listing: "Backup can't see everything"
 };
 
 function text(value, maxLength) {
@@ -143,6 +175,17 @@ function sanitizeJob(raw) {
 
   const done = amount(raw.done);
   const problem = raw.problem && typeof raw.problem === "object" ? raw.problem : null;
+  const notices = [];
+
+  for (const notice of Array.isArray(raw.notices) ? raw.notices.slice(0, MAX_NOTICES) : []) {
+    if (
+      notice && typeof notice === "object" &&
+      Object.hasOwn(NOTICE_LABELS, notice.kind) &&
+      !notices.some((seen) => seen.kind === notice.kind)
+    ) {
+      notices.push({ kind: notice.kind, since: instant(notice.since), hint: text(notice.hint, 160) });
+    }
+  }
 
   return {
     id,
@@ -158,7 +201,8 @@ function sanitizeJob(raw) {
         since: instant(problem.since),
         hint: text(problem.hint, 160)
       }
-      : null
+      : null,
+    notices
   };
 }
 
@@ -235,6 +279,29 @@ function readReport(reportPath) {
   };
 }
 
+/**
+ * The report files to read, from backups.json's options.
+ *
+ * @param {object} [options]
+ * @returns {{path: string, name: string}[]}
+ */
+function reportSources(options = {}) {
+  if (Array.isArray(options.reportPaths)) {
+    return options.reportPaths
+      .map((entry) => (typeof entry === "string" ? { path: entry, name: "" } : entry))
+      .filter((entry) => entry && typeof entry.path === "string")
+      .map((entry) => ({ path: entry.path, name: text(entry.name, 40) }));
+  }
+
+  const sources = DEFAULT_REPORT_SOURCES.map((source) => ({ ...source }));
+
+  if (typeof options.reportPath === "string") {
+    sources[0].path = options.reportPath;
+  }
+
+  return sources;
+}
+
 function formatBytes(bytes) {
   if (bytes >= 1e12) {
     return `${(bytes / 1e12).toFixed(2)} TB`;
@@ -307,9 +374,11 @@ function percentDone(job) {
 }
 
 /**
- * What the wall shows for one report.
+ * What the wall shows for the reports.
  *
- * @param {{report: object|null, heardAt: number}} received from readReport
+ * @param {{report: object|null, heardAt: number}|{name: string, received: object|null, failed?: boolean}[]} received
+ *   from readReport, or one entry per report file (received null: never written;
+ *   failed: the file is there but could not be read)
  * @param {object} [options] the optional fields of backups.json
  * @param {number} [now]
  * @returns {{items: object[], health: {tried: number, failed: number}, summary: string}}
@@ -325,47 +394,76 @@ function backupCards(received, options = {}, now = Date.now()) {
   const showFromFiles =
     Number(options.showFromFiles) > 0 ? Number(options.showFromFiles) : DEFAULT_SHOW_FROM_FILES;
 
-  const { report, heardAt } = received;
+  const sources = Array.isArray(received) ? received : [{ name: "", received }];
+  const items = [];
+  const notes = [];
+  const jobs = [];
+  const running = new Set();
+  let sourcesFailed = 0;
 
-  if (!report) {
-    return {
-      items: [{
-        id: "backup:unreadable",
+  sources.forEach((source, index) => {
+    const suffix = index === 0 ? "" : `:${index}`;
+    const who = source.name || "the backup server";
+    const tag = index === 0 ? "" : `${who}: `;
+
+    if (source.failed) {
+      sourcesFailed += 1;
+      notes.push(`${who}: report unreadable`);
+      return;
+    }
+
+    if (!source.received) {
+      return;
+    }
+
+    const { report, heardAt } = source.received;
+
+    if (!report) {
+      sourcesFailed += 1;
+      items.push({
+        id: `backup:unreadable${suffix}`,
         kind: "warning",
         label: "Backups",
-        title: "The backup report makes no sense",
+        title: index === 0 ? "The backup report makes no sense" : `The report from ${who} makes no sense`,
         detail: `Received ${formatWhen(heardAt, now)}`,
         timestamp: heardAt,
         priority: 90
-      }],
-      health: { tried: 1, failed: 1 },
-      summary: "the last report could not be read"
-    };
-  }
+      });
+      notes.push(`${tag}the last report could not be read`);
+      return;
+    }
 
-  /*
-   * Silence is the failure every other card here depends on noticing. Once
-   * the reports stop, what the last one said is no longer true, so it is not
-   * shown: a progress bar frozen at 41% would read as an upload in progress.
-   */
-  if (now - heardAt > staleMs) {
-    return {
-      items: [{
-        id: "backup:silent",
+    /*
+     * Silence is the failure every other card here depends on noticing. Once
+     * the reports stop, what the last one said is no longer true, so it is not
+     * shown: a progress bar frozen at 41% would read as an upload in progress.
+     */
+    if (now - heardAt > staleMs) {
+      sourcesFailed += 1;
+      items.push({
+        id: `backup:silent${suffix}`,
         kind: "warning",
         label: "Backups",
-        title: "No word from the backup server",
+        title: index === 0 ? "No word from the backup server" : `No word from ${who}`,
         detail: `Last report ${formatWhen(heardAt, now)}`,
         timestamp: heardAt,
         priority: 90
-      }],
-      health: { tried: 1, failed: 1 },
-      summary: `no report since ${new Date(heardAt).toISOString()}`
-    };
-  }
+      });
+      notes.push(`${tag}no report since ${new Date(heardAt).toISOString()}`);
+      return;
+    }
 
-  const items = [];
-  const notes = [];
+    if (report.running) {
+      running.add(report.running);
+    }
+
+    for (const job of report.jobs) {
+      if (!jobs.some((seen) => seen.id === job.id)) {
+        jobs.push({ ...job, heardAt });
+      }
+    }
+  });
+
 
   const big = (job) =>
     job.done.bytes + job.pending.bytes >= showFromBytes ||
@@ -378,13 +476,13 @@ function backupCards(received, options = {}, now = Date.now()) {
    */
   const problems = new Map();
 
-  for (const job of report.jobs) {
+  for (const job of jobs) {
     let problem = job.problem;
 
     if (
       !problem &&
       job.pending.files > 0 &&
-      report.running !== job.id &&
+      !running.has(job.id) &&
       job.lastProgress !== null &&
       now - job.lastProgress > stalledMs
     ) {
@@ -425,29 +523,33 @@ function backupCards(received, options = {}, now = Date.now()) {
     [...problems.values()].flat().map(({ job }) => job.id)
   );
 
-  const backlogs = report.jobs.filter(
+  const backlogs = jobs.filter(
     (job) => job.pending.files > 0 && !troubled.has(job.id)
   );
-  const running = backlogs.find((job) => job.id === report.running);
-  const waiting = backlogs.filter((job) => job !== running && big(job));
+  const uploading = backlogs.filter((job) => running.has(job.id));
+  const waiting = backlogs.filter((job) => !running.has(job.id) && big(job));
 
-  if (running) {
-    const percent = percentDone(running);
+  /*
+   * Jobs on different machines upload at the same time, each with a card of
+   * its own. On one machine only one runs at a time.
+   */
+  for (const job of uploading) {
+    const percent = percentDone(job);
     const parts = [];
 
     if (percent !== null) {
       parts.push(`${percent}%`);
     }
 
-    parts.push(`${formatBytes(running.pending.bytes)} left`);
+    parts.push(`${formatBytes(job.pending.bytes)} left`);
 
     /*
      * The sender keeps the last rate it measured after a backlog clears, so
      * until this one has uploaded something the rate is the previous
      * backlog's, and an ETA from it would be a guess about the wrong files.
      */
-    if (running.rate > 0 && running.done.bytes > 0) {
-      parts.push(formatRate(running.rate));
+    if (job.rate > 0 && job.done.bytes > 0) {
+      parts.push(formatRate(job.rate));
 
       /*
        * Only when nothing else is queued. Jobs take turns, so with another
@@ -455,28 +557,28 @@ function backupCards(received, options = {}, now = Date.now()) {
        * out from its own rate would be wrong by however many there are.
        */
       if (waiting.length === 0) {
-        parts.push(`~${formatDuration(running.pending.bytes / running.rate)}`);
+        parts.push(`~${formatDuration(job.pending.bytes / job.rate)}`);
       }
     }
 
     items.push({
-      id: `backup:running:${running.id}`,
+      id: `backup:running:${job.id}`,
       kind: "download",
       label: "Backing up",
-      title: running.label,
+      title: job.label,
       detail: parts.join(" · "),
-      timestamp: running.done.since ?? heardAt,
+      timestamp: job.done.since ?? job.heardAt,
       priority: 44,
       ...(percent !== null ? { progress: percent } : {})
     });
 
-    notes.push(`${running.id} uploading, ${percent ?? "?"}%, ${formatBytes(running.pending.bytes)} left`);
+    notes.push(`${job.id} uploading, ${percent ?? "?"}%, ${formatBytes(job.pending.bytes)} left`);
   }
 
   if (waiting.length > 0) {
     const files = waiting.reduce((sum, job) => sum + job.pending.files, 0);
     const bytes = waiting.reduce((sum, job) => sum + job.pending.bytes, 0);
-    const since = Math.min(...waiting.map((job) => job.done.since ?? heardAt));
+    const since = Math.min(...waiting.map((job) => job.done.since ?? job.heardAt));
 
     items.push({
       id: "backup:waiting",
@@ -491,18 +593,41 @@ function backupCards(received, options = {}, now = Date.now()) {
     notes.push(`waiting: ${waiting.map((job) => job.id).join(", ")}`);
   }
 
+  /*
+   * Notices are quieter than problems: worth a look, nothing broken. They are
+   * shown for a job with a problem too; a held delete stays held whatever else
+   * is wrong.
+   */
+  for (const job of jobs) {
+    for (const notice of job.notices) {
+      items.push({
+        id: `backup:notice:${job.id}:${notice.kind}`,
+        kind: "warning",
+        label: NOTICE_LABELS[notice.kind],
+        title: job.label,
+        detail: notice.hint,
+        timestamp: notice.since ?? now,
+        priority: notice.kind === "held" ? 85 : 60
+      });
+
+      notes.push(`${job.id} notice: ${notice.kind}`);
+    }
+  }
+
   return {
     items,
     health: {
-      tried: Math.max(1, report.jobs.length),
-      failed: troubled.size
+      tried: Math.max(1, jobs.length + sourcesFailed),
+      failed: troubled.size + sourcesFailed
     },
-    summary: notes.length > 0 ? notes.join("; ") : `all ${report.jobs.length} caught up`
+    summary: notes.length > 0 ? notes.join("; ") : `all ${jobs.length} caught up`
   };
 }
 
 module.exports = {
   DEFAULT_REPORT_PATH,
+  DEFAULT_REPORT_SOURCES,
+  reportSources,
   sanitizeReport,
   readReport,
   backupCards

@@ -8,6 +8,7 @@ const { ImapFlow } = require("imapflow");
 const { resolveVoiceContact } = require("./contacts");
 const {
   DEFAULT_REPORT_PATH: DEFAULT_BACKUP_REPORT_PATH,
+  reportSources,
   readReport,
   backupCards
 } = require("./backups");
@@ -2021,18 +2022,27 @@ async function pollBackups(configDir, log = console) {
     return [];
   }
 
-  let received;
+  /*
+   * One entry per report file (cloud's, this machine's music sync). A file
+   * that was never written is no sender yet; one that can't be read counts
+   * as a failure but shows no card, as before.
+   */
+  const received = reportSources(config).map((source) => {
+    try {
+      return { name: source.name, received: readReport(source.path) };
+    } catch (error) {
+      log.error(`[MMM-SecondBrain] Backup report ${source.path} unreadable: ${error.message}`);
+      return { name: source.name, received: null, failed: true };
+    }
+  });
 
-  try {
-    received = readReport(config.reportPath || DEFAULT_BACKUP_REPORT_PATH);
-  } catch (error) {
-    noteHealth("Backup", { tried: 1, failed: 1 });
-    log.error(`[MMM-SecondBrain] Backup report unreadable: ${error.message}`);
+  if (received.every((source) => !source.received && !source.failed)) {
+    noteHealth("Backup", { tried: 0, failed: 0 });
     return [];
   }
 
-  if (!received) {
-    noteHealth("Backup", { tried: 0, failed: 0 });
+  if (received.every((source) => !source.received)) {
+    noteHealth("Backup", { tried: received.length, failed: received.filter((source) => source.failed).length });
     return [];
   }
 

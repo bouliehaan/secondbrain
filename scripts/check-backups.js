@@ -16,7 +16,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
-const { sanitizeReport, backupCards } = require("../modules/MMM-SecondBrain/lib/backups.js");
+const { sanitizeReport, backupCards, reportSources } = require("../modules/MMM-SecondBrain/lib/backups.js");
 const { pollAll, refreshBackups, getLastPollStatus } = require("../modules/MMM-SecondBrain/lib/sources.js");
 const StatusLineLogic = require("../modules/StatusLine/lib/status-line.js");
 
@@ -212,6 +212,143 @@ function cards() {
   check("a report that makes no sense is a warning", nonsense.items[0]?.id === "backup:unreadable" && nonsense.health.failed === 1);
 }
 
+function severalReports() {
+  console.log("\nMore than one sender");
+
+  const cloud = (...args) => ({ name: "the backup server", received: received(...args) });
+  const music = (...args) => ({ name: "the music backup", received: received(...args) });
+  const neverWritten = { name: "the music backup", received: null };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  /*
+   * Until the music sync writes its first report, the wall must show exactly
+   * what it showed with cloud's report alone.
+   */
+  const backlog = {
+    pending: { files: 6185, bytes: 182.3 * GB },
+    done: { files: 7400, bytes: 77.2 * GB, since: ago(30 * hour) },
+    rate: 4.2e6
+  };
+  const alone = [
+    [[job("photos"), job("files")]],
+    [[job("photos", backlog)], { running: "photos" }],
+    [[job("photos", backlog), job("other", { pending: { files: 11971, bytes: 63.9 * GB } })], { running: "photos" }],
+    [[job("a", { problem: { kind: "signed-out", since: ago(hour) } }), job("b", { problem: { kind: "signed-out", since: ago(hour) } })]],
+    [[job("photos", { pending: { files: 30, bytes: 1e8 }, lastProgress: ago(7 * hour) })]],
+    [[job("photos", backlog)], { running: "photos", heardAgo: 25 * minute }]
+  ];
+  check(
+    "a music report never written changes nothing",
+    alone.every((args) => same(backupCards([cloud(...args), neverWritten], {}, now), cardsFor(...args)))
+  );
+  check(
+    "nor does it for a report that makes no sense",
+    same(
+      backupCards([{ name: "the backup server", received: { report: null, heardAt: now - minute } }, neverWritten], {}, now),
+      backupCards({ report: null, heardAt: now - minute }, {}, now)
+    )
+  );
+  check(
+    "no report from anyone is no card and no failure",
+    (() => {
+      const none = backupCards([{ name: "the backup server", received: null }, neverWritten], {}, now);
+      return none.items.length === 0 && none.health.failed === 0;
+    })()
+  );
+
+  const uploading = (id) => job(id, { pending: { files: 9, bytes: 9 * GB }, done: { files: 1, bytes: GB }, rate: 1e6 });
+  const both = backupCards([
+    cloud([uploading("photos")], { running: "photos" }),
+    music([uploading("music")], { running: "music" })
+  ], {}, now);
+  check(
+    "both machines uploading is two progress cards",
+    same(both.items.map((item) => item.id).sort(), ["backup:running:music", "backup:running:photos"]),
+    JSON.stringify(both.items)
+  );
+
+  const outage = { kind: "unreachable", since: ago(70 * minute), hint: "Proton Drive isn't answering" };
+  const shared = backupCards([cloud([job("photos", { problem: outage })]), music([job("music", { problem: outage })])], {}, now);
+  check("the same problem on both is one card", shared.items.length === 1, JSON.stringify(shared.items));
+  check("naming both jobs", shared.items[0]?.title === "photos label and music label", shared.items[0]?.title);
+  check("and counts both as failed", shared.health.tried === 2 && shared.health.failed === 2);
+
+  const musicSilent = backupCards([cloud([job("photos")]), music([job("music")], { heardAgo: 45 * minute })], {}, now);
+  check(
+    "music silent is its own card, with cloud's left alone",
+    same(musicSilent.items.map((item) => [item.id, item.title]), [["backup:silent:1", "No word from the music backup"]]),
+    JSON.stringify(musicSilent.items)
+  );
+  check("and reads as one of two down", musicSilent.health.tried === 2 && musicSilent.health.failed === 1);
+
+  const cloudSilent = backupCards([cloud([job("photos")], { heardAgo: 45 * minute }), music([job("music")])], {}, now);
+  check(
+    "cloud silent keeps its old card id and title",
+    same(cloudSilent.items.map((item) => [item.id, item.title]), [["backup:silent", "No word from the backup server"]])
+  );
+
+  const broken = backupCards([cloud([job("photos")]), { name: "the music backup", received: null, failed: true }], {}, now);
+  check("a report file that can't be read shows no card", broken.items.length === 0);
+  check("but counts as failed", broken.health.tried === 2 && broken.health.failed === 1);
+
+  console.log("\nNotices");
+
+  const notices = [
+    { kind: "held", since: ago(5 * minute), hint: "4,000 files are gone here; run allow-trash" },
+    { kind: "skipped", since: ago(5 * minute), hint: "2 item(s) can't be backed up" },
+    { kind: "bogus", since: ago(5 * minute), hint: "x" },
+    { kind: "held", since: ago(5 * minute), hint: "duplicate" }
+  ];
+  const noticed = backupCards([music([job("music", { notices })])], {}, now);
+  check(
+    "known notices are cards; unknown kinds and repeats are dropped",
+    same(noticed.items.map((item) => [item.id, item.label, item.priority]), [
+      ["backup:notice:music:held", "Backup waiting for your OK", 85],
+      ["backup:notice:music:skipped", "Backup skipping files", 60]
+    ]),
+    JSON.stringify(noticed.items)
+  );
+  check("as quiet warnings with the sender's hint", noticed.items.every((item) => item.kind === "warning") &&
+    noticed.items[0]?.detail === "4,000 files are gone here; run allow-trash");
+  check("which are not failures", noticed.health.tried === 1 && noticed.health.failed === 0);
+
+  const messy = backupCards([music([job("music", {
+    notices: [{ kind: "checked", since: ago(minute), hint: `a\nb\u0000c${"x".repeat(300)}` }]
+  })])], {}, now);
+  check(
+    "notice hints are cleaned and cut like everything else",
+    messy.items[0]?.detail.length === 160 && !/[\n\u0000]/.test(messy.items[0]?.detail),
+    JSON.stringify(messy.items[0]?.detail)
+  );
+
+  const many = sanitizeReport(JSON.stringify({
+    version: 1,
+    jobs: [{ id: "music", notices: ["skipped", "trashed", "checked", "listing", "held"].map((kind) => ({ kind })) }]
+  }));
+  check("at most four notices a job", many.jobs[0].notices.length === 4);
+
+  console.log("\nWhere the wall looks");
+
+  check(
+    "by default cloud's report, then the music report",
+    same(reportSources({}).map((source) => source.path), [
+      "/var/lib/secondbrain-backup/report/report.json",
+      "/var/lib/protonmusic/report/report.json"
+    ])
+  );
+  check(
+    "an old reportPath still moves cloud's",
+    same(reportSources({ reportPath: "/x.json" }).map((source) => source.path), ["/x.json", "/var/lib/protonmusic/report/report.json"])
+  );
+  check(
+    "reportPaths replaces the list",
+    same(reportSources({ reportPaths: ["/a.json", { path: "/b.json", name: "B" }, { name: "no path" }] }), [
+      { path: "/a.json", name: "" },
+      { path: "/b.json", name: "B" }
+    ])
+  );
+}
+
 async function polling() {
   console.log("\nThrough pollAll");
 
@@ -340,12 +477,71 @@ async function polling() {
   }
 }
 
+async function pollingSeveral() {
+  console.log("\nThrough pollAll, two report files");
+
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "secondbrain-backups-"));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "secondbrain-backups-state-"));
+  const cloudPath = path.join(configDir, "cloud.json");
+  const musicPath = path.join(configDir, "music.json");
+  const quiet = { log() {}, info() {}, error() {}, warn() {} };
+  const backupStatus = () => getLastPollStatus()?.sources?.find((source) => source.name === "Backup");
+  const fresh = (jobs, running = null) => JSON.stringify({ version: 1, sentAt: new Date().toISOString(), running, jobs });
+  const live = (id) => ({
+    id,
+    label: id,
+    pending: { files: 5000, bytes: 50 * GB },
+    done: { files: 5000, bytes: 50 * GB, since: new Date(Date.now() - hour).toISOString() },
+    lastProgress: new Date().toISOString()
+  });
+
+  try {
+    fs.writeFileSync(path.join(configDir, "backups.json"), JSON.stringify({
+      reportPaths: [{ path: cloudPath, name: "the backup server" }, { path: musicPath, name: "the music backup" }]
+    }));
+
+    await pollAll(configDir, { stateDir }, quiet);
+    check("neither written yet is off", backupStatus()?.state === "off");
+
+    fs.writeFileSync(cloudPath, fresh([live("photos")], "photos"));
+    const cloudOnly = await pollAll(configDir, { stateDir }, quiet);
+    check("cloud's alone is read while music has none", cloudOnly.some((item) => item.id === "backup:running:photos"));
+    check("and the status line says OK", backupStatus()?.state === "ok");
+
+    fs.writeFileSync(musicPath, fresh([{ ...live("music"), notices: [{ kind: "held", since: new Date().toISOString(), hint: "run allow-trash" }] }], "music"));
+    const together = await pollAll(configDir, { stateDir }, quiet);
+    const ids = together.filter((item) => item.id.startsWith("backup:")).map((item) => item.id).sort();
+    check(
+      "both are read and shown together",
+      JSON.stringify(ids) === JSON.stringify(["backup:notice:music:held", "backup:running:music", "backup:running:photos"]),
+      JSON.stringify(ids)
+    );
+
+    const refreshed = await refreshBackups(configDir, { stateDir }, quiet);
+    check("and the refresh between polls reads both too", refreshed?.filter((item) => item.id.startsWith("backup:")).length === 3);
+
+    fs.rmSync(musicPath);
+    fs.mkdirSync(musicPath);
+    const unreadable = await pollAll(configDir, { stateDir }, quiet);
+    check("a report path that can't be read leaves cloud's card up", unreadable.some((item) => item.id === "backup:running:photos"));
+    check("and the status line reads BACKUP 1/2", (() => {
+      const segment = StatusLineLogic.formatSource(backupStatus());
+      return segment?.text === "BACKUP 1/2" && segment.bad;
+    })(), JSON.stringify(backupStatus()));
+  } finally {
+    fs.rmSync(configDir, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+}
+
 async function run() {
   console.log("Backup checks\n");
 
   sanitizing();
   cards();
+  severalReports();
   await polling();
+  await pollingSeveral();
 
   console.log(
     `\n${failures === 0 ? "All checks passed." : `${failures} check(s) failed.`}\n`
